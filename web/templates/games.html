@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Games — Risk-Bench{% endblock %}
+{% block content %}
+<h2>Recent Games</h2>
+
+{% if games %}
+<table>
+    <thead>
+        <tr>
+            <th>Game ID</th>
+            <th>Players</th>
+            <th>Winner</th>
+            <th>Turns</th>
+            <th>Win Reason</th>
+            <th>Date</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for game in games %}
+        <tr>
+            <td><a href="/games/{{ game.id }}"><code>{{ game.id[:8] }}…</code></a></td>
+            <td>{{ game.colors | join(", ") }}</td>
+            <td>
+                {% if game.winner_color %}
+                <strong style="color: #34d399;">{{ game.winner_color }}</strong>
+                {% if game.winner_agent_id %}
+                <span style="color: #64748b; font-size: 0.8rem;">({{ game.winner_agent_id[:8] }})</span>
+                {% endif %}
+                {% else %}
+                <span style="color: #64748b;">—</span>
+                {% endif %}
+            </td>
+            <td>{{ game.turn_count }}</td>
+            <td style="font-size: 0.8rem; color: #94a3b8;">{{ game.win_reason or '—' }}</td>
+            <td style="font-size: 0.8rem; color: #64748b;">
+                {{ game.started_at.strftime('%m/%d %H:%M') if game.started_at else '—' }}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="card">
+    <p style="color: #64748b;">No games recorded yet.</p>
+</div>
+{% endif %}
+{% endblock %}

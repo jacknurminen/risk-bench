@@ -1,0 +1,30 @@
+[project]
+name = "risk-bench"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.82.0",
+    "fastapi>=0.129.0",
+    "google-generativeai>=0.8.6",
+    "jinja2>=3.1.6",
+    "openai>=2.21.0",
+    "pydantic>=2.12.5",
+    "rich>=14.3.3",
+    "typer>=0.24.0",
+    "uvicorn>=0.41.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "ruff>=0.15.1",
+    "ty>=0.0.17",
+]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
