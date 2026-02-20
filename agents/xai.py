@@ -1,5 +1,3 @@
-"""Grok adapter — uses OpenAI-compatible API via xAI endpoint."""
-
 from __future__ import annotations
 
 from agents.openai import OpenAIAgent
@@ -12,9 +10,9 @@ class GrokAgent(OpenAIAgent):
         self,
         color: str,
         name: str,
-        model: str = "grok-2",
-        api_key: str | None = None,
-        max_tokens: int = 512,
+        model: str,
+        api_key: str | None,
+        max_tokens: int,
     ) -> None:
         super().__init__(
             color=color,

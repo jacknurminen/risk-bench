@@ -1,5 +1,3 @@
-"""Claude adapter using the Anthropic SDK with tool use."""
-
 from __future__ import annotations
 
 import json
@@ -116,21 +114,32 @@ _CHAT_TOOLS: list[dict[str, Any]] = [
 
 
 class AnthropicAgent(BaseAgent):
+    """Risk agent backed by the Anthropic Claude API using tool use."""
+
     def __init__(
         self,
         color: str,
         name: str,
-        model: str = "claude-sonnet-4-6",
-        api_key: str | None = None,
-        max_tokens: int = 512,
+        model: str,
+        api_key: str | None,
+        max_tokens: int,
     ) -> None:
-        super().__init__(color, name)
+        super().__init__(color=color, name=name)
         self.model = model
         self.max_tokens = max_tokens
         self.client = anthropic.Anthropic(api_key=api_key)
 
     def get_move(self, state: GameState, phase: Phase) -> dict[str, Any]:
-        view = state.to_agent_view(self.color)
+        """Return a move for the current phase by calling the Claude API.
+
+        Args:
+            state: Current game state.
+            phase: The phase to generate a move for.
+
+        Returns:
+            Move dict appropriate for the given phase.
+        """
+        view = state.to_agent_view(color=self.color)
         phase_key = str(phase).replace("Phase.", "").lower()
         tools = _TOOLS.get(phase_key, [])
 
@@ -150,7 +159,43 @@ class AnthropicAgent(BaseAgent):
             messages=[{"role": "user", "content": user_content}],
         )
 
-        return self._parse_response(response, phase_key)
+        return self._parse_response(response=response, phase_key=phase_key)
+
+    def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return chat messages by calling the Claude API.
+
+        Args:
+            state: Current game state.
+            inbox: Recent messages from other players.
+
+        Returns:
+            List of message dicts with a 'text' key, or empty list to pass.
+        """
+        view = state.to_agent_view(color=self.color)
+        user_content = (
+            f"Game state summary:\n"
+            f"Turn {view['turn']}, you are {self.color}.\n"
+            f"Recent chat:\n"
+            + "\n".join(f"[{entry['from']}]: {entry['text']}" for entry in view["chat_log"][-5:])
+            + "\n\nRespond with say(text) or pass_turn()."
+        )
+
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=200,
+                system=_CHAT_SYSTEM,
+                tools=_CHAT_TOOLS,  # type: ignore[arg-type]
+                messages=[{"role": "user", "content": user_content}],
+            )
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "say":
+                    text = block.input.get("text", "")[:200]
+                    if text:
+                        return [{"text": text}]
+        except Exception:
+            pass
+        return []
 
     def _parse_response(self, response: Any, phase_key: str) -> dict[str, Any]:
         for block in response.content:
@@ -175,30 +220,3 @@ class AnthropicAgent(BaseAgent):
         if phase_key == "attack":
             return {"action": "end_attacks"}
         return {"action": "skip"}
-
-    def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        view = state.to_agent_view(self.color)
-        user_content = (
-            f"Game state summary:\n"
-            f"Turn {view['turn']}, you are {self.color}.\n"
-            f"Recent chat:\n"
-            + "\n".join(f"[{e['from']}]: {e['text']}" for e in view["chat_log"][-5:])
-            + "\n\nRespond with say(text) or pass_turn()."
-        )
-
-        try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=200,
-                system=_CHAT_SYSTEM,
-                tools=_CHAT_TOOLS,  # type: ignore[arg-type]
-                messages=[{"role": "user", "content": user_content}],
-            )
-            for block in response.content:
-                if block.type == "tool_use" and block.name == "say":
-                    text = block.input.get("text", "")[:200]
-                    if text:
-                        return [{"text": text}]
-        except Exception:
-            pass
-        return []

@@ -1,5 +1,3 @@
-"""GPT / o-series adapter using the OpenAI SDK with function calling."""
-
 from __future__ import annotations
 
 import json
@@ -107,16 +105,18 @@ _FUNCTIONS: dict[str, list[dict[str, Any]]] = {
 
 
 class OpenAIAgent(BaseAgent):
+    """Risk agent backed by the OpenAI chat completions API using function calling."""
+
     def __init__(
         self,
         color: str,
         name: str,
-        model: str = "gpt-4o",
-        api_key: str | None = None,
-        base_url: str | None = None,
-        max_tokens: int = 512,
+        model: str,
+        api_key: str | None,
+        base_url: str | None,
+        max_tokens: int,
     ) -> None:
-        super().__init__(color, name)
+        super().__init__(color=color, name=name)
         self.model = model
         self.max_tokens = max_tokens
         kwargs: dict[str, Any] = {}
@@ -127,7 +127,16 @@ class OpenAIAgent(BaseAgent):
         self.client = _openai.OpenAI(**kwargs)
 
     def get_move(self, state: GameState, phase: Phase) -> dict[str, Any]:
-        view = state.to_agent_view(self.color)
+        """Return a move for the current phase by calling the OpenAI API.
+
+        Args:
+            state: Current game state.
+            phase: The phase to generate a move for.
+
+        Returns:
+            Move dict appropriate for the given phase.
+        """
+        view = state.to_agent_view(color=self.color)
         phase_key = str(phase).split(".")[-1].lower()
         tools = _FUNCTIONS.get(phase_key, [])
 
@@ -147,31 +156,27 @@ class OpenAIAgent(BaseAgent):
             tool_choice="required" if tools else "none",
         )
 
-        msg = response.choices[0].message
-        if msg.tool_calls:
-            call = msg.tool_calls[0]
+        message = response.choices[0].message
+        if message.tool_calls:
+            call = message.tool_calls[0]
             tool_name = call.function.name
             inputs = json.loads(call.function.arguments or "{}")
-            return self._map_tool(tool_name, inputs, phase_key)
+            return self._map_tool(tool_name=tool_name, inputs=inputs, phase_key=phase_key)
 
         return {"action": "end_attacks"} if phase_key == "attack" else {"action": "skip"}
 
-    def _map_tool(self, tool_name: str, inputs: dict[str, Any], phase_key: str) -> dict[str, Any]:
-        if tool_name == "place_troops":
-            return {"territory": inputs["territory"], "count": inputs["count"]}
-        if tool_name == "redeem_cards":
-            return {"action": "redeem_cards", "cards": inputs["cards"]}
-        if tool_name == "attack":
-            return {"from": inputs["from"], "to": inputs["to"], "attackers": inputs["attackers"]}
-        if tool_name == "end_attacks":
-            return {"action": "end_attacks"}
-        if tool_name == "fortify":
-            return {"from": inputs["from"], "to": inputs["to"], "count": inputs["count"]}
-        return {"action": "skip"}
-
     def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        view = state.to_agent_view(self.color)
-        recent_chat = "\n".join(f"[{e['from']}]: {e['text']}" for e in view["chat_log"][-5:])
+        """Return chat messages by calling the OpenAI API.
+
+        Args:
+            state: Current game state.
+            inbox: Recent messages from other players.
+
+        Returns:
+            List of message dicts with a 'text' key, or empty list to pass.
+        """
+        view = state.to_agent_view(color=self.color)
+        recent_chat = "\n".join(f"[{entry['from']}]: {entry['text']}" for entry in view["chat_log"][-5:])
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -190,3 +195,16 @@ class OpenAIAgent(BaseAgent):
         except Exception:
             pass
         return []
+
+    def _map_tool(self, tool_name: str, inputs: dict[str, Any], phase_key: str) -> dict[str, Any]:
+        if tool_name == "place_troops":
+            return {"territory": inputs["territory"], "count": inputs["count"]}
+        if tool_name == "redeem_cards":
+            return {"action": "redeem_cards", "cards": inputs["cards"]}
+        if tool_name == "attack":
+            return {"from": inputs["from"], "to": inputs["to"], "attackers": inputs["attackers"]}
+        if tool_name == "end_attacks":
+            return {"action": "end_attacks"}
+        if tool_name == "fortify":
+            return {"from": inputs["from"], "to": inputs["to"], "count": inputs["count"]}
+        return {"action": "skip"}

@@ -1,5 +1,3 @@
-"""Random-move agent — baseline and fallback."""
-
 from __future__ import annotations
 
 import random
@@ -14,16 +12,37 @@ class RandomAgent(BaseAgent):
     """Picks a legal move uniformly at random. Always passes in chat."""
 
     def get_move(self, state: GameState, phase: Phase) -> dict[str, Any]:
+        """Return a random legal move for the current phase.
+
+        Args:
+            state: Current game state.
+            phase: The phase to generate a move for.
+
+        Returns:
+            A move dict appropriate for the given phase.
+        """
         if phase == Phase.REINFORCE:
-            return self._reinforce(state)
+            return self._reinforce(state=state)
         if phase == Phase.ATTACK:
-            return self._attack(state)
+            return self._attack(state=state)
         if phase == Phase.FORTIFY:
-            return self._fortify(state)
+            return self._fortify(state=state)
         return {"action": "skip"}
 
+    def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return no messages — random agent is always silent.
+
+        Args:
+            state: Current game state.
+            inbox: Incoming messages from other players.
+
+        Returns:
+            Empty list.
+        """
+        return []
+
     def _reinforce(self, state: GameState) -> dict[str, Any]:
-        owned = state.territories_of(self.color)
+        owned = state.territories_of(player=self.color)
         territory = random.choice(owned)
         # Place all remaining troops at once
         return {"territory": territory, "count": state.troops_to_place}
@@ -34,19 +53,20 @@ class RandomAgent(BaseAgent):
             return {"action": "end_attacks"}
 
         valid_attacks: list[tuple[str, str]] = []
-        for from_t, ts in state.territories.items():
-            if ts.owner != self.color or ts.troops < 2:
+        for from_territory, territory_state in state.territories.items():
+            if territory_state.owner != self.color or territory_state.troops < 2:
                 continue
-            for adj in BOARD.territories[from_t].adjacent:
-                if adj in state.territories and state.territories[adj].owner != self.color:
-                    valid_attacks.append((from_t, adj))
+            for adjacent_territory in BOARD.territories[from_territory].adjacent:
+                enemy_owned = state.territories.get(adjacent_territory)
+                if enemy_owned is not None and enemy_owned.owner != self.color:
+                    valid_attacks.append((from_territory, adjacent_territory))
 
         if not valid_attacks:
             return {"action": "end_attacks"}
 
-        from_t, to_t = random.choice(valid_attacks)
-        max_atk = min(3, state.territories[from_t].troops - 1)
-        return {"from": from_t, "to": to_t, "attackers": max_atk}
+        from_territory, to_territory = random.choice(valid_attacks)
+        max_attackers = min(3, state.territories[from_territory].troops - 1)
+        return {"from": from_territory, "to": to_territory, "attackers": max_attackers}
 
     def _fortify(self, state: GameState) -> dict[str, Any]:
         # 50% chance to skip fortify
@@ -54,20 +74,17 @@ class RandomAgent(BaseAgent):
             return {"action": "skip"}
 
         candidates: list[tuple[str, str]] = []
-        for from_t, ts in state.territories.items():
-            if ts.owner != self.color or ts.troops < 2:
+        for from_territory, territory_state in state.territories.items():
+            if territory_state.owner != self.color or territory_state.troops < 2:
                 continue
-            for adj in BOARD.territories[from_t].adjacent:
-                if adj in state.territories and state.territories[adj].owner == self.color:
-                    candidates.append((from_t, adj))
+            for adjacent_territory in BOARD.territories[from_territory].adjacent:
+                friendly_owned = state.territories.get(adjacent_territory)
+                if friendly_owned is not None and friendly_owned.owner == self.color:
+                    candidates.append((from_territory, adjacent_territory))
 
         if not candidates:
             return {"action": "skip"}
 
-        from_t, to_t = random.choice(candidates)
-        count = random.randint(1, state.territories[from_t].troops - 1)
-        return {"from": from_t, "to": to_t, "count": count}
-
-    def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        # Random agent is silent
-        return []
+        from_territory, to_territory = random.choice(candidates)
+        count = random.randint(1, state.territories[from_territory].troops - 1)
+        return {"from": from_territory, "to": to_territory, "count": count}

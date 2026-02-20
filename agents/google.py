@@ -1,5 +1,3 @@
-"""Gemini adapter using google-generativeai SDK."""
-
 from __future__ import annotations
 
 import json
@@ -32,15 +30,17 @@ def _build_prompt(view: dict[str, Any], phase_key: str, troops: int) -> str:
 
 
 class GeminiAgent(BaseAgent):
+    """Risk agent backed by the Google Gemini API using JSON-mode responses."""
+
     def __init__(
         self,
         color: str,
         name: str,
-        model: str = "gemini-1.5-flash",
-        api_key: str | None = None,
-        max_tokens: int = 512,
+        model: str,
+        api_key: str | None,
+        max_tokens: int,
     ) -> None:
-        super().__init__(color, name)
+        super().__init__(color=color, name=name)
         self.model_name = model
         self.max_tokens = max_tokens
         if api_key:
@@ -51,9 +51,18 @@ class GeminiAgent(BaseAgent):
         )
 
     def get_move(self, state: GameState, phase: Phase) -> dict[str, Any]:
-        view = state.to_agent_view(self.color)
+        """Return a move for the current phase by calling the Gemini API.
+
+        Args:
+            state: Current game state.
+            phase: The phase to generate a move for.
+
+        Returns:
+            Move dict appropriate for the given phase.
+        """
+        view = state.to_agent_view(color=self.color)
         phase_key = str(phase).split(".")[-1].lower()
-        prompt = _build_prompt(view, phase_key, state.troops_to_place)
+        prompt = _build_prompt(view=view, phase_key=phase_key, troops=state.troops_to_place)
 
         response = self._model.generate_content(
             prompt,
@@ -76,26 +85,27 @@ class GeminiAgent(BaseAgent):
         except json.JSONDecodeError:
             return {"action": "end_attacks"} if phase_key == "attack" else {"action": "skip"}
 
-        return self._normalize(data, phase_key)
-
-    def _normalize(self, data: dict[str, Any], phase_key: str) -> dict[str, Any]:
-        action = data.get("action", "")
-        if action in ("end_attacks", "skip", "redeem_cards"):
-            return data
-        if phase_key == "reinforce" and "territory" in data:
-            return data
-        if phase_key == "attack" and "from" in data:
-            return data
-        if phase_key == "fortify" and "from" in data:
-            return data
-        return {"action": "end_attacks"} if phase_key == "attack" else {"action": "skip"}
+        return self._normalize(data=data, phase_key=phase_key)
 
     def get_messages(self, state: GameState, inbox: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        view = state.to_agent_view(self.color)
-        recent = "\n".join(f"[{e['from']}]: {e['text']}" for e in view["chat_log"][-5:])
+        """Return chat messages by calling the Gemini API.
+
+        Args:
+            state: Current game state.
+            inbox: Recent messages from other players.
+
+        Returns:
+            List of message dicts with a 'text' key, or empty list to pass.
+        """
+        view = state.to_agent_view(color=self.color)
+        recent_chat = "\n".join(f"[{entry['from']}]: {entry['text']}" for entry in view["chat_log"][-5:])
         try:
+            prompt = (
+                f"Recent Risk chat:\n{recent_chat}\n\n"
+                "Reply briefly to influence the game, or reply PASS to stay silent."
+            )
             response = self._model.generate_content(
-                f"Recent Risk chat:\n{recent}\n\nReply briefly to influence the game, or reply PASS to stay silent.",
+                prompt,
                 generation_config=genai.types.GenerationConfig(max_output_tokens=100, temperature=0.9),
             )
             text = (response.text or "").strip()
@@ -104,3 +114,13 @@ class GeminiAgent(BaseAgent):
         except Exception:
             pass
         return []
+
+    def _normalize(self, data: dict[str, Any], phase_key: str) -> dict[str, Any]:
+        action = data.get("action", "")
+        if action in ("end_attacks", "skip", "redeem_cards"):
+            return data
+        if phase_key == "reinforce" and "territory" in data:
+            return data
+        if phase_key in ("attack", "fortify") and "from" in data:
+            return data
+        return {"action": "end_attacks"} if phase_key == "attack" else {"action": "skip"}

@@ -1,5 +1,3 @@
-"""Pydantic models for all stored records."""
-
 from __future__ import annotations
 
 from datetime import datetime

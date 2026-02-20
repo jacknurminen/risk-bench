@@ -1,5 +1,3 @@
-"""CLI entrypoint for Risk-Bench."""
-
 from __future__ import annotations
 
 import uuid
@@ -12,7 +10,14 @@ from rich.table import Table
 
 import config
 import storage.store as store
-from storage.models import AgentRecord
+from agents.anthropic import AnthropicAgent
+from agents.google import GeminiAgent
+from agents.openai import OpenAIAgent
+from agents.random import RandomAgent
+from agents.xai import GrokAgent
+from game.engine import GameEngine
+from storage.models import AgentRecord, Leaderboard
+from tournament.runner import TournamentRunner
 
 app = typer.Typer(help="Risk-Bench: LLM benchmark via the game of Risk", no_args_is_help=True)
 console = Console()
@@ -31,29 +36,29 @@ def run_tournament(
     verbose: Annotated[bool, typer.Option("--verbose/--quiet")] = True,
 ) -> None:
     """Run a round-robin tournament between registered agents."""
-    from tournament.runner import TournamentRunner
-
-    agent_ids = [a.strip() for a in agents.split(",") if a.strip()]
+    agent_ids = [agent_id.strip() for agent_id in agents.split(",") if agent_id.strip()]
     if len(agent_ids) < 2:
         console.print("[red]Need at least 2 agents to run a tournament.[/red]")
         raise typer.Exit(1)
 
     registered = store.load_agents()
-    reg_map = {a.id: a for a in registered}
+    registered_by_id = {agent.id: agent for agent in registered}
 
     agent_configs = []
-    for aid in agent_ids:
-        if aid not in reg_map:
-            console.print(f"[red]Agent {aid!r} not found in registry. Use 'agent add' first.[/red]")
+    for agent_id in agent_ids:
+        if agent_id not in registered_by_id:
+            console.print(f"[red]Agent {agent_id!r} not found in registry. Use 'agent add' first.[/red]")
             raise typer.Exit(1)
-        rec = reg_map[aid]
-        agent_instance = _build_agent(rec, color="red")  # color assigned per game
+        agent_record = registered_by_id[agent_id]
+        agent_instance = _build_agent(agent_record=agent_record, color="red")  # color assigned per game
         agent_configs.append(
             {
-                "id": rec.id,
-                "name": rec.name,
-                "model": rec.model,
-                "provider": rec.provider,
+                # identity
+                "id": agent_record.id,
+                "name": agent_record.name,
+                # model config
+                "model": agent_record.model,
+                "provider": agent_record.provider,
                 "agent": agent_instance,
             }
         )
@@ -62,8 +67,8 @@ def run_tournament(
     records = runner.run()
 
     console.print(f"\n[bold]Results: {len(records)} game(s) completed[/bold]")
-    lb = store.rebuild_leaderboard()
-    _print_leaderboard(lb)
+    leaderboard = store.rebuild_leaderboard()
+    _print_leaderboard(leaderboard=leaderboard)
 
 
 @tournament_app.command("quick")
@@ -72,9 +77,6 @@ def quick_game(
     verbose: Annotated[bool, typer.Option("--verbose/--quiet")] = True,
 ) -> None:
     """Run a quick test game with random agents."""
-    from agents.random import RandomAgent
-    from game.engine import GameEngine
-
     colors = ["red", "blue", "green", "yellow", "purple", "orange"][:n_players]
     agents = {color: RandomAgent(color=color, name=f"random-{color}") for color in colors}
 
@@ -116,8 +118,8 @@ def agent_add(
     if not agent_id:
         agent_id = f"{provider}-{name.lower().replace(' ', '-')}-{str(uuid.uuid4())[:6]}"
 
-    rec = AgentRecord(id=agent_id, name=name, model=model, provider=provider)
-    store.upsert_agent(rec)
+    agent_record = AgentRecord(id=agent_id, name=name, model=model, provider=provider)
+    store.upsert_agent(agent=agent_record)
     console.print(f"[green]Registered agent:[/green] {name} (id: {agent_id})")
 
 
@@ -137,8 +139,15 @@ def agent_list() -> None:
     table.add_column("Elo", justify="right")
     table.add_column("W/L")
 
-    for a in sorted(agents, key=lambda x: x.elo, reverse=True):
-        table.add_row(a.id[:16], a.name, a.provider, a.model, f"{a.elo:.0f}", f"{a.wins}/{a.losses}")
+    for agent in sorted(agents, key=lambda agent: agent.elo, reverse=True):
+        table.add_row(
+            agent.id[:16],
+            agent.name,
+            agent.provider,
+            agent.model,
+            f"{agent.elo:.0f}",
+            f"{agent.wins}/{agent.losses}",
+        )
 
     console.print(table)
 
@@ -149,12 +158,12 @@ def agent_remove(
 ) -> None:
     """Remove an agent from the registry."""
     agents = store.load_agents()
-    before = len(agents)
-    agents = [a for a in agents if a.id != agent_id]
-    if len(agents) == before:
+    original_count = len(agents)
+    agents = [agent for agent in agents if agent.id != agent_id]
+    if len(agents) == original_count:
         console.print(f"[red]Agent {agent_id!r} not found.[/red]")
         raise typer.Exit(1)
-    store.save_agents(agents)
+    store.save_agents(agents=agents)
     console.print(f"[green]Removed agent {agent_id}[/green]")
 
 
@@ -175,34 +184,45 @@ def serve(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def _build_agent(rec: AgentRecord, color: str) -> object:
-    """Instantiate the correct agent class from a registry record."""
-    from agents.random import RandomAgent
-
-    if rec.provider == "anthropic":
-        from agents.anthropic import AnthropicAgent
-
-        return AnthropicAgent(color=color, name=rec.name, model=rec.model, api_key=config.ANTHROPIC_API_KEY)
-    if rec.provider == "openai":
-        from agents.openai import OpenAIAgent
-
-        return OpenAIAgent(color=color, name=rec.name, model=rec.model, api_key=config.OPENAI_API_KEY)
-    if rec.provider == "xai":
-        from agents.xai import GrokAgent
-
-        return GrokAgent(color=color, name=rec.name, model=rec.model, api_key=config.XAI_API_KEY)
-    if rec.provider == "google":
-        from agents.google import GeminiAgent
-
-        return GeminiAgent(color=color, name=rec.name, model=rec.model, api_key=config.GOOGLE_API_KEY)
+def _build_agent(agent_record: AgentRecord, color: str) -> object:
+    if agent_record.provider == "anthropic":
+        return AnthropicAgent(
+            color=color,
+            name=agent_record.name,
+            model=agent_record.model,
+            api_key=config.ANTHROPIC_API_KEY,
+            max_tokens=config.MAX_AGENT_TOKENS,
+        )
+    if agent_record.provider == "openai":
+        return OpenAIAgent(
+            color=color,
+            name=agent_record.name,
+            model=agent_record.model,
+            api_key=config.OPENAI_API_KEY,
+            base_url=None,
+            max_tokens=config.MAX_AGENT_TOKENS,
+        )
+    if agent_record.provider == "xai":
+        return GrokAgent(
+            color=color,
+            name=agent_record.name,
+            model=agent_record.model,
+            api_key=config.XAI_API_KEY,
+            max_tokens=config.MAX_AGENT_TOKENS,
+        )
+    if agent_record.provider == "google":
+        return GeminiAgent(
+            color=color,
+            name=agent_record.name,
+            model=agent_record.model,
+            api_key=config.GOOGLE_API_KEY,
+            max_tokens=config.MAX_AGENT_TOKENS,
+        )
     # default: random
-    return RandomAgent(color=color, name=rec.name)
+    return RandomAgent(color=color, name=agent_record.name)
 
 
-def _print_leaderboard(lb: object) -> None:
-    from storage.models import Leaderboard
-
-    assert isinstance(lb, Leaderboard)
+def _print_leaderboard(leaderboard: Leaderboard) -> None:
     table = Table(title="Leaderboard")
     table.add_column("#", justify="right")
     table.add_column("Agent")
@@ -211,8 +231,15 @@ def _print_leaderboard(lb: object) -> None:
     table.add_column("L", justify="right")
     table.add_column("Win%", justify="right")
 
-    for e in lb.entries:
-        table.add_row(str(e.rank), e.name, f"{e.elo:.0f}", str(e.wins), str(e.losses), f"{e.win_rate:.1%}")
+    for entry in leaderboard.entries:
+        table.add_row(
+            str(entry.rank),
+            entry.name,
+            f"{entry.elo:.0f}",
+            str(entry.wins),
+            str(entry.losses),
+            f"{entry.win_rate:.1%}",
+        )
 
     console.print(table)
 

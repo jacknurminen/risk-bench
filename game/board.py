@@ -1,5 +1,3 @@
-"""Immutable Risk board: 42 territories, adjacency lists, continents."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -153,34 +151,80 @@ class Board:
             self.territories[name] = Territory(name=name, continent=continent, adjacent=tuple(adjacent))
 
         self.continents: dict[str, Continent] = {}
-        for name, bonus, terrs in _CONTINENT_DATA:
-            self.continents[name] = Continent(name=name, bonus=bonus, territories=tuple(terrs))
+        for name, bonus, territories in _CONTINENT_DATA:
+            self.continents[name] = Continent(name=name, bonus=bonus, territories=tuple(territories))
 
         # quick-lookup: territory -> continent
         self._territory_continent: dict[str, str] = {t.name: t.continent for t in self.territories.values()}
 
     # ------------------------------------------------------------------
-    def are_adjacent(self, a: str, b: str) -> bool:
-        return b in self.territories[a].adjacent
+    def are_adjacent(self, territory: str, other_territory: str) -> bool:
+        """Return True if the two territories share a border.
+
+        Args:
+            territory: Name of the first territory.
+            other_territory: Name of the territory to check adjacency against.
+
+        Returns:
+            True if the territories are adjacent.
+        """
+        return other_territory in self.territories[territory].adjacent
 
     def continent_of(self, territory: str) -> str:
+        """Return the continent name that contains the given territory.
+
+        Args:
+            territory: Territory name to look up.
+
+        Returns:
+            Continent name string.
+        """
         return self._territory_continent[territory]
 
     def continent_bonus(self, continent: str) -> int:
+        """Return the reinforcement bonus for controlling the given continent.
+
+        Args:
+            continent: Continent name.
+
+        Returns:
+            Number of bonus troops awarded for full continent control.
+        """
         return self.continents[continent].bonus
 
     def territories_of(self, continent: str) -> tuple[str, ...]:
+        """Return the territory names that make up the given continent.
+
+        Args:
+            continent: Continent name.
+
+        Returns:
+            Tuple of territory name strings.
+        """
         return self.continents[continent].territories
 
     def all_territory_names(self) -> list[str]:
+        """Return a list of all 42 territory names on the board.
+
+        Returns:
+            List of territory name strings.
+        """
         return list(self.territories.keys())
 
     def continent_controller(self, owner_map: dict[str, str]) -> dict[str, str | None]:
-        """Return {continent: player} if a player controls the whole continent, else None."""
+        """Return the sole controller of each continent, or None if contested.
+
+        Args:
+            owner_map: Mapping of territory name to owning player color.
+
+        Returns:
+            Dict mapping continent name to the controlling player color, or None if no
+            single player owns all territories in that continent.
+        """
         result: dict[str, str | None] = {}
-        for cname, cont in self.continents.items():
-            owners = {owner_map[t] for t in cont.territories if t in owner_map}
-            result[cname] = owners.pop() if len(owners) == 1 else None
+        for continent_name, continent in self.continents.items():
+            owners = {owner_map[territory] for territory in continent.territories if territory in owner_map}
+            result[continent_name] = owners.pop() if len(owners) == 1 else None
         return result
 
 

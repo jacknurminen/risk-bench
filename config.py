@@ -1,5 +1,3 @@
-"""Configuration — API keys from env, model names, game settings."""
-
 from __future__ import annotations
 
 import os
@@ -23,6 +21,9 @@ DEFAULT_MODELS: dict[str, str] = {
 MAX_TURNS = 500
 MAX_AGENT_RETRIES = 3
 REACTION_WINDOW_CAP = 12
+
+# Agent inference
+MAX_AGENT_TOKENS: int = 512
 
 # Web server
 DEFAULT_HOST = "0.0.0.0"
