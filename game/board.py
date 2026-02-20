@@ -87,104 +87,261 @@ _C = Continent
 # ---------------------------------------------------------------------------
 # Territory definitions (42 canonical Risk territories)
 # ---------------------------------------------------------------------------
-_TERRITORY_DATA: list[tuple[Territory, Continent, list[Territory]]] = [
+_TERRITORY_DATA: list[TerritoryNode] = [
     # North America (9)
-    (_T.ALASKA, _C.NORTH_AMERICA, [_T.NORTHWEST_TERRITORY, _T.ALBERTA, _T.KAMCHATKA]),
-    (_T.NORTHWEST_TERRITORY, _C.NORTH_AMERICA, [_T.ALASKA, _T.ALBERTA, _T.ONTARIO, _T.GREENLAND]),
-    (_T.GREENLAND, _C.NORTH_AMERICA, [_T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.QUEBEC, _T.ICELAND]),
-    (_T.ALBERTA, _C.NORTH_AMERICA, [_T.ALASKA, _T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.WESTERN_UNITED_STATES]),
-    (
-        _T.ONTARIO,
-        _C.NORTH_AMERICA,
-        [
+    TerritoryNode(
+        name=_T.ALASKA,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.NORTHWEST_TERRITORY, _T.ALBERTA, _T.KAMCHATKA),
+    ),
+    TerritoryNode(
+        name=_T.NORTHWEST_TERRITORY,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.ALASKA, _T.ALBERTA, _T.ONTARIO, _T.GREENLAND),
+    ),
+    TerritoryNode(
+        name=_T.GREENLAND,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.QUEBEC, _T.ICELAND),
+    ),
+    TerritoryNode(
+        name=_T.ALBERTA,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.ALASKA, _T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.WESTERN_UNITED_STATES),
+    ),
+    TerritoryNode(
+        name=_T.ONTARIO,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(
             _T.NORTHWEST_TERRITORY,
             _T.ALBERTA,
             _T.GREENLAND,
             _T.QUEBEC,
             _T.WESTERN_UNITED_STATES,
             _T.EASTERN_UNITED_STATES,
-        ],
+        ),
     ),
-    (_T.QUEBEC, _C.NORTH_AMERICA, [_T.GREENLAND, _T.ONTARIO, _T.EASTERN_UNITED_STATES]),
-    (
-        _T.WESTERN_UNITED_STATES,
-        _C.NORTH_AMERICA,
-        [_T.ALBERTA, _T.ONTARIO, _T.EASTERN_UNITED_STATES, _T.CENTRAL_AMERICA],
+    TerritoryNode(
+        name=_T.QUEBEC,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.GREENLAND, _T.ONTARIO, _T.EASTERN_UNITED_STATES),
     ),
-    (
-        _T.EASTERN_UNITED_STATES,
-        _C.NORTH_AMERICA,
-        [_T.ONTARIO, _T.QUEBEC, _T.WESTERN_UNITED_STATES, _T.CENTRAL_AMERICA],
+    TerritoryNode(
+        name=_T.WESTERN_UNITED_STATES,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.ALBERTA, _T.ONTARIO, _T.EASTERN_UNITED_STATES, _T.CENTRAL_AMERICA),
     ),
-    (_T.CENTRAL_AMERICA, _C.NORTH_AMERICA, [_T.WESTERN_UNITED_STATES, _T.EASTERN_UNITED_STATES, _T.VENEZUELA]),
+    TerritoryNode(
+        name=_T.EASTERN_UNITED_STATES,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.ONTARIO, _T.QUEBEC, _T.WESTERN_UNITED_STATES, _T.CENTRAL_AMERICA),
+    ),
+    TerritoryNode(
+        name=_T.CENTRAL_AMERICA,
+        continent=_C.NORTH_AMERICA,
+        adjacent=(_T.WESTERN_UNITED_STATES, _T.EASTERN_UNITED_STATES, _T.VENEZUELA),
+    ),
     # South America (4)
-    (_T.VENEZUELA, _C.SOUTH_AMERICA, [_T.CENTRAL_AMERICA, _T.PERU, _T.BRAZIL]),
-    (_T.PERU, _C.SOUTH_AMERICA, [_T.VENEZUELA, _T.BRAZIL, _T.ARGENTINA]),
-    (_T.BRAZIL, _C.SOUTH_AMERICA, [_T.VENEZUELA, _T.PERU, _T.ARGENTINA, _T.NORTH_AFRICA]),
-    (_T.ARGENTINA, _C.SOUTH_AMERICA, [_T.PERU, _T.BRAZIL]),
+    TerritoryNode(
+        name=_T.VENEZUELA,
+        continent=_C.SOUTH_AMERICA,
+        adjacent=(_T.CENTRAL_AMERICA, _T.PERU, _T.BRAZIL),
+    ),
+    TerritoryNode(
+        name=_T.PERU,
+        continent=_C.SOUTH_AMERICA,
+        adjacent=(_T.VENEZUELA, _T.BRAZIL, _T.ARGENTINA),
+    ),
+    TerritoryNode(
+        name=_T.BRAZIL,
+        continent=_C.SOUTH_AMERICA,
+        adjacent=(_T.VENEZUELA, _T.PERU, _T.ARGENTINA, _T.NORTH_AFRICA),
+    ),
+    TerritoryNode(
+        name=_T.ARGENTINA,
+        continent=_C.SOUTH_AMERICA,
+        adjacent=(_T.PERU, _T.BRAZIL),
+    ),
     # Europe (7)
-    (_T.ICELAND, _C.EUROPE, [_T.GREENLAND, _T.GREAT_BRITAIN, _T.SCANDINAVIA]),
-    (_T.GREAT_BRITAIN, _C.EUROPE, [_T.ICELAND, _T.SCANDINAVIA, _T.NORTHERN_EUROPE, _T.WESTERN_EUROPE]),
-    (_T.SCANDINAVIA, _C.EUROPE, [_T.ICELAND, _T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.UKRAINE]),
-    (
-        _T.NORTHERN_EUROPE,
-        _C.EUROPE,
-        [_T.GREAT_BRITAIN, _T.SCANDINAVIA, _T.UKRAINE, _T.WESTERN_EUROPE, _T.SOUTHERN_EUROPE],
+    TerritoryNode(
+        name=_T.ICELAND,
+        continent=_C.EUROPE,
+        adjacent=(_T.GREENLAND, _T.GREAT_BRITAIN, _T.SCANDINAVIA),
     ),
-    (_T.WESTERN_EUROPE, _C.EUROPE, [_T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.SOUTHERN_EUROPE, _T.NORTH_AFRICA]),
-    (
-        _T.SOUTHERN_EUROPE,
-        _C.EUROPE,
-        [_T.NORTHERN_EUROPE, _T.WESTERN_EUROPE, _T.UKRAINE, _T.NORTH_AFRICA, _T.EGYPT, _T.MIDDLE_EAST],
+    TerritoryNode(
+        name=_T.GREAT_BRITAIN,
+        continent=_C.EUROPE,
+        adjacent=(_T.ICELAND, _T.SCANDINAVIA, _T.NORTHERN_EUROPE, _T.WESTERN_EUROPE),
     ),
-    (
-        _T.UKRAINE,
-        _C.EUROPE,
-        [_T.SCANDINAVIA, _T.NORTHERN_EUROPE, _T.SOUTHERN_EUROPE, _T.URAL, _T.AFGHANISTAN, _T.MIDDLE_EAST],
+    TerritoryNode(
+        name=_T.SCANDINAVIA,
+        continent=_C.EUROPE,
+        adjacent=(_T.ICELAND, _T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.UKRAINE),
+    ),
+    TerritoryNode(
+        name=_T.NORTHERN_EUROPE,
+        continent=_C.EUROPE,
+        adjacent=(_T.GREAT_BRITAIN, _T.SCANDINAVIA, _T.UKRAINE, _T.WESTERN_EUROPE, _T.SOUTHERN_EUROPE),
+    ),
+    TerritoryNode(
+        name=_T.WESTERN_EUROPE,
+        continent=_C.EUROPE,
+        adjacent=(_T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.SOUTHERN_EUROPE, _T.NORTH_AFRICA),
+    ),
+    TerritoryNode(
+        name=_T.SOUTHERN_EUROPE,
+        continent=_C.EUROPE,
+        adjacent=(
+            _T.NORTHERN_EUROPE,
+            _T.WESTERN_EUROPE,
+            _T.UKRAINE,
+            _T.NORTH_AFRICA,
+            _T.EGYPT,
+            _T.MIDDLE_EAST,
+        ),
+    ),
+    TerritoryNode(
+        name=_T.UKRAINE,
+        continent=_C.EUROPE,
+        adjacent=(
+            _T.SCANDINAVIA,
+            _T.NORTHERN_EUROPE,
+            _T.SOUTHERN_EUROPE,
+            _T.URAL,
+            _T.AFGHANISTAN,
+            _T.MIDDLE_EAST,
+        ),
     ),
     # Africa (6)
-    (
-        _T.NORTH_AFRICA,
-        _C.AFRICA,
-        [_T.BRAZIL, _T.WESTERN_EUROPE, _T.SOUTHERN_EUROPE, _T.EGYPT, _T.EAST_AFRICA, _T.CENTRAL_AFRICA],
+    TerritoryNode(
+        name=_T.NORTH_AFRICA,
+        continent=_C.AFRICA,
+        adjacent=(
+            _T.BRAZIL,
+            _T.WESTERN_EUROPE,
+            _T.SOUTHERN_EUROPE,
+            _T.EGYPT,
+            _T.EAST_AFRICA,
+            _T.CENTRAL_AFRICA,
+        ),
     ),
-    (_T.EGYPT, _C.AFRICA, [_T.SOUTHERN_EUROPE, _T.NORTH_AFRICA, _T.EAST_AFRICA, _T.MIDDLE_EAST]),
-    (
-        _T.EAST_AFRICA,
-        _C.AFRICA,
-        [_T.NORTH_AFRICA, _T.EGYPT, _T.CENTRAL_AFRICA, _T.SOUTH_AFRICA, _T.MADAGASCAR, _T.MIDDLE_EAST],
+    TerritoryNode(
+        name=_T.EGYPT,
+        continent=_C.AFRICA,
+        adjacent=(_T.SOUTHERN_EUROPE, _T.NORTH_AFRICA, _T.EAST_AFRICA, _T.MIDDLE_EAST),
     ),
-    (_T.CENTRAL_AFRICA, _C.AFRICA, [_T.NORTH_AFRICA, _T.EAST_AFRICA, _T.SOUTH_AFRICA]),
-    (_T.SOUTH_AFRICA, _C.AFRICA, [_T.CENTRAL_AFRICA, _T.EAST_AFRICA, _T.MADAGASCAR]),
-    (_T.MADAGASCAR, _C.AFRICA, [_T.EAST_AFRICA, _T.SOUTH_AFRICA]),
+    TerritoryNode(
+        name=_T.EAST_AFRICA,
+        continent=_C.AFRICA,
+        adjacent=(_T.NORTH_AFRICA, _T.EGYPT, _T.CENTRAL_AFRICA, _T.SOUTH_AFRICA, _T.MADAGASCAR, _T.MIDDLE_EAST),
+    ),
+    TerritoryNode(
+        name=_T.CENTRAL_AFRICA,
+        continent=_C.AFRICA,
+        adjacent=(_T.NORTH_AFRICA, _T.EAST_AFRICA, _T.SOUTH_AFRICA),
+    ),
+    TerritoryNode(
+        name=_T.SOUTH_AFRICA,
+        continent=_C.AFRICA,
+        adjacent=(_T.CENTRAL_AFRICA, _T.EAST_AFRICA, _T.MADAGASCAR),
+    ),
+    TerritoryNode(
+        name=_T.MADAGASCAR,
+        continent=_C.AFRICA,
+        adjacent=(_T.EAST_AFRICA, _T.SOUTH_AFRICA),
+    ),
     # Asia (12)
-    (_T.URAL, _C.ASIA, [_T.UKRAINE, _T.SIBERIA, _T.AFGHANISTAN, _T.CHINA]),
-    (_T.SIBERIA, _C.ASIA, [_T.URAL, _T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.CHINA]),
-    (_T.YAKUTSK, _C.ASIA, [_T.SIBERIA, _T.KAMCHATKA, _T.IRKUTSK]),
-    (_T.KAMCHATKA, _C.ASIA, [_T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.JAPAN, _T.ALASKA]),
-    (_T.IRKUTSK, _C.ASIA, [_T.SIBERIA, _T.YAKUTSK, _T.KAMCHATKA, _T.MONGOLIA]),
-    (_T.MONGOLIA, _C.ASIA, [_T.SIBERIA, _T.IRKUTSK, _T.KAMCHATKA, _T.JAPAN, _T.CHINA]),
-    (_T.JAPAN, _C.ASIA, [_T.KAMCHATKA, _T.MONGOLIA]),
-    (_T.AFGHANISTAN, _C.ASIA, [_T.UKRAINE, _T.URAL, _T.CHINA, _T.INDIA, _T.MIDDLE_EAST]),
-    (_T.CHINA, _C.ASIA, [_T.URAL, _T.SIBERIA, _T.MONGOLIA, _T.AFGHANISTAN, _T.INDIA, _T.SOUTHEAST_ASIA]),
-    (_T.MIDDLE_EAST, _C.ASIA, [_T.SOUTHERN_EUROPE, _T.UKRAINE, _T.AFGHANISTAN, _T.INDIA, _T.EGYPT, _T.EAST_AFRICA]),
-    (_T.INDIA, _C.ASIA, [_T.AFGHANISTAN, _T.CHINA, _T.MIDDLE_EAST, _T.SOUTHEAST_ASIA]),
-    (_T.SOUTHEAST_ASIA, _C.ASIA, [_T.CHINA, _T.INDIA, _T.INDONESIA]),
+    TerritoryNode(
+        name=_T.URAL,
+        continent=_C.ASIA,
+        adjacent=(_T.UKRAINE, _T.SIBERIA, _T.AFGHANISTAN, _T.CHINA),
+    ),
+    TerritoryNode(
+        name=_T.SIBERIA,
+        continent=_C.ASIA,
+        adjacent=(_T.URAL, _T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.CHINA),
+    ),
+    TerritoryNode(
+        name=_T.YAKUTSK,
+        continent=_C.ASIA,
+        adjacent=(_T.SIBERIA, _T.KAMCHATKA, _T.IRKUTSK),
+    ),
+    TerritoryNode(
+        name=_T.KAMCHATKA,
+        continent=_C.ASIA,
+        adjacent=(_T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.JAPAN, _T.ALASKA),
+    ),
+    TerritoryNode(
+        name=_T.IRKUTSK,
+        continent=_C.ASIA,
+        adjacent=(_T.SIBERIA, _T.YAKUTSK, _T.KAMCHATKA, _T.MONGOLIA),
+    ),
+    TerritoryNode(
+        name=_T.MONGOLIA,
+        continent=_C.ASIA,
+        adjacent=(_T.SIBERIA, _T.IRKUTSK, _T.KAMCHATKA, _T.JAPAN, _T.CHINA),
+    ),
+    TerritoryNode(
+        name=_T.JAPAN,
+        continent=_C.ASIA,
+        adjacent=(_T.KAMCHATKA, _T.MONGOLIA),
+    ),
+    TerritoryNode(
+        name=_T.AFGHANISTAN,
+        continent=_C.ASIA,
+        adjacent=(_T.UKRAINE, _T.URAL, _T.CHINA, _T.INDIA, _T.MIDDLE_EAST),
+    ),
+    TerritoryNode(
+        name=_T.CHINA,
+        continent=_C.ASIA,
+        adjacent=(_T.URAL, _T.SIBERIA, _T.MONGOLIA, _T.AFGHANISTAN, _T.INDIA, _T.SOUTHEAST_ASIA),
+    ),
+    TerritoryNode(
+        name=_T.MIDDLE_EAST,
+        continent=_C.ASIA,
+        adjacent=(_T.SOUTHERN_EUROPE, _T.UKRAINE, _T.AFGHANISTAN, _T.INDIA, _T.EGYPT, _T.EAST_AFRICA),
+    ),
+    TerritoryNode(
+        name=_T.INDIA,
+        continent=_C.ASIA,
+        adjacent=(_T.AFGHANISTAN, _T.CHINA, _T.MIDDLE_EAST, _T.SOUTHEAST_ASIA),
+    ),
+    TerritoryNode(
+        name=_T.SOUTHEAST_ASIA,
+        continent=_C.ASIA,
+        adjacent=(_T.CHINA, _T.INDIA, _T.INDONESIA),
+    ),
     # Oceania (4)
-    (_T.INDONESIA, _C.OCEANIA, [_T.SOUTHEAST_ASIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA]),
-    (_T.NEW_GUINEA, _C.OCEANIA, [_T.INDONESIA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA]),
-    (_T.WESTERN_AUSTRALIA, _C.OCEANIA, [_T.INDONESIA, _T.NEW_GUINEA, _T.EASTERN_AUSTRALIA]),
-    (_T.EASTERN_AUSTRALIA, _C.OCEANIA, [_T.NEW_GUINEA, _T.WESTERN_AUSTRALIA]),
+    TerritoryNode(
+        name=_T.INDONESIA,
+        continent=_C.OCEANIA,
+        adjacent=(_T.SOUTHEAST_ASIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA),
+    ),
+    TerritoryNode(
+        name=_T.NEW_GUINEA,
+        continent=_C.OCEANIA,
+        adjacent=(_T.INDONESIA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA),
+    ),
+    TerritoryNode(
+        name=_T.WESTERN_AUSTRALIA,
+        continent=_C.OCEANIA,
+        adjacent=(_T.INDONESIA, _T.NEW_GUINEA, _T.EASTERN_AUSTRALIA),
+    ),
+    TerritoryNode(
+        name=_T.EASTERN_AUSTRALIA,
+        continent=_C.OCEANIA,
+        adjacent=(_T.NEW_GUINEA, _T.WESTERN_AUSTRALIA),
+    ),
 ]
 
 # ---------------------------------------------------------------------------
 # Continent definitions
 # ---------------------------------------------------------------------------
-_CONTINENT_DATA: list[tuple[Continent, int, list[Territory]]] = [
-    (
-        _C.NORTH_AMERICA,
-        5,
-        [
+_CONTINENT_DATA: list[ContinentInfo] = [
+    ContinentInfo(
+        name=_C.NORTH_AMERICA,
+        bonus=5,
+        territories=(
             _T.ALASKA,
             _T.NORTHWEST_TERRITORY,
             _T.GREENLAND,
@@ -194,13 +351,17 @@ _CONTINENT_DATA: list[tuple[Continent, int, list[Territory]]] = [
             _T.WESTERN_UNITED_STATES,
             _T.EASTERN_UNITED_STATES,
             _T.CENTRAL_AMERICA,
-        ],
+        ),
     ),
-    (_C.SOUTH_AMERICA, 2, [_T.VENEZUELA, _T.PERU, _T.BRAZIL, _T.ARGENTINA]),
-    (
-        _C.EUROPE,
-        5,
-        [
+    ContinentInfo(
+        name=_C.SOUTH_AMERICA,
+        bonus=2,
+        territories=(_T.VENEZUELA, _T.PERU, _T.BRAZIL, _T.ARGENTINA),
+    ),
+    ContinentInfo(
+        name=_C.EUROPE,
+        bonus=5,
+        territories=(
             _T.ICELAND,
             _T.GREAT_BRITAIN,
             _T.SCANDINAVIA,
@@ -208,13 +369,24 @@ _CONTINENT_DATA: list[tuple[Continent, int, list[Territory]]] = [
             _T.WESTERN_EUROPE,
             _T.SOUTHERN_EUROPE,
             _T.UKRAINE,
-        ],
+        ),
     ),
-    (_C.AFRICA, 3, [_T.NORTH_AFRICA, _T.EGYPT, _T.EAST_AFRICA, _T.CENTRAL_AFRICA, _T.SOUTH_AFRICA, _T.MADAGASCAR]),
-    (
-        _C.ASIA,
-        7,
-        [
+    ContinentInfo(
+        name=_C.AFRICA,
+        bonus=3,
+        territories=(
+            _T.NORTH_AFRICA,
+            _T.EGYPT,
+            _T.EAST_AFRICA,
+            _T.CENTRAL_AFRICA,
+            _T.SOUTH_AFRICA,
+            _T.MADAGASCAR,
+        ),
+    ),
+    ContinentInfo(
+        name=_C.ASIA,
+        bonus=7,
+        territories=(
             _T.URAL,
             _T.SIBERIA,
             _T.YAKUTSK,
@@ -227,9 +399,13 @@ _CONTINENT_DATA: list[tuple[Continent, int, list[Territory]]] = [
             _T.MIDDLE_EAST,
             _T.INDIA,
             _T.SOUTHEAST_ASIA,
-        ],
+        ),
     ),
-    (_C.OCEANIA, 2, [_T.INDONESIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA]),
+    ContinentInfo(
+        name=_C.OCEANIA,
+        bonus=2,
+        territories=(_T.INDONESIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA),
+    ),
 ]
 
 
@@ -237,18 +413,9 @@ class Board:
     """Immutable board loaded once at startup."""
 
     def __init__(self) -> None:
-        self.territories: dict[Territory, TerritoryNode] = {}
-        for name, continent, adjacent in _TERRITORY_DATA:
-            self.territories[name] = TerritoryNode(name=name, continent=continent, adjacent=tuple(adjacent))
-
-        self.continents: dict[Continent, ContinentInfo] = {}
-        for name, bonus, territories in _CONTINENT_DATA:
-            self.continents[name] = ContinentInfo(name=name, bonus=bonus, territories=tuple(territories))
-
-        # quick-lookup: territory -> continent
-        self._territory_continent: dict[Territory, Continent] = {
-            t.name: t.continent for t in self.territories.values()
-        }
+        self.territories: dict[Territory, TerritoryNode] = {node.name: node for node in _TERRITORY_DATA}
+        self.continents: dict[Continent, ContinentInfo] = {info.name: info for info in _CONTINENT_DATA}
+        self._territory_continent: dict[Territory, Continent] = {node.name: node.continent for node in _TERRITORY_DATA}
 
     # ------------------------------------------------------------------
     def are_adjacent(self, territory: Territory, other_territory: Territory) -> bool:
