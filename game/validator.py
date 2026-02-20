@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from game.board import BOARD
+from game.board import BOARD, Territory
 from game.cards import is_valid_set
 from game.state import GameState, Phase
 
@@ -62,13 +62,15 @@ def validate_card_redeem(state: GameState, cards: list[str]) -> None:
 
 # ---------------------------------------------------------------------------
 def _validate_reinforce(state: GameState, move: dict[str, Any], player: str) -> None:
-    territory = move.get("territory")
+    territory_name = move.get("territory")
     count = move.get("count", 0)
 
-    if not territory:
+    if not territory_name:
         raise InvalidMove("reinforce: missing territory")
-    if territory not in state.territories:
-        raise InvalidMove(f"reinforce: unknown territory {territory!r}")
+    try:
+        territory = Territory(territory_name)
+    except ValueError:
+        raise InvalidMove(f"reinforce: unknown territory {territory_name!r}")
     if state.territories[territory].owner != player:
         raise InvalidMove(f"reinforce: {territory!r} not owned by {player}")
     if not isinstance(count, int) or count < 1:
@@ -78,16 +80,17 @@ def _validate_reinforce(state: GameState, move: dict[str, Any], player: str) -> 
 
 
 def _validate_attack(state: GameState, move: dict[str, Any], player: str) -> None:
-    from_territory = move.get("from")
-    to_territory = move.get("to")
+    from_territory_name = move.get("from")
+    to_territory_name = move.get("to")
     attackers = move.get("attackers", 0)
 
-    if not from_territory or not to_territory:
+    if not from_territory_name or not to_territory_name:
         raise InvalidMove("attack: missing from/to")
-    if from_territory not in state.territories:
-        raise InvalidMove(f"attack: unknown territory {from_territory!r}")
-    if to_territory not in state.territories:
-        raise InvalidMove(f"attack: unknown territory {to_territory!r}")
+    try:
+        from_territory = Territory(from_territory_name)
+        to_territory = Territory(to_territory_name)
+    except ValueError as error:
+        raise InvalidMove(f"attack: unknown territory: {error}") from error
     if state.territories[from_territory].owner != player:
         raise InvalidMove(f"attack: {from_territory!r} not owned by {player}")
     if state.territories[to_territory].owner == player:
@@ -104,16 +107,17 @@ def _validate_attack(state: GameState, move: dict[str, Any], player: str) -> Non
 
 
 def _validate_fortify(state: GameState, move: dict[str, Any], player: str) -> None:
-    from_territory = move.get("from")
-    to_territory = move.get("to")
+    from_territory_name = move.get("from")
+    to_territory_name = move.get("to")
     count = move.get("count", 0)
 
-    if not from_territory or not to_territory:
+    if not from_territory_name or not to_territory_name:
         raise InvalidMove("fortify: missing from/to")
-    if from_territory not in state.territories:
-        raise InvalidMove(f"fortify: unknown territory {from_territory!r}")
-    if to_territory not in state.territories:
-        raise InvalidMove(f"fortify: unknown territory {to_territory!r}")
+    try:
+        from_territory = Territory(from_territory_name)
+        to_territory = Territory(to_territory_name)
+    except ValueError as error:
+        raise InvalidMove(f"fortify: unknown territory: {error}") from error
     if state.territories[from_territory].owner != player:
         raise InvalidMove(f"fortify: {from_territory!r} not owned by {player}")
     if state.territories[to_territory].owner != player:
@@ -128,11 +132,13 @@ def _validate_fortify(state: GameState, move: dict[str, Any], player: str) -> No
 
 
 def _validate_setup(state: GameState, move: dict[str, Any], player: str) -> None:
-    territory = move.get("territory")
-    if not territory:
+    territory_name = move.get("territory")
+    if not territory_name:
         raise InvalidMove("setup: missing territory")
-    if territory not in state.territories:
-        raise InvalidMove(f"setup: unknown territory {territory!r}")
+    try:
+        territory = Territory(territory_name)
+    except ValueError:
+        raise InvalidMove(f"setup: unknown territory {territory_name!r}")
     territory_state = state.territories[territory]
     if territory_state.owner not in (player, ""):
         raise InvalidMove(f"setup: territory {territory!r} already owned by {territory_state.owner}")
@@ -140,11 +146,11 @@ def _validate_setup(state: GameState, move: dict[str, Any], player: str) -> None
         raise InvalidMove("setup: no troops to place")
 
 
-def _connected_through_owned(start: str, end: str, player: str, state: GameState) -> bool:
+def _connected_through_owned(start: Territory, end: Territory, player: str, state: GameState) -> bool:
     if start == end:
         return True
-    visited = {start}
-    queue = [start]
+    visited: set[Territory] = {start}
+    queue: list[Territory] = [start]
     while queue:
         current = queue.pop(0)
         for neighbor in BOARD.territories[current].adjacent:

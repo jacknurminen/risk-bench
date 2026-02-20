@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from game.board import BOARD
+from game.board import BOARD, Continent, Territory
 from game.state import GameState
 
 # ---------------------------------------------------------------------------
@@ -101,19 +101,19 @@ def is_valid_set(cards: list[str]) -> bool:
     return len(set(non_wild)) == 1 or len(set(non_wild)) == 3
 
 
-def territory_match_bonus(cards: list[str], owned_territories: list[str]) -> int:
+def territory_match_bonus(cards: list[str], owned_territories: list[Territory]) -> int:
     """Return the bonus troops if any redeemed card's territory is owned by the player.
 
     Args:
         cards: The three cards being redeemed.
-        owned_territories: List of territory names owned by the redeeming player.
+        owned_territories: List of territories owned by the redeeming player.
 
     Returns:
         2 if any card matches an owned territory, 0 otherwise.
     """
     for card in cards:
         if not is_wildcard(card=card):
-            territory = card.split(":")[1]
+            territory = Territory(card.split(":")[1])
             if territory in owned_territories:
                 return 2
     return 0
@@ -184,31 +184,42 @@ def check_mission(player: str, mission: str, state: GameState) -> bool:
     mission_lower = mission.lower()
 
     if "asia and south america" in mission_lower:
-        return continent_control.get("asia") == player and continent_control.get("south_america") == player
+        return (
+            continent_control.get(Continent.ASIA) == player
+            and continent_control.get(Continent.SOUTH_AMERICA) == player
+        )
     if "asia and africa" in mission_lower:
-        return continent_control.get("asia") == player and continent_control.get("africa") == player
+        return continent_control.get(Continent.ASIA) == player and continent_control.get(Continent.AFRICA) == player
     if "north america and africa" in mission_lower:
-        return continent_control.get("north_america") == player and continent_control.get("africa") == player
+        return (
+            continent_control.get(Continent.NORTH_AMERICA) == player
+            and continent_control.get(Continent.AFRICA) == player
+        )
     if "north america and australia" in mission_lower:
-        return continent_control.get("north_america") == player and continent_control.get("oceania") == player
+        return (
+            continent_control.get(Continent.NORTH_AMERICA) == player
+            and continent_control.get(Continent.OCEANIA) == player
+        )
     if "europe and south america" in mission_lower:
         extras = [
             c
             for c, controller in continent_control.items()
-            if controller == player and c not in ("europe", "south_america")
+            if controller == player and c not in (Continent.EUROPE, Continent.SOUTH_AMERICA)
         ]
         return (
-            continent_control.get("europe") == player
-            and continent_control.get("south_america") == player
+            continent_control.get(Continent.EUROPE) == player
+            and continent_control.get(Continent.SOUTH_AMERICA) == player
             and len(extras) >= 1
         )
     if "europe and australia" in mission_lower:
         extras = [
-            c for c, controller in continent_control.items() if controller == player and c not in ("europe", "oceania")
+            c
+            for c, controller in continent_control.items()
+            if controller == player and c not in (Continent.EUROPE, Continent.OCEANIA)
         ]
         return (
-            continent_control.get("europe") == player
-            and continent_control.get("oceania") == player
+            continent_control.get(Continent.EUROPE) == player
+            and continent_control.get(Continent.OCEANIA) == player
             and len(extras) >= 1
         )
     if "24 territories of your choice" in mission_lower:
@@ -225,7 +236,10 @@ def check_mission(player: str, mission: str, state: GameState) -> bool:
         qualifying = [territory for territory in owned if state.territories[territory].troops >= 2]
         return len(qualifying) >= 18
     if "south america and australia" in mission_lower:
-        return continent_control.get("south_america") == player and continent_control.get("oceania") == player
+        return (
+            continent_control.get(Continent.SOUTH_AMERICA) == player
+            and continent_control.get(Continent.OCEANIA) == player
+        )
 
     # Fallback: never complete
     return False

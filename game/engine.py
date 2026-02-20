@@ -6,7 +6,7 @@ from typing import Any
 
 from rich.console import Console
 
-from game.board import BOARD
+from game.board import BOARD, Territory
 from game.cards import (
     assign_missions,
     build_deck,
@@ -190,7 +190,7 @@ class GameEngine:
 
     def _apply_reinforce(self, player: str, move: dict[str, Any]) -> None:
         state = self.state
-        territory = move["territory"]
+        territory = Territory(move["territory"])
         count = move["count"]
         state.territories[territory].troops += count
         state.troops_to_place -= count
@@ -242,8 +242,8 @@ class GameEngine:
                 self._log(f"  {player} ends attacks")
                 break
 
-            from_territory = move["from"]
-            to_territory = move["to"]
+            from_territory = Territory(move["from"])
+            to_territory = Territory(move["to"])
             attackers = move["attackers"]
 
             from_troops = state.territories[from_territory].troops
@@ -309,8 +309,8 @@ class GameEngine:
         if move.get("action") == "skip":
             return
 
-        from_territory = move["from"]
-        to_territory = move["to"]
+        from_territory = Territory(move["from"])
+        to_territory = Territory(move["to"])
         count = move["count"]
 
         state.territories[from_territory].troops -= count

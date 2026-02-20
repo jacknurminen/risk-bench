@@ -4,7 +4,7 @@ import random
 from typing import Any
 
 from agents.base import BaseAgent
-from game.board import BOARD
+from game.board import BOARD, Territory
 from game.state import GameState, Phase
 
 
@@ -52,7 +52,7 @@ class RandomAgent(BaseAgent):
         if random.random() < 0.3:
             return {"action": "end_attacks"}
 
-        valid_attacks: list[tuple[str, str]] = []
+        valid_attacks: list[tuple[Territory, Territory]] = []
         for from_territory, territory_state in state.territories.items():
             if territory_state.owner != self.color or territory_state.troops < 2:
                 continue
@@ -73,7 +73,7 @@ class RandomAgent(BaseAgent):
         if random.random() < 0.5:
             return {"action": "skip"}
 
-        candidates: list[tuple[str, str]] = []
+        candidates: list[tuple[Territory, Territory]] = []
         for from_territory, territory_state in state.territories.items():
             if territory_state.owner != self.color or territory_state.troops < 2:
                 continue

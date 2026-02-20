@@ -1,144 +1,235 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import StrEnum
+
+
+class Continent(StrEnum):
+    NORTH_AMERICA = "north_america"
+    SOUTH_AMERICA = "south_america"
+    EUROPE = "europe"
+    AFRICA = "africa"
+    ASIA = "asia"
+    OCEANIA = "oceania"
+
+
+class Territory(StrEnum):
+    # North America
+    ALASKA = "alaska"
+    NORTHWEST_TERRITORY = "northwest_territory"
+    GREENLAND = "greenland"
+    ALBERTA = "alberta"
+    ONTARIO = "ontario"
+    QUEBEC = "quebec"
+    WESTERN_UNITED_STATES = "western_united_states"
+    EASTERN_UNITED_STATES = "eastern_united_states"
+    CENTRAL_AMERICA = "central_america"
+    # South America
+    VENEZUELA = "venezuela"
+    PERU = "peru"
+    BRAZIL = "brazil"
+    ARGENTINA = "argentina"
+    # Europe
+    ICELAND = "iceland"
+    GREAT_BRITAIN = "great_britain"
+    SCANDINAVIA = "scandinavia"
+    NORTHERN_EUROPE = "northern_europe"
+    WESTERN_EUROPE = "western_europe"
+    SOUTHERN_EUROPE = "southern_europe"
+    UKRAINE = "ukraine"
+    # Africa
+    NORTH_AFRICA = "north_africa"
+    EGYPT = "egypt"
+    EAST_AFRICA = "east_africa"
+    CENTRAL_AFRICA = "central_africa"
+    SOUTH_AFRICA = "south_africa"
+    MADAGASCAR = "madagascar"
+    # Asia
+    URAL = "ural"
+    SIBERIA = "siberia"
+    YAKUTSK = "yakutsk"
+    KAMCHATKA = "kamchatka"
+    IRKUTSK = "irkutsk"
+    MONGOLIA = "mongolia"
+    JAPAN = "japan"
+    AFGHANISTAN = "afghanistan"
+    CHINA = "china"
+    MIDDLE_EAST = "middle_east"
+    INDIA = "india"
+    SOUTHEAST_ASIA = "southeast_asia"
+    # Oceania
+    INDONESIA = "indonesia"
+    NEW_GUINEA = "new_guinea"
+    WESTERN_AUSTRALIA = "western_australia"
+    EASTERN_AUSTRALIA = "eastern_australia"
 
 
 @dataclass(frozen=True)
-class Territory:
-    name: str
-    continent: str
-    adjacent: tuple[str, ...]
+class TerritoryNode:
+    name: Territory
+    continent: Continent
+    adjacent: tuple[Territory, ...]
 
 
 @dataclass(frozen=True)
-class Continent:
-    name: str
+class ContinentInfo:
+    name: Continent
     bonus: int
-    territories: tuple[str, ...]
+    territories: tuple[Territory, ...]
 
+
+# ---------------------------------------------------------------------------
+# Short aliases for the data tables below (class references, not magic strings)
+# ---------------------------------------------------------------------------
+_T = Territory
+_C = Continent
 
 # ---------------------------------------------------------------------------
 # Territory definitions (42 canonical Risk territories)
 # ---------------------------------------------------------------------------
-_NA = "north_america"
-_SA = "south_america"
-_EU = "europe"
-_AF = "africa"
-_AS = "asia"
-_OC = "oceania"
-
-_TERRITORY_DATA: list[tuple[str, str, list[str]]] = [
+_TERRITORY_DATA: list[tuple[Territory, Continent, list[Territory]]] = [
     # North America (9)
-    ("alaska", _NA, ["northwest_territory", "alberta", "kamchatka"]),
-    ("northwest_territory", _NA, ["alaska", "alberta", "ontario", "greenland"]),
-    ("greenland", _NA, ["northwest_territory", "ontario", "quebec", "iceland"]),
-    ("alberta", _NA, ["alaska", "northwest_territory", "ontario", "western_united_states"]),
+    (_T.ALASKA, _C.NORTH_AMERICA, [_T.NORTHWEST_TERRITORY, _T.ALBERTA, _T.KAMCHATKA]),
+    (_T.NORTHWEST_TERRITORY, _C.NORTH_AMERICA, [_T.ALASKA, _T.ALBERTA, _T.ONTARIO, _T.GREENLAND]),
+    (_T.GREENLAND, _C.NORTH_AMERICA, [_T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.QUEBEC, _T.ICELAND]),
+    (_T.ALBERTA, _C.NORTH_AMERICA, [_T.ALASKA, _T.NORTHWEST_TERRITORY, _T.ONTARIO, _T.WESTERN_UNITED_STATES]),
     (
-        "ontario",
-        _NA,
-        ["northwest_territory", "alberta", "greenland", "quebec", "western_united_states", "eastern_united_states"],
+        _T.ONTARIO,
+        _C.NORTH_AMERICA,
+        [
+            _T.NORTHWEST_TERRITORY,
+            _T.ALBERTA,
+            _T.GREENLAND,
+            _T.QUEBEC,
+            _T.WESTERN_UNITED_STATES,
+            _T.EASTERN_UNITED_STATES,
+        ],
     ),
-    ("quebec", _NA, ["greenland", "ontario", "eastern_united_states"]),
-    ("western_united_states", _NA, ["alberta", "ontario", "eastern_united_states", "central_america"]),
-    ("eastern_united_states", _NA, ["ontario", "quebec", "western_united_states", "central_america"]),
-    ("central_america", _NA, ["western_united_states", "eastern_united_states", "venezuela"]),
+    (_T.QUEBEC, _C.NORTH_AMERICA, [_T.GREENLAND, _T.ONTARIO, _T.EASTERN_UNITED_STATES]),
+    (
+        _T.WESTERN_UNITED_STATES,
+        _C.NORTH_AMERICA,
+        [_T.ALBERTA, _T.ONTARIO, _T.EASTERN_UNITED_STATES, _T.CENTRAL_AMERICA],
+    ),
+    (
+        _T.EASTERN_UNITED_STATES,
+        _C.NORTH_AMERICA,
+        [_T.ONTARIO, _T.QUEBEC, _T.WESTERN_UNITED_STATES, _T.CENTRAL_AMERICA],
+    ),
+    (_T.CENTRAL_AMERICA, _C.NORTH_AMERICA, [_T.WESTERN_UNITED_STATES, _T.EASTERN_UNITED_STATES, _T.VENEZUELA]),
     # South America (4)
-    ("venezuela", _SA, ["central_america", "peru", "brazil"]),
-    ("peru", _SA, ["venezuela", "brazil", "argentina"]),
-    ("brazil", _SA, ["venezuela", "peru", "argentina", "north_africa"]),
-    ("argentina", _SA, ["peru", "brazil"]),
+    (_T.VENEZUELA, _C.SOUTH_AMERICA, [_T.CENTRAL_AMERICA, _T.PERU, _T.BRAZIL]),
+    (_T.PERU, _C.SOUTH_AMERICA, [_T.VENEZUELA, _T.BRAZIL, _T.ARGENTINA]),
+    (_T.BRAZIL, _C.SOUTH_AMERICA, [_T.VENEZUELA, _T.PERU, _T.ARGENTINA, _T.NORTH_AFRICA]),
+    (_T.ARGENTINA, _C.SOUTH_AMERICA, [_T.PERU, _T.BRAZIL]),
     # Europe (7)
-    ("iceland", _EU, ["greenland", "great_britain", "scandinavia"]),
-    ("great_britain", _EU, ["iceland", "scandinavia", "northern_europe", "western_europe"]),
-    ("scandinavia", _EU, ["iceland", "great_britain", "northern_europe", "ukraine"]),
-    ("northern_europe", _EU, ["great_britain", "scandinavia", "ukraine", "western_europe", "southern_europe"]),
-    ("western_europe", _EU, ["great_britain", "northern_europe", "southern_europe", "north_africa"]),
+    (_T.ICELAND, _C.EUROPE, [_T.GREENLAND, _T.GREAT_BRITAIN, _T.SCANDINAVIA]),
+    (_T.GREAT_BRITAIN, _C.EUROPE, [_T.ICELAND, _T.SCANDINAVIA, _T.NORTHERN_EUROPE, _T.WESTERN_EUROPE]),
+    (_T.SCANDINAVIA, _C.EUROPE, [_T.ICELAND, _T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.UKRAINE]),
     (
-        "southern_europe",
-        _EU,
-        ["northern_europe", "western_europe", "ukraine", "north_africa", "egypt", "middle_east"],
+        _T.NORTHERN_EUROPE,
+        _C.EUROPE,
+        [_T.GREAT_BRITAIN, _T.SCANDINAVIA, _T.UKRAINE, _T.WESTERN_EUROPE, _T.SOUTHERN_EUROPE],
     ),
-    ("ukraine", _EU, ["scandinavia", "northern_europe", "southern_europe", "ural", "afghanistan", "middle_east"]),
+    (_T.WESTERN_EUROPE, _C.EUROPE, [_T.GREAT_BRITAIN, _T.NORTHERN_EUROPE, _T.SOUTHERN_EUROPE, _T.NORTH_AFRICA]),
+    (
+        _T.SOUTHERN_EUROPE,
+        _C.EUROPE,
+        [_T.NORTHERN_EUROPE, _T.WESTERN_EUROPE, _T.UKRAINE, _T.NORTH_AFRICA, _T.EGYPT, _T.MIDDLE_EAST],
+    ),
+    (
+        _T.UKRAINE,
+        _C.EUROPE,
+        [_T.SCANDINAVIA, _T.NORTHERN_EUROPE, _T.SOUTHERN_EUROPE, _T.URAL, _T.AFGHANISTAN, _T.MIDDLE_EAST],
+    ),
     # Africa (6)
     (
-        "north_africa",
-        _AF,
-        ["brazil", "western_europe", "southern_europe", "egypt", "east_africa", "central_africa"],
+        _T.NORTH_AFRICA,
+        _C.AFRICA,
+        [_T.BRAZIL, _T.WESTERN_EUROPE, _T.SOUTHERN_EUROPE, _T.EGYPT, _T.EAST_AFRICA, _T.CENTRAL_AFRICA],
     ),
-    ("egypt", _AF, ["southern_europe", "north_africa", "east_africa", "middle_east"]),
+    (_T.EGYPT, _C.AFRICA, [_T.SOUTHERN_EUROPE, _T.NORTH_AFRICA, _T.EAST_AFRICA, _T.MIDDLE_EAST]),
     (
-        "east_africa",
-        _AF,
-        ["north_africa", "egypt", "central_africa", "south_africa", "madagascar", "middle_east"],
+        _T.EAST_AFRICA,
+        _C.AFRICA,
+        [_T.NORTH_AFRICA, _T.EGYPT, _T.CENTRAL_AFRICA, _T.SOUTH_AFRICA, _T.MADAGASCAR, _T.MIDDLE_EAST],
     ),
-    ("central_africa", _AF, ["north_africa", "east_africa", "south_africa"]),
-    ("south_africa", _AF, ["central_africa", "east_africa", "madagascar"]),
-    ("madagascar", _AF, ["east_africa", "south_africa"]),
+    (_T.CENTRAL_AFRICA, _C.AFRICA, [_T.NORTH_AFRICA, _T.EAST_AFRICA, _T.SOUTH_AFRICA]),
+    (_T.SOUTH_AFRICA, _C.AFRICA, [_T.CENTRAL_AFRICA, _T.EAST_AFRICA, _T.MADAGASCAR]),
+    (_T.MADAGASCAR, _C.AFRICA, [_T.EAST_AFRICA, _T.SOUTH_AFRICA]),
     # Asia (12)
-    ("ural", _AS, ["ukraine", "siberia", "afghanistan", "china"]),
-    ("siberia", _AS, ["ural", "yakutsk", "irkutsk", "mongolia", "china"]),
-    ("yakutsk", _AS, ["siberia", "kamchatka", "irkutsk"]),
-    ("kamchatka", _AS, ["yakutsk", "irkutsk", "mongolia", "japan", "alaska"]),
-    ("irkutsk", _AS, ["siberia", "yakutsk", "kamchatka", "mongolia"]),
-    ("mongolia", _AS, ["siberia", "irkutsk", "kamchatka", "japan", "china"]),
-    ("japan", _AS, ["kamchatka", "mongolia"]),
-    ("afghanistan", _AS, ["ukraine", "ural", "china", "india", "middle_east"]),
-    ("china", _AS, ["ural", "siberia", "mongolia", "afghanistan", "india", "southeast_asia"]),
-    ("middle_east", _AS, ["southern_europe", "ukraine", "afghanistan", "india", "egypt", "east_africa"]),
-    ("india", _AS, ["afghanistan", "china", "middle_east", "southeast_asia"]),
-    ("southeast_asia", _AS, ["china", "india", "indonesia"]),
+    (_T.URAL, _C.ASIA, [_T.UKRAINE, _T.SIBERIA, _T.AFGHANISTAN, _T.CHINA]),
+    (_T.SIBERIA, _C.ASIA, [_T.URAL, _T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.CHINA]),
+    (_T.YAKUTSK, _C.ASIA, [_T.SIBERIA, _T.KAMCHATKA, _T.IRKUTSK]),
+    (_T.KAMCHATKA, _C.ASIA, [_T.YAKUTSK, _T.IRKUTSK, _T.MONGOLIA, _T.JAPAN, _T.ALASKA]),
+    (_T.IRKUTSK, _C.ASIA, [_T.SIBERIA, _T.YAKUTSK, _T.KAMCHATKA, _T.MONGOLIA]),
+    (_T.MONGOLIA, _C.ASIA, [_T.SIBERIA, _T.IRKUTSK, _T.KAMCHATKA, _T.JAPAN, _T.CHINA]),
+    (_T.JAPAN, _C.ASIA, [_T.KAMCHATKA, _T.MONGOLIA]),
+    (_T.AFGHANISTAN, _C.ASIA, [_T.UKRAINE, _T.URAL, _T.CHINA, _T.INDIA, _T.MIDDLE_EAST]),
+    (_T.CHINA, _C.ASIA, [_T.URAL, _T.SIBERIA, _T.MONGOLIA, _T.AFGHANISTAN, _T.INDIA, _T.SOUTHEAST_ASIA]),
+    (_T.MIDDLE_EAST, _C.ASIA, [_T.SOUTHERN_EUROPE, _T.UKRAINE, _T.AFGHANISTAN, _T.INDIA, _T.EGYPT, _T.EAST_AFRICA]),
+    (_T.INDIA, _C.ASIA, [_T.AFGHANISTAN, _T.CHINA, _T.MIDDLE_EAST, _T.SOUTHEAST_ASIA]),
+    (_T.SOUTHEAST_ASIA, _C.ASIA, [_T.CHINA, _T.INDIA, _T.INDONESIA]),
     # Oceania (4)
-    ("indonesia", _OC, ["southeast_asia", "new_guinea", "western_australia"]),
-    ("new_guinea", _OC, ["indonesia", "western_australia", "eastern_australia"]),
-    ("western_australia", _OC, ["indonesia", "new_guinea", "eastern_australia"]),
-    ("eastern_australia", _OC, ["new_guinea", "western_australia"]),
+    (_T.INDONESIA, _C.OCEANIA, [_T.SOUTHEAST_ASIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA]),
+    (_T.NEW_GUINEA, _C.OCEANIA, [_T.INDONESIA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA]),
+    (_T.WESTERN_AUSTRALIA, _C.OCEANIA, [_T.INDONESIA, _T.NEW_GUINEA, _T.EASTERN_AUSTRALIA]),
+    (_T.EASTERN_AUSTRALIA, _C.OCEANIA, [_T.NEW_GUINEA, _T.WESTERN_AUSTRALIA]),
 ]
 
 # ---------------------------------------------------------------------------
 # Continent definitions
 # ---------------------------------------------------------------------------
-_CONTINENT_DATA: list[tuple[str, int, list[str]]] = [
+_CONTINENT_DATA: list[tuple[Continent, int, list[Territory]]] = [
     (
-        _NA,
+        _C.NORTH_AMERICA,
         5,
         [
-            "alaska",
-            "northwest_territory",
-            "greenland",
-            "alberta",
-            "ontario",
-            "quebec",
-            "western_united_states",
-            "eastern_united_states",
-            "central_america",
+            _T.ALASKA,
+            _T.NORTHWEST_TERRITORY,
+            _T.GREENLAND,
+            _T.ALBERTA,
+            _T.ONTARIO,
+            _T.QUEBEC,
+            _T.WESTERN_UNITED_STATES,
+            _T.EASTERN_UNITED_STATES,
+            _T.CENTRAL_AMERICA,
         ],
     ),
-    (_SA, 2, ["venezuela", "peru", "brazil", "argentina"]),
+    (_C.SOUTH_AMERICA, 2, [_T.VENEZUELA, _T.PERU, _T.BRAZIL, _T.ARGENTINA]),
     (
-        _EU,
+        _C.EUROPE,
         5,
-        ["iceland", "great_britain", "scandinavia", "northern_europe", "western_europe", "southern_europe", "ukraine"],
+        [
+            _T.ICELAND,
+            _T.GREAT_BRITAIN,
+            _T.SCANDINAVIA,
+            _T.NORTHERN_EUROPE,
+            _T.WESTERN_EUROPE,
+            _T.SOUTHERN_EUROPE,
+            _T.UKRAINE,
+        ],
     ),
-    (_AF, 3, ["north_africa", "egypt", "east_africa", "central_africa", "south_africa", "madagascar"]),
+    (_C.AFRICA, 3, [_T.NORTH_AFRICA, _T.EGYPT, _T.EAST_AFRICA, _T.CENTRAL_AFRICA, _T.SOUTH_AFRICA, _T.MADAGASCAR]),
     (
-        _AS,
+        _C.ASIA,
         7,
         [
-            "ural",
-            "siberia",
-            "yakutsk",
-            "kamchatka",
-            "irkutsk",
-            "mongolia",
-            "japan",
-            "afghanistan",
-            "china",
-            "middle_east",
-            "india",
-            "southeast_asia",
+            _T.URAL,
+            _T.SIBERIA,
+            _T.YAKUTSK,
+            _T.KAMCHATKA,
+            _T.IRKUTSK,
+            _T.MONGOLIA,
+            _T.JAPAN,
+            _T.AFGHANISTAN,
+            _T.CHINA,
+            _T.MIDDLE_EAST,
+            _T.INDIA,
+            _T.SOUTHEAST_ASIA,
         ],
     ),
-    (_OC, 2, ["indonesia", "new_guinea", "western_australia", "eastern_australia"]),
+    (_C.OCEANIA, 2, [_T.INDONESIA, _T.NEW_GUINEA, _T.WESTERN_AUSTRALIA, _T.EASTERN_AUSTRALIA]),
 ]
 
 
@@ -146,82 +237,84 @@ class Board:
     """Immutable board loaded once at startup."""
 
     def __init__(self) -> None:
-        self.territories: dict[str, Territory] = {}
+        self.territories: dict[Territory, TerritoryNode] = {}
         for name, continent, adjacent in _TERRITORY_DATA:
-            self.territories[name] = Territory(name=name, continent=continent, adjacent=tuple(adjacent))
+            self.territories[name] = TerritoryNode(name=name, continent=continent, adjacent=tuple(adjacent))
 
-        self.continents: dict[str, Continent] = {}
+        self.continents: dict[Continent, ContinentInfo] = {}
         for name, bonus, territories in _CONTINENT_DATA:
-            self.continents[name] = Continent(name=name, bonus=bonus, territories=tuple(territories))
+            self.continents[name] = ContinentInfo(name=name, bonus=bonus, territories=tuple(territories))
 
         # quick-lookup: territory -> continent
-        self._territory_continent: dict[str, str] = {t.name: t.continent for t in self.territories.values()}
+        self._territory_continent: dict[Territory, Continent] = {
+            t.name: t.continent for t in self.territories.values()
+        }
 
     # ------------------------------------------------------------------
-    def are_adjacent(self, territory: str, other_territory: str) -> bool:
+    def are_adjacent(self, territory: Territory, other_territory: Territory) -> bool:
         """Return True if the two territories share a border.
 
         Args:
-            territory: Name of the first territory.
-            other_territory: Name of the territory to check adjacency against.
+            territory: The first territory.
+            other_territory: The territory to check adjacency against.
 
         Returns:
             True if the territories are adjacent.
         """
         return other_territory in self.territories[territory].adjacent
 
-    def continent_of(self, territory: str) -> str:
-        """Return the continent name that contains the given territory.
+    def continent_of(self, territory: Territory) -> Continent:
+        """Return the continent that contains the given territory.
 
         Args:
-            territory: Territory name to look up.
+            territory: Territory to look up.
 
         Returns:
-            Continent name string.
+            Continent enum value.
         """
         return self._territory_continent[territory]
 
-    def continent_bonus(self, continent: str) -> int:
+    def continent_bonus(self, continent: Continent) -> int:
         """Return the reinforcement bonus for controlling the given continent.
 
         Args:
-            continent: Continent name.
+            continent: Continent to look up.
 
         Returns:
             Number of bonus troops awarded for full continent control.
         """
         return self.continents[continent].bonus
 
-    def territories_of(self, continent: str) -> tuple[str, ...]:
-        """Return the territory names that make up the given continent.
+    def territories_of(self, continent: Continent) -> tuple[Territory, ...]:
+        """Return the territories that make up the given continent.
 
         Args:
-            continent: Continent name.
+            continent: Continent to look up.
 
         Returns:
-            Tuple of territory name strings.
+            Tuple of Territory enum values.
         """
         return self.continents[continent].territories
 
-    def all_territory_names(self) -> list[str]:
-        """Return a list of all 42 territory names on the board.
+    def all_territory_names(self) -> list[Territory]:
+        """Return a list of all 42 territories on the board.
 
         Returns:
-            List of territory name strings.
+            List of Territory enum values.
         """
         return list(self.territories.keys())
 
-    def continent_controller(self, owner_map: dict[str, str]) -> dict[str, str | None]:
+    def continent_controller(self, owner_map: dict[Territory, str]) -> dict[Continent, str | None]:
         """Return the sole controller of each continent, or None if contested.
 
         Args:
-            owner_map: Mapping of territory name to owning player color.
+            owner_map: Mapping of territory to owning player color.
 
         Returns:
-            Dict mapping continent name to the controlling player color, or None if no
+            Dict mapping continent to the controlling player color, or None if no
             single player owns all territories in that continent.
         """
-        result: dict[str, str | None] = {}
+        result: dict[Continent, str | None] = {}
         for continent_name, continent in self.continents.items():
             owners = {owner_map[territory] for territory in continent.territories if territory in owner_map}
             result[continent_name] = owners.pop() if len(owners) == 1 else None

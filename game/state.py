@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from game.board import BOARD
+from game.board import BOARD, Territory
 
 
 class Phase(StrEnum):
@@ -108,8 +108,8 @@ class GameState:
     current_player: str
     players: list[str]  # ordered list of colors (turn order)
 
-    # territory_name -> TerritoryState
-    territories: dict[str, TerritoryState] = field(default_factory=dict)
+    # territory -> TerritoryState
+    territories: dict[Territory, TerritoryState] = field(default_factory=dict)
 
     # player_color -> list of card strings e.g. "infantry:alaska"
     hands: dict[str, list[str]] = field(default_factory=dict)
@@ -158,14 +158,14 @@ class GameState:
             alive=len(owned) > 0,
         )
 
-    def territories_of(self, player: str) -> list[str]:
-        """Return the territory names owned by the given player.
+    def territories_of(self, player: str) -> list[Territory]:
+        """Return the territories owned by the given player.
 
         Args:
             player: Player color to query.
 
         Returns:
-            List of territory name strings owned by the player.
+            List of Territory enum values owned by the player.
         """
         return [name for name, territory_state in self.territories.items() if territory_state.owner == player]
 
