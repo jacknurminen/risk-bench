@@ -21,11 +21,17 @@ class Tool:
 
 @dataclass(frozen=True)
 class ToolCall:
-    """A request from the model to invoke a tool. The caller executes it."""
+    """A request from the model to invoke a tool. The caller executes it.
+
+    ``provider_data`` is opaque provider-specific state that must be echoed
+    back unchanged when the call is replayed in the conversation history
+    (e.g. Gemini thought signatures). Callers never inspect it.
+    """
 
     id: str
     name: str
     arguments: dict[str, Any]
+    provider_data: object | None = None
 
 
 @dataclass(frozen=True)

@@ -54,8 +54,12 @@ def _to_content(message: Message) -> types.Content:
         return types.Content(role="user", parts=[types.Part(function_response=function_response)])
 
     if message.role == "assistant" and message.tool_calls:
+        # Gemini 3 requires the thought_signature captured at parse time to be echoed on replay.
         parts = [
-            types.Part(function_call=types.FunctionCall(name=call.name, args=call.arguments))
+            types.Part(
+                function_call=types.FunctionCall(name=call.name, args=call.arguments),
+                thought_signature=call.provider_data if isinstance(call.provider_data, bytes) else None,
+            )
             for call in message.tool_calls
         ]
         return types.Content(role="model", parts=parts)
@@ -79,7 +83,14 @@ def _parse_response(response: types.GenerateContentResponse) -> Response:
     for part in _response_parts(response=response):
         call = part.function_call
         if call and (call_name := call.name):
-            tool_calls.append(ToolCall(id=call_name, name=call_name, arguments=dict(call.args or {})))
+            tool_calls.append(
+                ToolCall(
+                    id=call_name,
+                    name=call_name,
+                    arguments=dict(call.args or {}),
+                    provider_data=part.thought_signature,
+                )
+            )
         elif part.text:
             text_parts.append(part.text)
 
