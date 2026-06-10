@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
-
 from storage.models import AgentRecord, GameRecord, Leaderboard, LeaderboardEntry
 
 DATA_DIR = Path("data")

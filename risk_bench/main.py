@@ -3,24 +3,31 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-import typer
-import uvicorn
-from rich.console import Console
-from rich.table import Table
-
 import config
 import storage.store as store
+import typer
+import uvicorn
 from agents.anthropic import AnthropicAgent
 from agents.google import GeminiAgent
 from agents.openai import OpenAIAgent
-from agents.random import RandomAgent
 from agents.xai import GrokAgent
 from game.engine import GameEngine
+from rich.console import Console
+from rich.table import Table
 from storage.models import AgentRecord, Leaderboard
 from tournament.runner import TournamentRunner
 
 app = typer.Typer(help="Risk-Bench: LLM benchmark via the game of Risk", no_args_is_help=True)
 console = Console()
+settings = config.Settings()
+
+# Default model per provider, used when 'agent add' omits an explicit --model.
+_DEFAULT_MODELS = {
+    "anthropic": "claude-sonnet-4-6",
+    "openai": "gpt-4o",
+    "xai": "grok-2",
+    "google": "gemini-2.0-flash",
+}
 
 # ---------------------------------------------------------------------------
 # tournament subcommand
@@ -50,7 +57,7 @@ def run_tournament(
             console.print(f"[red]Agent {agent_id!r} not found in registry. Use 'agent add' first.[/red]")
             raise typer.Exit(1)
         agent_record = registered_by_id[agent_id]
-        agent_instance = _build_agent(agent_record=agent_record, color="red")  # color assigned per game
+        agent_instance = _build_agent(agent_record=agent_record)  # color assigned per game by the runner
         agent_configs.append(
             {
                 # identity
@@ -102,7 +109,7 @@ app.add_typer(agent_app, name="agent")
 def agent_add(
     name: Annotated[str, typer.Option("--name")] = "",
     provider: Annotated[str, typer.Option("--provider", help="anthropic|openai|xai|google|random")] = "",
-    model: Annotated[str, typer.Option("--model", help="Model name (uses provider default if omitted)")] = "",
+    model: Annotated[str, typer.Option("--model", help="Model name")] = "",
     agent_id: Annotated[str, typer.Option("--id", help="Custom ID (auto-generated if omitted)")] = "",
 ) -> None:
     """Register a new agent."""

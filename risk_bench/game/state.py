@@ -117,6 +117,10 @@ class GameState:
     # player_color -> mission string (secret)
     missions: dict[str, str] = field(default_factory=dict)
 
+    # draw pile and discard pile of card strings (cards cycle: redeemed -> discard -> reshuffled into deck)
+    deck: list[str] = field(default_factory=list)
+    discard: list[str] = field(default_factory=list)
+
     # append-only chat log
     chat_log: list[ChatEntry] = field(default_factory=list)
 

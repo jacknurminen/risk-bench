@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import storage.store as store
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
-import storage.store as store
 
 app = FastAPI(title="Risk-Bench Dashboard")
 

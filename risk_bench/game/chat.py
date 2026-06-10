@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import random
 
+from game.player import Player
 from game.state import ChatEntry, GameState
 
 # Maximum messages per reaction window before the game continues
@@ -38,20 +39,20 @@ class ChatLog:
 
 def run_reaction_window(
     state: GameState,
-    agents: dict[str, object],
+    players: dict[str, Player],
     event: str,
     inbox_messages: list[ChatEntry],
 ) -> None:
-    """Open a reaction window where each alive agent may say something or pass.
+    """Open a reaction window where each alive player may say something or pass.
 
-    The window closes after all agents pass consecutively or REACTION_WINDOW_CAP
+    The window closes after all players pass consecutively or REACTION_WINDOW_CAP
     messages have been posted.
 
     Args:
         state: Current game state.
-        agents: Mapping of player color to agent instance.
+        players: Mapping of player color to Player instance.
         event: Event label attached to any messages posted in this window.
-        inbox_messages: Additional context messages delivered to agents.
+        inbox_messages: Recent chat context delivered to each player.
     """
     alive = state.alive_players()
     if len(alive) <= 1:
@@ -68,21 +69,17 @@ def run_reaction_window(
         for color in order:
             if consecutive_passes >= len(order) or total_messages >= REACTION_WINDOW_CAP:
                 break
-            agent = agents.get(color)
-            if agent is None:
+            player = players.get(color)
+            if player is None:
                 consecutive_passes += 1
                 continue
 
-            try:
-                messages = agent.get_messages(state, inbox_messages)  # type: ignore[union-attr]
-            except Exception:
-                messages = []
-
+            messages = player.react(state=state, inbox=inbox_messages)
             if messages:
-                for message in messages[:2]:  # at most 2 messages per window turn
-                    text = str(message.get("text", "")).strip()[:500]
-                    if text:
-                        chat.add(from_color=color, text=text, event=event)
+                for text in messages[:2]:  # at most 2 messages per window turn
+                    trimmed = text.strip()[:500]
+                    if trimmed:
+                        chat.add(from_color=color, text=trimmed, event=event)
                         total_messages += 1
                 consecutive_passes = 0
             else:

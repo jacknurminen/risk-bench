@@ -4,10 +4,10 @@ import random
 from datetime import datetime
 from typing import Any
 
+from game.engine import GameEngine
+from game.player import LLMPlayer, RandomPlayer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
-
-from game.engine import GameEngine
 from storage import store
 from storage.models import AgentRecord, ChatRecord, GameRecord
 from tournament.elo import update_elo
@@ -60,15 +60,16 @@ class TournamentRunner:
 
         colors = ["red", "blue", "green", "yellow", "purple", "orange"]
         player_colors = colors[: len(configs)]
-        color_to_agent: dict[str, Any] = {}
+        color_to_player: dict[str, Any] = {}
 
         for agent_config, color in zip(configs, player_colors):
             agent = agent_config["agent"]
-            agent.color = color
-            color_to_agent[color] = agent
+            color_to_player[color] = (
+                RandomPlayer(color=color) if agent is None else LLMPlayer(agent=agent, color=color)
+            )
 
         started_at = datetime.utcnow()
-        engine = GameEngine(agents=color_to_agent, verbose=self.verbose)
+        engine = GameEngine(players=color_to_player, verbose=self.verbose)
         engine.new_game(players=player_colors)
         final_state = engine.run()
         finished_at = datetime.utcnow()
