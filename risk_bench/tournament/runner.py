@@ -3,10 +3,12 @@ import random
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
 from risk_bench.runner.game_runner import GameRecord, GameRunner
+from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
 from risk_bench.tournament.elo import INITIAL_RATING, update_ratings
 from risk_bench.tournament.results import AgentStanding, GameResult, TournamentReport
 
@@ -28,11 +30,13 @@ class TournamentRunner:
     def __init__(
         self,
         participants: dict[str, PlayerFactory],
+        participant_specs: dict[str, str],
         games: int,
         players_per_game: int,
         base_seed: int,
         max_turns: int,
         allow_private_messages: bool,
+        journal_directory: Path | None,
         k_factor: float,
         verbose: bool,
     ) -> None:
@@ -43,6 +47,8 @@ class TournamentRunner:
                 f"Cannot seat {players_per_game} players per game with only {len(participants)} participants."
             )
         self._participants = participants
+        self._participant_specs = participant_specs
+        self._journal_directory = journal_directory
         self._games = games
         self._players_per_game = players_per_game
         self._base_seed = base_seed
@@ -65,8 +71,8 @@ class TournamentRunner:
         results = []
 
         for game_index, seating in enumerate(self._seatings()):
-            record = self._run_one_game(game_index=game_index, seating=seating)
-            results.append(_summarize(record=record))
+            record, journal_path = self._run_one_game(game_index=game_index, seating=seating)
+            results.append(_summarize(record=record, journal_path=journal_path))
 
             game_ratings = {name: ratings[name] for name in seating}
             ratings |= update_ratings(ratings=game_ratings, winner=record.winner, k_factor=self._k_factor)
@@ -104,20 +110,43 @@ class TournamentRunner:
             seatings.append(matchup[rotation:] + matchup[:rotation])
         return seatings
 
-    def _run_one_game(self, game_index: int, seating: tuple[str, ...]) -> GameRecord:
+    def _run_one_game(self, game_index: int, seating: tuple[str, ...]) -> tuple[GameRecord, Path | None]:
         seed = self._base_seed + game_index
         players = {name: self._participants[name](name, random.Random(f"{seed}:{name}")) for name in seating}
+        journal = self._open_journal(game_index=game_index, seed=seed, seating=seating)
         runner = GameRunner(
             players=players,
             seed=seed,
             max_turns=self._max_turns,
             allow_private_messages=self._allow_private_messages,
+            journal=journal,
             verbose=self._verbose,
         )
-        return runner.run()
+        try:
+            return runner.run(), journal.path if journal is not None else None
+        finally:
+            if journal is not None:
+                journal.close()
+
+    def _open_journal(self, game_index: int, seed: int, seating: tuple[str, ...]) -> JournalWriter | None:
+        if self._journal_directory is None:
+            return None
+        started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        path = self._journal_directory / f"{started_at}-game{game_index + 1}-seed{seed}.jsonl"
+        journal = JournalWriter(path=path, append=False)
+        journal.write_header(
+            header=JournalHeader(
+                schema_version=SCHEMA_VERSION,
+                seed=seed,
+                player_specs={name: self._participant_specs[name] for name in seating},
+                max_turns=self._max_turns,
+                allow_private_messages=self._allow_private_messages,
+            )
+        )
+        return journal
 
 
-def _summarize(record: GameRecord) -> GameResult:
+def _summarize(record: GameRecord, journal_path: Path | None) -> GameResult:
     chat_message_counts = Counter(message.sender for message in record.chat)
     return GameResult(
         seed=record.seed,
@@ -127,6 +156,7 @@ def _summarize(record: GameRecord) -> GameResult:
         turn_count=record.turn_count,
         invalid_action_counts=dict(record.invalid_action_counts),
         chat_message_counts={player_id: chat_message_counts[player_id] for player_id in record.player_ids},
+        journal_path=str(journal_path) if journal_path is not None else None,
     )
 
 

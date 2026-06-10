@@ -2,8 +2,7 @@ import pytest
 import typer
 
 from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
-from risk_bench.config import Settings
-from risk_bench.main import _named_factories, _resolve_model
+from risk_bench.main import _named_specs, _resolve_model
 
 
 def test_tier_specs_resolve_to_concrete_model_ids():
@@ -27,7 +26,10 @@ def test_invalid_specs_are_rejected():
 
 
 def test_player_names_use_resolved_model_ids_with_duplicate_suffixes():
-    settings = Settings(anthropic_api_key="test-key")
-    factories = _named_factories(specs=["anthropic:lo", "anthropic:lo", "random"], settings=settings)
+    named = _named_specs(specs=["anthropic:lo", "anthropic:lo", "random"])
 
-    assert list(factories) == ["claude-haiku-4-5", "claude-haiku-4-5#2", "random"]
+    assert named == {
+        "claude-haiku-4-5": "anthropic:lo",
+        "claude-haiku-4-5#2": "anthropic:lo",
+        "random": "random",
+    }

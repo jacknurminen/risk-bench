@@ -18,6 +18,8 @@ def random_player_factory(player_id: PlayerId, rng: random.Random) -> Player:
 def run_tournament(games: int, participant_names: list[str], players_per_game: int) -> TournamentReport:
     runner = TournamentRunner(
         participants={name: random_player_factory for name in participant_names},
+        participant_specs={name: "random" for name in participant_names},
+        journal_directory=None,
         games=games,
         players_per_game=players_per_game,
         base_seed=100,
@@ -76,6 +78,8 @@ def test_too_few_participants_for_the_seat_count_is_rejected():
     with pytest.raises(ValueError, match="Cannot seat"):
         TournamentRunner(
             participants={"alpha": random_player_factory, "beta": random_player_factory},
+            participant_specs={"alpha": "random", "beta": "random"},
+            journal_directory=None,
             games=1,
             players_per_game=3,
             base_seed=0,

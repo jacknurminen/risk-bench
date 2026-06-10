@@ -16,7 +16,7 @@ def random_players(player_ids: list[PlayerId], seed: int) -> dict[PlayerId, Play
 def run_random_game(seed: int, max_turns: int) -> GameRecord:
     players = random_players(player_ids=["alice", "bob", "carla"], seed=seed)
     return GameRunner(
-        players=players, seed=seed, max_turns=max_turns, allow_private_messages=True, verbose=False
+        players=players, seed=seed, max_turns=max_turns, allow_private_messages=True, journal=None, verbose=False
     ).run()
 
 
@@ -79,7 +79,9 @@ def test_negotiation_messages_reach_other_players_views():
     talkers = {
         player_id: ScriptedTalker(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
     }
-    record = GameRunner(players=dict(talkers), seed=3, max_turns=5, allow_private_messages=True, verbose=False).run()
+    record = GameRunner(
+        players=dict(talkers), seed=3, max_turns=5, allow_private_messages=True, journal=None, verbose=False
+    ).run()
 
     assert len(record.chat) > 0
     alice_decision_views = [view for view in talkers["alice"].seen_views if view.visible_chat]
@@ -90,7 +92,9 @@ def test_setup_placements_of_others_are_not_delivered_as_events():
     talkers = {
         player_id: ScriptedTalker(player_id=player_id, rng=random.Random(5)) for player_id in ("alice", "bob", "carla")
     }
-    GameRunner(players=dict(talkers), seed=5, max_turns=3, allow_private_messages=True, verbose=False).run()
+    GameRunner(
+        players=dict(talkers), seed=5, max_turns=3, allow_private_messages=True, journal=None, verbose=False
+    ).run()
 
     for player_id, talker in talkers.items():
         for view in talker.seen_views:
@@ -132,7 +136,7 @@ def whisperers(seed: int) -> dict[PlayerId, Player]:
 
 def test_private_messages_are_dropped_when_not_allowed():
     record = GameRunner(
-        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=False, verbose=False
+        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=False, journal=None, verbose=False
     ).run()
 
     assert record.chat == ()
@@ -140,7 +144,7 @@ def test_private_messages_are_dropped_when_not_allowed():
 
 def test_private_messages_are_kept_when_allowed():
     record = GameRunner(
-        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=True, verbose=False
+        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=True, journal=None, verbose=False
     ).run()
 
     assert len(record.chat) > 0
@@ -149,7 +153,7 @@ def test_private_messages_are_kept_when_allowed():
 
 def test_views_expose_whether_private_messages_are_allowed():
     players = whisperers(seed=9)
-    GameRunner(players=players, seed=9, max_turns=2, allow_private_messages=False, verbose=False).run()
+    GameRunner(players=players, seed=9, max_turns=2, allow_private_messages=False, journal=None, verbose=False).run()
 
     alice = players["alice"]
     assert isinstance(alice, PrivateWhisperer)

@@ -10,6 +10,7 @@ from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
 from risk_bench.players.view import build_player_view
+from risk_bench.runner.journal import JournalWriter, RestoredGame
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,10 @@ class GameRunner:
     are delivered only to the placing player, keeping starting placements blind.
     When ``allow_private_messages`` is off (the table-game default), private
     messages are silently dropped at the transcript boundary.
+
+    When a journal is given, every applied action, its events, and every chat
+    message are appended to it as they happen, so a crashed game can be
+    restored with ``journal.restore_game`` and continued via ``resume``.
     """
 
     def __init__(
@@ -45,33 +50,69 @@ class GameRunner:
         seed: int,
         max_turns: int,
         allow_private_messages: bool,
+        journal: JournalWriter | None,
         verbose: bool,
     ) -> None:
         self._players = players
         self._seed = seed
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
+        self._journal = journal
         self._verbose = verbose
-        # per-game progress, (re)created by run()
+        # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
         self._all_events: list[GameEvent] = []
         self._pending_events: dict[PlayerId, list[GameEvent]] = {}
 
     def run(self) -> GameRecord:
-        """Play the game to completion.
+        """Play the game from setup to completion.
 
         Returns:
             The full record of the finished game.
         """
         rng = random.Random(self._seed)
-        self._transcript = ChatTranscript()
+        self._reset_progress(transcript=ChatTranscript())
+        state = setup_game(player_ids=list(self._players), rng=rng)
+        return self._play(state=state, rng=rng)
+
+    def resume(self, restored: RestoredGame) -> GameRecord:
+        """Continue a game restored from a journal until completion.
+
+        The record returned covers the whole game except per-player
+        invalid-action counts, which restart at zero on resume.
+
+        Args:
+            restored: The journal-replayed game; its player specs must match
+                the players this runner was constructed with.
+
+        Returns:
+            The full record of the finished game.
+
+        Raises:
+            ValueError: If the restored game is already finished or the
+                players do not match.
+        """
+        if restored.is_finished or restored.state.phase is Phase.GAME_OVER:
+            raise ValueError("This game is already finished; nothing to resume.")
+        if list(restored.header.player_specs) != list(self._players):
+            raise ValueError("The journal's players do not match this runner's players.")
+
+        transcript = ChatTranscript()
+        for message in restored.messages:
+            transcript.add(message=message)
+        self._reset_progress(transcript=transcript)
+        return self._play(state=restored.state, rng=restored.rng)
+
+    def _reset_progress(self, transcript: ChatTranscript) -> None:
+        self._transcript = transcript
         self._all_events = []
         self._pending_events = {player_id: [] for player_id in self._players}
 
-        state = setup_game(player_ids=list(self._players), rng=rng)
+    def _play(self, state: GameState, rng: random.Random) -> GameRecord:
         missions = {player_id: player.mission for player_id, player in state.players.items()}
 
-        last_negotiated_turn = 0
+        # on resume this skips re-running the current turn's negotiation round
+        last_negotiated_turn = state.turn_number
         while state.phase is not Phase.GAME_OVER:
             if state.turn_number > self._max_turns:
                 self._record_events(state=state, events=(TurnLimitReached(turn_number=state.turn_number),))
@@ -81,6 +122,8 @@ class GameRunner:
                 self._run_negotiation_round(state=state)
             state = self._decide_and_apply(state=state, rng=rng)
 
+        if self._journal is not None:
+            self._journal.write_result(winner=state.winner, turn_count=state.turn_number)
         return GameRecord(
             seed=self._seed,
             player_ids=tuple(self._players),
@@ -102,6 +145,9 @@ class GameRunner:
         )
         action = self._players[acting_player].decide_action(request)
         result = apply_action(state=state, action=action, rng=rng)
+        if self._journal is not None:
+            self._journal.write_action(player_id=acting_player, action=action)
+            self._journal.write_events(events=result.events)
         self._record_events(state=state, events=result.events)
         return result.state
 
@@ -127,6 +173,8 @@ class GameRunner:
                 if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
                     continue
                 self._transcript.add(message=message)
+                if self._journal is not None:
+                    self._journal.write_message(message=message)
                 if self._verbose:
                     print(message)
 

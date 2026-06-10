@@ -14,6 +14,7 @@ class GameResult(BaseModel):
     turn_count: int
     invalid_action_counts: dict[str, int]
     chat_message_counts: dict[str, int]
+    journal_path: str | None
 
 
 class AgentStanding(BaseModel):
