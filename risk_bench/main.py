@@ -21,6 +21,8 @@ from risk_bench.runner.game_runner import GameRecord, GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, restore_game
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import PlayerFactory, TournamentRunner
+from risk_bench.viewer.html import render_viewer_html
+from risk_bench.viewer.snapshots import build_view_model
 
 app = typer.Typer(help="Risk-Bench: an LLM benchmark based on the board game Risk.")
 console = Console()
@@ -145,6 +147,18 @@ _TIER_MODELS_BY_PROVIDER: dict[str, type[AnthropicModel] | type[GoogleModel] | t
     "google": GoogleModel,
     "openai": OpenAIModel,
 }
+
+
+@app.command()
+def view(
+    journal: Annotated[Path, typer.Argument(help="Game journal (.jsonl) to render.")],
+    output: Annotated[Path | None, typer.Option(help="Output HTML path; defaults to alongside the journal.")] = None,
+) -> None:
+    """Render a game journal into a self-contained HTML replay viewer."""
+    html = render_viewer_html(view_model=build_view_model(journal_path=journal))
+    destination = output if output is not None else journal.with_suffix(".html")
+    destination.write_text(html, encoding="utf-8")
+    console.print(f"Viewer written to {destination}")
 
 
 def _named_specs(specs: list[str]) -> dict[str, str]:

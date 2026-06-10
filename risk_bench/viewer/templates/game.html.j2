@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>risk-bench replay</title>
+<style>
+  :root { --bg:#14151a; --panel:#1d1f26; --line:#2c2f3a; --text:#d8dae2; --dim:#8b8e9c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.45 system-ui, sans-serif; }
+  .layout { display:grid; grid-template-columns: 1fr 340px; grid-template-rows: auto auto 260px; gap:10px;
+            padding:10px; height:100vh; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; }
+  #board { grid-row: 1; }
+  #side  { grid-row: 1 / span 2; grid-column: 2; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
+  #controls { grid-row: 2; grid-column: 1; display:flex; align-items:center; gap:8px; }
+  #log { grid-row: 3; grid-column: 1 / span 2; }
+  h3 { margin:2px 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  .continent { margin-bottom:10px; }
+  .continent .cname { color:var(--dim); font-size:11px; margin-bottom:4px; }
+  .tiles { display:flex; flex-wrap:wrap; gap:4px; }
+  .tile { width:108px; border-radius:5px; padding:4px 6px; border:1px solid var(--line); }
+  .tile .tname { font-size:10px; color:#fff; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tile .armies { font-size:15px; font-weight:700; color:#fff; }
+  button { background:#2a2d38; color:var(--text); border:1px solid var(--line); border-radius:5px;
+           padding:4px 10px; cursor:pointer; font-size:13px; }
+  button:hover { background:#343847; }
+  input[type=range] { flex:1; }
+  #status { min-width:220px; color:var(--dim); }
+  .player { border:1px solid var(--line); border-radius:6px; padding:6px 8px; margin-bottom:6px; }
+  .player .pname { font-weight:700; }
+  .player .mission { color:var(--dim); font-size:11px; margin-top:2px; }
+  .player .stats { font-size:11px; margin-top:2px; }
+  .player.dead { opacity:.45; }
+  .player.acting { outline:2px solid #ffffff33; }
+  #chat { flex:1; overflow:auto; }
+  .msg { margin-bottom:6px; padding:5px 7px; border-radius:6px; background:#23252e; }
+  .msg .meta { font-size:10px; color:var(--dim); }
+  .msg.future { opacity:.3; }
+  .msg .priv { color:#e0b34c; }
+  .entry { padding:2px 6px; border-radius:4px; cursor:pointer; }
+  .entry:hover { background:#262935; }
+  .entry.current { background:#2e3342; }
+  .entry .ev { color:var(--dim); padding-left:14px; }
+  .banner { padding:4px 8px; border-radius:6px; background:#23252e; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div id="board" class="panel"></div>
+  <div id="side">
+    <div class="panel" id="playersPanel"><h3>Players</h3><div id="players"></div></div>
+    <div class="panel" id="chat"><h3>Chat</h3><div id="messages"></div></div>
+  </div>
+  <div id="controls" class="panel">
+    <button id="first">⏮</button>
+    <button id="prevTurn">«turn</button>
+    <button id="prev">◀</button>
+    <button id="play">▶ play</button>
+    <button id="next">▶</button>
+    <button id="nextTurn">turn»</button>
+    <button id="last">⏭</button>
+    <input type="range" id="slider" min="0" value="0">
+    <span id="status"></span>
+  </div>
+  <div id="log" class="panel"><h3>Event log</h3><div id="entries"></div></div>
+</div>
+<script>
+const GAME = {{ game_json }};
+const COLORS = ["#c0504d","#4f81bd","#9bbb59","#8064a2","#f79646","#4bacc6"];
+const steps = GAME.steps;
+let index = 0;
+let timer = null;
+
+const el = id => document.getElementById(id);
+const pretty = name => name.replaceAll("_", " ");
+
+function buildBoard() {
+  const board = el("board");
+  for (const continent of GAME.continents) {
+    const section = document.createElement("div");
+    section.className = "continent";
+    section.innerHTML = `<div class="cname">${pretty(continent.name)} (+${continent.bonus})</div>`;
+    const tiles = document.createElement("div");
+    tiles.className = "tiles";
+    for (const territory of continent.territories) {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+      tile.id = "t-" + territory;
+      tile.innerHTML = `<div class="tname">${pretty(territory)}</div><div class="armies"></div>`;
+      tiles.appendChild(tile);
+    }
+    section.appendChild(tiles);
+    board.appendChild(section);
+  }
+}
+
+function buildPlayers() {
+  const container = el("players");
+  GAME.players.forEach((player, seat) => {
+    const card = document.createElement("div");
+    card.className = "player";
+    card.id = "p-" + seat;
+    card.innerHTML = `<div class="pname" style="color:${COLORS[seat]}">${player.name}</div>
+      <div class="mission">${player.mission}</div><div class="stats"></div>`;
+    container.appendChild(card);
+  });
+  if (GAME.result) {
+    const banner = document.createElement("div");
+    banner.className = "banner";
+    banner.textContent = GAME.result.winner
+      ? `Winner: ${GAME.result.winner} (turn ${GAME.result.turn_count})`
+      : `Draw at the turn limit (turn ${GAME.result.turn_count})`;
+    container.prepend(banner);
+  }
+}
+
+function buildChat() {
+  const container = el("messages");
+  if (!GAME.messages.length) { container.innerHTML = '<span style="color:var(--dim)">No messages.</span>'; return; }
+  GAME.messages.forEach((message, i) => {
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.id = "m-" + i;
+    const channel = message.visibility === "private"
+      ? `<span class="priv">🔒 to ${message.recipient}</span>` : "to everyone";
+    div.innerHTML = `<div class="meta">turn ${message.turn_number} — <b>${message.sender}</b> ${channel}</div>
+      <div>${message.text}</div>`;
+    container.appendChild(div);
+  });
+}
+
+function buildLog() {
+  const container = el("entries");
+  steps.forEach((step, i) => {
+    const entry = document.createElement("div");
+    entry.className = "entry";
+    entry.id = "e-" + i;
+    const events = step.events.map(text => `<div class="ev">${text}</div>`).join("");
+    entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : step.action}</div>${events}`;
+    entry.onclick = () => show(i);
+    container.appendChild(entry);
+  });
+}
+
+function show(newIndex) {
+  index = Math.max(0, Math.min(steps.length - 1, newIndex));
+  const step = steps[index];
+  for (const [territory, [seat, armies]] of Object.entries(step.board)) {
+    const tile = el("t-" + territory);
+    tile.style.background = COLORS[seat] + "55";
+    tile.style.borderColor = COLORS[seat];
+    tile.querySelector(".armies").textContent = armies;
+  }
+  step.players.forEach((stats, seat) => {
+    const card = el("p-" + seat);
+    card.classList.toggle("dead", stats.eliminated);
+    card.classList.toggle("acting", GAME.players[seat].name === step.current_player);
+    card.querySelector(".stats").textContent =
+      `${stats.territories} territories · ${stats.armies} armies · ${stats.cards} cards`;
+  });
+  GAME.messages.forEach((message, i) => el("m-" + i).classList.toggle("future", message.step > index));
+  document.querySelectorAll(".entry.current").forEach(entry => entry.classList.remove("current"));
+  const entry = el("e-" + index);
+  entry.classList.add("current");
+  entry.scrollIntoView({ block: "nearest" });
+  el("slider").value = index;
+  el("status").textContent = `step ${index}/${steps.length - 1} — turn ${step.turn}, ${pretty(step.phase)}`;
+}
+
+function stopPlaying() { clearInterval(timer); timer = null; el("play").textContent = "▶ play"; }
+function turnBoundary(direction) {
+  const turn = steps[index].turn;
+  let i = index;
+  while (i + direction >= 0 && i + direction < steps.length && steps[i = i + direction].turn === turn);
+  return i;
+}
+
+el("first").onclick = () => show(0);
+el("last").onclick = () => show(steps.length - 1);
+el("prev").onclick = () => show(index - 1);
+el("next").onclick = () => show(index + 1);
+el("prevTurn").onclick = () => show(turnBoundary(-1));
+el("nextTurn").onclick = () => show(turnBoundary(1));
+el("slider").max = steps.length - 1;
+el("slider").oninput = event => show(Number(event.target.value));
+el("play").onclick = () => {
+  if (timer) { stopPlaying(); return; }
+  el("play").textContent = "⏸ pause";
+  timer = setInterval(() => { if (index >= steps.length - 1) stopPlaying(); else show(index + 1); }, 250);
+};
+document.addEventListener("keydown", event => {
+  if (event.key === "ArrowLeft") show(index - 1);
+  if (event.key === "ArrowRight") show(index + 1);
+});
+
+buildBoard(); buildPlayers(); buildChat(); buildLog(); show(0);
+</script>
+</body>
+</html>

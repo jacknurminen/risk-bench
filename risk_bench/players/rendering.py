@@ -121,7 +121,7 @@ _MAX_CHAT_MESSAGES_SHOWN: Final[int] = 40
 def _render_events(view: PlayerView) -> str:
     if not view.recent_events:
         return ""
-    lines = "\n".join(f"- {_narrate_event(event=event)}" for event in view.recent_events)
+    lines = "\n".join(f"- {narrate_event(event=event)}" for event in view.recent_events)
     return f"Since your last decision:\n{lines}"
 
 
@@ -192,7 +192,15 @@ def _phase_instruction(view: PlayerView) -> str:
             return "The game is over."
 
 
-def _narrate_event(event: GameEvent) -> str:
+def narrate_event(event: GameEvent) -> str:
+    """Render one game event as a human-readable sentence.
+
+    Args:
+        event: The event to narrate.
+
+    Returns:
+        A single-sentence description, used in prompts and the replay viewer.
+    """
     match event:
         case TurnStarted(player_id=player_id, turn_number=turn_number):
             return f"Turn {turn_number} started for {player_id}."
