@@ -5,6 +5,7 @@ from typing import Any
 import jinja2
 
 _TEMPLATE_PATH = Path(__file__).parent / "templates" / "game.html.j2"
+_BOARD_SVG_PATH = Path(__file__).parent / "templates" / "board.svg"
 
 
 def render_viewer_html(view_model: dict[str, Any]) -> str:
@@ -14,7 +15,11 @@ def render_viewer_html(view_model: dict[str, Any]) -> str:
         view_model: The dict produced by ``snapshots.build_view_model``.
 
     Returns:
-        A complete HTML document with the game data embedded; no server needed.
+        A complete HTML document with the game data and board map embedded;
+        no server needed.
     """
     template = jinja2.Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
-    return template.render(game_json=json.dumps(view_model))
+    return template.render(
+        game_json=json.dumps(view_model),
+        board_svg=_BOARD_SVG_PATH.read_text(encoding="utf-8"),
+    )

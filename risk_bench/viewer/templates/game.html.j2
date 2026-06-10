@@ -15,12 +15,11 @@
   #controls { grid-row: 2; grid-column: 1; display:flex; align-items:center; gap:8px; }
   #log { grid-row: 3; grid-column: 1 / span 2; }
   h3 { margin:2px 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-  .continent { margin-bottom:10px; }
-  .continent .cname { color:var(--dim); font-size:11px; margin-bottom:4px; }
-  .tiles { display:flex; flex-wrap:wrap; gap:4px; }
-  .tile { width:108px; border-radius:5px; padding:4px 6px; border:1px solid var(--line); }
-  .tile .tname { font-size:10px; color:#fff; opacity:.85; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .tile .armies { font-size:15px; font-weight:700; color:#fff; }
+  #board svg { width:100%; height:auto; background:#b9cdd9; border-radius:6px; }
+  #board .attribution { font-size:10px; color:var(--dim); margin-top:4px; }
+  #board .attribution a { color:var(--dim); }
+  .acount { font:700 11px system-ui, sans-serif; text-anchor:middle; dominant-baseline:middle;
+            fill:#101010; paint-order:stroke; stroke:#ffffffd0; stroke-width:2.5px; pointer-events:none; }
   button { background:#2a2d38; color:var(--text); border:1px solid var(--line); border-radius:5px;
            padding:4px 10px; cursor:pointer; font-size:13px; }
   button:hover { background:#343847; }
@@ -46,7 +45,11 @@
 </head>
 <body>
 <div class="layout">
-  <div id="board" class="panel"></div>
+  <div id="board" class="panel">
+    {{ board_svg }}
+    <div class="attribution">Map: <a href="https://commons.wikimedia.org/wiki/File:Risk_board.svg">Risk board</a>
+      by Gr0gmint, Wikimedia Commons, <a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a></div>
+  </div>
   <div id="side">
     <div class="panel" id="playersPanel"><h3>Players</h3><div id="players"></div></div>
     <div class="panel" id="chat"><h3>Chat</h3><div id="messages"></div></div>
@@ -74,23 +77,22 @@ let timer = null;
 const el = id => document.getElementById(id);
 const pretty = name => name.replaceAll("_", " ");
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const territoryShapes = {};
+
 function buildBoard() {
-  const board = el("board");
-  for (const continent of GAME.continents) {
-    const section = document.createElement("div");
-    section.className = "continent";
-    section.innerHTML = `<div class="cname">${pretty(continent.name)} (+${continent.bonus})</div>`;
-    const tiles = document.createElement("div");
-    tiles.className = "tiles";
-    for (const territory of continent.territories) {
-      const tile = document.createElement("div");
-      tile.className = "tile";
-      tile.id = "t-" + territory;
-      tile.innerHTML = `<div class="tname">${pretty(territory)}</div><div class="armies"></div>`;
-      tiles.appendChild(tile);
-    }
-    section.appendChild(tiles);
-    board.appendChild(section);
+  const svg = document.querySelector("#board svg");
+  for (const territory of Object.keys(steps[0].board)) {
+    const path = svg.getElementById(territory);
+    const box = path.getBBox();
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("x", box.x + box.width / 2);
+    label.setAttribute("y", box.y + box.height / 2);
+    label.setAttribute("class", "acount");
+    svg.appendChild(label);
+    const tooltip = document.createElementNS(SVG_NS, "title");
+    path.appendChild(tooltip);
+    territoryShapes[territory] = { path, label, tooltip };
   }
 }
 
@@ -146,10 +148,11 @@ function show(newIndex) {
   index = Math.max(0, Math.min(steps.length - 1, newIndex));
   const step = steps[index];
   for (const [territory, [seat, armies]] of Object.entries(step.board)) {
-    const tile = el("t-" + territory);
-    tile.style.background = COLORS[seat] + "55";
-    tile.style.borderColor = COLORS[seat];
-    tile.querySelector(".armies").textContent = armies;
+    const shape = territoryShapes[territory];
+    shape.path.style.fill = COLORS[seat];
+    shape.path.style.fillOpacity = "0.78";
+    shape.label.textContent = armies;
+    shape.tooltip.textContent = `${pretty(territory)} — ${GAME.players[seat].name}, ${armies} armies`;
   }
   step.players.forEach((stats, seat) => {
     const card = el("p-" + seat);

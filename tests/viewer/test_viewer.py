@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from risk_bench.game.types import Territory
 from risk_bench.viewer.html import render_viewer_html
 from risk_bench.viewer.snapshots import build_view_model
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
@@ -43,6 +44,13 @@ def test_rendered_html_is_self_contained(tmp_path: Path):
 
     assert html.startswith("<!DOCTYPE html>")
     assert "const GAME =" in html
-    assert "alaska" in html
     assert model["players"][0]["name"] in html
     assert "<script src=" not in html  # no external dependencies
+
+
+def test_rendered_html_embeds_the_board_map_with_every_territory(tmp_path: Path):
+    html = render_viewer_html(view_model=build_view_model(journal_path=journal_with_game(tmp_path=tmp_path)))
+
+    assert "<svg" in html
+    assert all(f'id="{territory}"' in html for territory in Territory)
+    assert "CC BY-SA 3.0" in html  # the map's attribution requirement
