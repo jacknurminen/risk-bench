@@ -9,8 +9,8 @@ from rich.table import Table
 from risk_bench.agents.anthropic import AnthropicAgent
 from risk_bench.agents.base import Agent
 from risk_bench.agents.google import GeminiAgent
+from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
 from risk_bench.agents.openai import OpenAIAgent
-from risk_bench.agents.xai import GrokAgent
 from risk_bench.config import Settings, load_settings
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
@@ -23,7 +23,10 @@ from risk_bench.tournament.runner import PlayerFactory, TournamentRunner
 app = typer.Typer(help="Risk-Bench: an LLM benchmark based on the board game Risk.")
 console = Console()
 
-MODELS_HELP = "Players as provider:model specs (anthropic/openai/google/xai), or 'random' for the baseline."
+MODELS_HELP = (
+    "Players as provider:tier specs like 'anthropic:hi' (providers: anthropic/openai/google, tiers: lo/mid/hi), "
+    "provider:model for an explicit model id, or 'random' for the baseline."
+)
 
 
 @app.command()
@@ -77,10 +80,17 @@ def tournament(
     console.print(f"\nFull report written to {report_path}")
 
 
+_TIER_MODELS_BY_PROVIDER: dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]] = {
+    "anthropic": AnthropicModel,
+    "google": GoogleModel,
+    "openai": OpenAIModel,
+}
+
+
 def _named_factories(specs: list[str], settings: Settings) -> dict[str, PlayerFactory]:
     factories = {}
     for spec in specs:
-        base_name = spec.rsplit(":", maxsplit=1)[-1]
+        base_name = "random" if spec == "random" else _resolve_model(spec=spec)
         name = base_name
         suffix = 2
         while name in factories:
@@ -101,10 +111,21 @@ def _player_factory(spec: str, settings: Settings) -> PlayerFactory:
     return create_llm_player
 
 
+def _resolve_model(spec: str) -> str:
+    provider, _, model_or_tier = spec.partition(":")
+    if not model_or_tier:
+        raise typer.BadParameter(f"'{spec}' is not 'random' or a provider:tier / provider:model spec.")
+    tier_models = _TIER_MODELS_BY_PROVIDER.get(provider)
+    if tier_models is None:
+        raise typer.BadParameter(f"Unknown provider '{provider}'; use anthropic, openai, or google.")
+    if model_or_tier.upper() in tier_models.__members__:
+        return tier_models[model_or_tier.upper()].value
+    return model_or_tier
+
+
 def _build_agent(spec: str, settings: Settings) -> Agent:
-    provider, _, model = spec.partition(":")
-    if not model:
-        raise typer.BadParameter(f"'{spec}' is not 'random' or a provider:model spec.")
+    provider = spec.partition(":")[0]
+    model = _resolve_model(spec=spec)
     api_key = _require_api_key(provider=provider, settings=settings)
     match provider:
         case "anthropic":
@@ -113,10 +134,8 @@ def _build_agent(spec: str, settings: Settings) -> Agent:
             return OpenAIAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
         case "google":
             return GeminiAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
-        case "xai":
-            return GrokAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
         case unknown_provider:
-            raise typer.BadParameter(f"Unknown provider '{unknown_provider}'; use anthropic/openai/google/xai.")
+            raise typer.BadParameter(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
 
 
 def _require_api_key(provider: str, settings: Settings) -> str:
@@ -124,7 +143,6 @@ def _require_api_key(provider: str, settings: Settings) -> str:
         "anthropic": settings.anthropic_api_key,
         "openai": settings.openai_api_key,
         "google": settings.google_api_key,
-        "xai": settings.xai_api_key,
     }
     api_key = keys_by_provider.get(provider)
     if api_key is None:
