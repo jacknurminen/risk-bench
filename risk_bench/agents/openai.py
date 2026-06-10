@@ -28,7 +28,8 @@ class OpenAIAgent:
         """
         response = self._client.chat.completions.create(
             model=self._model,
-            max_tokens=self._max_tokens,
+            # newer OpenAI models reject 'max_tokens' in favor of 'max_completion_tokens'
+            max_completion_tokens=self._max_tokens,
             messages=[_to_openai_message(message=message) for message in messages],
             tools=[_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit,
         )
