@@ -4,7 +4,8 @@ import json
 
 import openai
 import openai.types.chat
-from agents.base import Message, Response, Tool, ToolCall
+
+from risk_bench.agents.base import Message, Response, Tool, ToolCall
 
 
 class OpenAIAgent:

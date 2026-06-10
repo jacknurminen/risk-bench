@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from agents.base import Message, Response, Tool, ToolCall
 from google import genai
 from google.genai import types
+
+from risk_bench.agents.base import Message, Response, Tool, ToolCall
 
 
 class GeminiAgent:
@@ -76,9 +77,9 @@ def _parse_response(response: types.GenerateContentResponse) -> Response:
     text_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     for part in _response_parts(response=response):
-        if part.function_call and part.function_call.name:
-            call = part.function_call
-            tool_calls.append(ToolCall(id=call.name, name=call.name, arguments=dict(call.args or {})))
+        call = part.function_call
+        if call and (call_name := call.name):
+            tool_calls.append(ToolCall(id=call_name, name=call_name, arguments=dict(call.args or {})))
         elif part.text:
             text_parts.append(part.text)
 

@@ -4,9 +4,10 @@ import json
 
 import xai_sdk
 import xai_sdk.chat
-from agents.base import Message, Response, Tool, ToolCall
 from xai_sdk.proto import chat_pb2
 from xai_sdk.proto.v5 import chat_pb2 as chat_pb2_v5
+
+from risk_bench.agents.base import Message, Response, Tool, ToolCall
 
 
 class GrokAgent:

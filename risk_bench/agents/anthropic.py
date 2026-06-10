@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Literal
 
 import anthropic
-from agents.base import Message, Response, Tool, ToolCall
+
+from risk_bench.agents.base import Message, Response, Tool, ToolCall
 
 
 class AnthropicAgent:
