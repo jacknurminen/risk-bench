@@ -410,8 +410,6 @@ _CONTINENT_DATA: list[ContinentInfo] = [
 
 
 class Board:
-    """Immutable board loaded once at startup."""
-
     def __init__(self) -> None:
         self.territories: dict[Territory, TerritoryNode] = {node.name: node for node in _TERRITORY_DATA}
         self.continents: dict[Continent, ContinentInfo] = {info.name: info for info in _CONTINENT_DATA}
@@ -486,7 +484,3 @@ class Board:
             owners = {owner_map[territory] for territory in continent.territories if territory in owner_map}
             result[continent_name] = owners.pop() if len(owners) == 1 else None
         return result
-
-
-# Module-level singleton
-BOARD = Board()
