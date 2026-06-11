@@ -109,6 +109,7 @@
 <script>
 const GAME = {{ game_json }};
 const LIVE = {{ live_json }};
+const POLL_URL = {{ poll_url_json }};
 const COLORS = ["#c0504d","#4f81bd","#9bbb59","#8064a2","#f79646","#4bacc6"];
 const steps = GAME.steps;
 let index = 0;
@@ -366,7 +367,7 @@ el("thoughtsToggle").onchange = event => document.body.classList.toggle("showTho
 
 let lastFingerprint = null;
 async function refreshFromJournal() {
-  const response = await fetch("game.json", { cache: "no-store" });
+  const response = await fetch(POLL_URL, { cache: "no-store" });
   if (!response.ok) return;
   const updated = await response.json();
   // the last known step can gain events after the fact (the journal writes them

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>risk-bench</title>
+<style>
+  :root { --bg:#14151a; --panel:#1d1f26; --line:#2c2f3a; --text:#d8dae2; --dim:#8b8e9c; --accent:#d8b66a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h1 .dice { color: var(--accent); }
+  .subtitle { color: var(--dim); margin-bottom: 24px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 28px 0 10px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--dim); font-weight: 500; font-size: 12px; padding: 6px 10px;
+       border-bottom: 1px solid var(--line); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  tr.game { cursor: pointer; }
+  tr.game:hover td { background: #23252e; }
+  tr:last-child td { border-bottom: none; }
+  .status { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
+  .status.live { background: #2c4a2e; color: #9fdca4; }
+  .status.done { background: #2a2d38; color: var(--dim); }
+  .winner { color: #9fdca4; }
+  .mic { color: var(--accent); }
+  .empty { color: var(--dim); padding: 12px 10px; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  label { color: var(--dim); font-size: 12px; }
+  select, input[type=number], input[type=text] {
+    background: #2a2d38; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 6px 8px; font-size: 13px; }
+  button { background: var(--accent); color: #14151a; border: none; border-radius: 6px;
+           padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  button:hover { filter: brightness(1.1); }
+  button.subtle { background: #2a2d38; color: var(--text); font-weight: 400; }
+  #launchError { color: #e07a7a; margin-top: 8px; white-space: pre-wrap; }
+  .playerRow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dice">⚂</span> risk-bench</h1>
+  <div class="subtitle">LLMs playing Risk: strategy, diplomacy, betrayal — measured.</div>
+
+  <h2>New game</h2>
+  <div class="panel">
+    <div id="playerRows"></div>
+    <div class="row">
+      <button class="subtle" id="addPlayer">+ add player</button>
+    </div>
+    <div class="row">
+      <label>commentator <select id="commentator"></select></label>
+      <label>seed <input type="number" id="seed" value="0" style="width:90px"></label>
+      <label>max turns <input type="number" id="maxTurns" placeholder="default" style="width:90px"></label>
+      <button id="launch">▶ start game</button>
+    </div>
+    <div id="launchError"></div>
+  </div>
+
+  <h2>Games</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>started</th><th>players</th><th>status</th><th>winner</th><th>turns</th></tr></thead>
+      <tbody id="games"><tr><td class="empty" colspan="5">Loading…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+<script>
+const el = id => document.getElementById(id);
+let specOptions = [];
+
+async function loadModels() {
+  const catalog = await (await fetch("/api/models")).json();
+  specOptions = [catalog.baseline];
+  for (const [provider, tiers] of Object.entries(catalog.tiers_by_provider)) {
+    for (const [tier, modelId] of Object.entries(tiers)) {
+      specOptions.push(`${provider}:${tier}`);
+    }
+  }
+  el("commentator").innerHTML = '<option value="">none</option>' +
+    specOptions.filter(spec => spec !== "random")
+      .map(spec => `<option value="${spec}">${spec}</option>`).join("");
+  addPlayerRow(); addPlayerRow(); addPlayerRow();
+}
+
+function addPlayerRow() {
+  const rows = el("playerRows");
+  if (rows.children.length >= 6) return;
+  const row = document.createElement("div");
+  row.className = "playerRow";
+  row.innerHTML = `<span class="seat">seat ${rows.children.length + 1}</span>
+    <select class="playerSpec">${specOptions.map(spec => `<option value="${spec}">${spec}</option>`).join("")}</select>
+    <input type="text" class="customSpec" placeholder="or custom provider:model" style="flex:1">
+    <button class="subtle remove">✕</button>`;
+  row.querySelector(".remove").onclick = () => { if (rows.children.length > 3) { row.remove(); renumber(); } };
+  rows.appendChild(row);
+}
+
+function renumber() {
+  document.querySelectorAll("#playerRows .seat")
+    .forEach((seat, i) => seat.textContent = `seat ${i + 1}`);
+}
+
+async function launch() {
+  el("launchError").textContent = "";
+  const players = [...document.querySelectorAll(".playerRow")].map(row =>
+    row.querySelector(".customSpec").value.trim() || row.querySelector(".playerSpec").value);
+  const body = {
+    players,
+    seed: Number(el("seed").value) || 0,
+    commentator: el("commentator").value || null,
+    max_turns: el("maxTurns").value ? Number(el("maxTurns").value) : null,
+  };
+  el("launch").disabled = true;
+  el("launch").textContent = "starting…";
+  try {
+    const response = await fetch("/api/games", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail ?? JSON.stringify(payload));
+    location.href = `/games/${payload.id}`;
+  } catch (error) {
+    el("launchError").textContent = String(error.message ?? error);
+    el("launch").disabled = false;
+    el("launch").textContent = "▶ start game";
+  }
+}
+
+async function loadGames() {
+  const payload = await (await fetch("/api/games")).json();
+  const body = el("games");
+  if (!payload.games.length) {
+    body.innerHTML = '<tr><td class="empty" colspan="5">No games yet — start one above.</td></tr>';
+    return;
+  }
+  body.innerHTML = payload.games.map(game => {
+    const started = new Date(game.modified_at).toLocaleString();
+    const status = game.finished
+      ? '<span class="status done">finished</span>'
+      : '<span class="status live">● running</span>';
+    const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
+    const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
+    return `<tr class="game" onclick="location.href='/games/${game.id}'">
+      <td>${started}</td><td>${game.players.join(", ")}${mic}</td>
+      <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td></tr>`;
+  }).join("");
+}
+
+el("addPlayer").onclick = addPlayerRow;
+el("launch").onclick = launch;
+loadModels(); loadGames();
+setInterval(loadGames, 5000);
+</script>
+</body>
+</html>

@@ -4,26 +4,19 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import uvicorn
 from rich.console import Console
 from rich.table import Table
 
-from risk_bench.agents.anthropic import AnthropicAgent
-from risk_bench.agents.base import Agent
-from risk_bench.agents.google import GeminiAgent
-from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
-from risk_bench.agents.openai import OpenAIAgent
+from risk_bench import specs
+from risk_bench.api.app import create_app
 from risk_bench.config import Settings, load_settings
-from risk_bench.game.types import PlayerId
-from risk_bench.players.base import Player
-from risk_bench.players.llm import LLMPlayer
-from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.commentary import Commentator
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, restore_game
 from risk_bench.tournament.results import TournamentReport, write_report
-from risk_bench.tournament.runner import PlayerFactory, TournamentRunner
+from risk_bench.tournament.runner import TournamentRunner
 from risk_bench.viewer.html import render_viewer_html
-from risk_bench.viewer.server import create_viewer_server
 from risk_bench.viewer.snapshots import build_view_model
 
 app = typer.Typer(help="Risk-Bench: an LLM benchmark based on the board game Risk.")
@@ -44,23 +37,32 @@ def game(
         str | None,
         typer.Option(help="Model spec for an omniscient commentator that comments after each turn."),
     ] = None,
+    journal: Annotated[Path | None, typer.Option(help="Journal file path; defaults to a timestamped name.")] = None,
+    max_turns: Annotated[int | None, typer.Option(help="Turn limit override; defaults to settings.")] = None,
     verbose: Annotated[bool, typer.Option(help="Print events and chat as they happen.")] = True,
 ) -> None:
     """Run a single game between the given players (or resume a crashed one) and print the outcome."""
     settings = load_settings()
-    commentator_instance = (
-        Commentator(agent=_build_agent(spec=commentator, settings=settings)) if commentator is not None else None
-    )
-    if resume is not None:
-        record, journal_path = _resume_game(
-            journal_file=resume, settings=settings, commentator=commentator_instance, verbose=verbose
-        )
-    elif models:
-        record, journal_path = _run_new_game(
-            models=models, seed=seed, settings=settings, commentator=commentator_instance, verbose=verbose
-        )
-    else:
-        raise typer.BadParameter("Provide player specs, or --resume with a journal file.")
+    try:
+        commentator_instance = specs.build_commentator(spec=commentator, settings=settings)
+        if resume is not None:
+            record, journal_path = _resume_game(
+                journal_file=resume, settings=settings, commentator=commentator_instance, verbose=verbose
+            )
+        elif models:
+            record, journal_path = _run_new_game(
+                models=models,
+                seed=seed,
+                settings=settings,
+                commentator=commentator_instance,
+                journal_path=journal,
+                max_turns=max_turns if max_turns is not None else settings.max_turns,
+                verbose=verbose,
+            )
+        else:
+            raise typer.BadParameter("Provide player specs, or --resume with a journal file.")
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
 
     outcome = f"[bold green]{record.winner} wins[/bold green]" if record.winner else "[bold yellow]draw[/bold yellow]"
     console.print(f"\nGame over after {record.turn_count} turns: {outcome}")
@@ -70,22 +72,29 @@ def game(
 
 
 def _run_new_game(
-    models: list[str], seed: int, settings: Settings, commentator: Commentator | None, verbose: bool
+    models: list[str],
+    seed: int,
+    settings: Settings,
+    commentator: Commentator | None,
+    journal_path: Path | None,
+    max_turns: int,
+    verbose: bool,
 ) -> tuple[GameRecord, Path]:
-    specs = _named_specs(specs=models)
+    player_specs = specs.named_specs(specs=models)
     players = {
-        name: _player_factory(spec=spec, settings=settings)(name, random.Random(f"{seed}:{name}"))
-        for name, spec in specs.items()
+        name: specs.player_factory(spec=spec, settings=settings)(name, random.Random(f"{seed}:{name}"))
+        for name, spec in player_specs.items()
     }
-    started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
-    journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}.jsonl"
+    if journal_path is None:
+        started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
+        journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}.jsonl"
     journal = JournalWriter(path=journal_path, append=False)
     journal.write_header(
         header=JournalHeader(
             schema_version=SCHEMA_VERSION,
             seed=seed,
-            player_specs=specs,
-            max_turns=settings.max_turns,
+            player_specs=player_specs,
+            max_turns=max_turns,
             allow_private_messages=settings.allow_private_messages,
             max_negotiation_rounds=settings.max_negotiation_rounds,
         )
@@ -93,7 +102,7 @@ def _run_new_game(
     runner = GameRunner(
         players=players,
         seed=seed,
-        max_turns=settings.max_turns,
+        max_turns=max_turns,
         allow_private_messages=settings.allow_private_messages,
         max_negotiation_rounds=settings.max_negotiation_rounds,
         commentator=commentator,
@@ -114,7 +123,7 @@ def _resume_game(
         raise typer.BadParameter(f"{journal_file} records a finished game; nothing to resume.")
     header = restored.header
     players = {
-        name: _player_factory(spec=spec, settings=settings)(name, random.Random(f"{header.seed}:{name}:resume"))
+        name: specs.player_factory(spec=spec, settings=settings)(name, random.Random(f"{header.seed}:{name}:resume"))
         for name, spec in header.player_specs.items()
     }
     journal = JournalWriter(path=journal_file, append=True)
@@ -145,10 +154,16 @@ def tournament(
 ) -> None:
     """Run a tournament, print final standings, and write the JSON report."""
     settings = load_settings()
-    specs = _named_specs(specs=models)
+    try:
+        player_specs = specs.named_specs(specs=models)
+        participants = {
+            name: specs.player_factory(spec=spec, settings=settings) for name, spec in player_specs.items()
+        }
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
     runner = TournamentRunner(
-        participants={name: _player_factory(spec=spec, settings=settings) for name, spec in specs.items()},
-        participant_specs=specs,
+        participants=participants,
+        participant_specs=player_specs,
         journal_directory=settings.output_directory / "games",
         games=games,
         players_per_game=players_per_game,
@@ -165,96 +180,28 @@ def tournament(
     console.print(f"\nFull report written to {report_path}")
 
 
-_TIER_MODELS_BY_PROVIDER: dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]] = {
-    "anthropic": AnthropicModel,
-    "google": GoogleModel,
-    "openai": OpenAIModel,
-}
-
-
 @app.command()
 def view(
     journal: Annotated[Path, typer.Argument(help="Game journal (.jsonl) to render.")],
     output: Annotated[Path | None, typer.Option(help="Output HTML path; defaults to alongside the journal.")] = None,
-    follow: Annotated[bool, typer.Option(help="Serve a live viewer that follows the journal as it grows.")] = False,
-    port: Annotated[int, typer.Option(help="Port for --follow.")] = 8420,
 ) -> None:
-    """Render a game journal into a self-contained HTML replay viewer, or follow it live."""
-    if follow:
-        server = create_viewer_server(journal_path=journal, host="127.0.0.1", port=port)
-        console.print(f"Following {journal} at [bold]http://127.0.0.1:{port}[/bold] — Ctrl+C to stop.")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            server.server_close()
-        return
-    html = render_viewer_html(view_model=build_view_model(journal_path=journal), live=False)
+    """Render a game journal into a self-contained HTML replay viewer."""
+    html = render_viewer_html(view_model=build_view_model(journal_path=journal))
     destination = output if output is not None else journal.with_suffix(".html")
     destination.write_text(html, encoding="utf-8")
     console.print(f"Viewer written to {destination}")
 
 
-def _named_specs(specs: list[str]) -> dict[str, str]:
-    named = {}
-    for spec in specs:
-        base_name = "random" if spec == "random" else _resolve_model(spec=spec)
-        name = base_name
-        suffix = 2
-        while name in named:
-            name = f"{base_name}#{suffix}"
-            suffix += 1
-        named[name] = spec
-    return named
-
-
-def _player_factory(spec: str, settings: Settings) -> PlayerFactory:
-    if spec == "random":
-        return lambda player_id, rng: RandomPlayer(player_id=player_id, rng=rng)
-    agent = _build_agent(spec=spec, settings=settings)
-
-    def create_llm_player(player_id: PlayerId, rng: random.Random) -> Player:
-        return LLMPlayer(player_id=player_id, agent=agent, max_invalid_retries=settings.max_invalid_retries, rng=rng)
-
-    return create_llm_player
-
-
-def _resolve_model(spec: str) -> str:
-    provider, _, model_or_tier = spec.partition(":")
-    if not model_or_tier:
-        raise typer.BadParameter(f"'{spec}' is not 'random' or a provider:tier / provider:model spec.")
-    tier_models = _TIER_MODELS_BY_PROVIDER.get(provider)
-    if tier_models is None:
-        raise typer.BadParameter(f"Unknown provider '{provider}'; use anthropic, openai, or google.")
-    if model_or_tier.upper() in tier_models.__members__:
-        return tier_models[model_or_tier.upper()].value
-    return model_or_tier
-
-
-def _build_agent(spec: str, settings: Settings) -> Agent:
-    provider = spec.partition(":")[0]
-    model = _resolve_model(spec=spec)
-    api_key = _require_api_key(provider=provider, settings=settings)
-    match provider:
-        case "anthropic":
-            return AnthropicAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
-        case "openai":
-            return OpenAIAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
-        case "google":
-            return GeminiAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
-        case unknown_provider:
-            raise typer.BadParameter(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
-
-
-def _require_api_key(provider: str, settings: Settings) -> str:
-    keys_by_provider = {
-        "anthropic": settings.anthropic_api_key,
-        "openai": settings.openai_api_key,
-        "google": settings.google_api_key,
-    }
-    api_key = keys_by_provider.get(provider)
-    if api_key is None:
-        raise typer.BadParameter(f"No API key configured for '{provider}'; set {provider.upper()}_API_KEY.")
-    return api_key
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Interface to bind to.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to bind to.")] = 8420,
+) -> None:
+    """Serve the web app: browse games, watch them live, and launch new ones."""
+    settings = load_settings()
+    web_app = create_app(games_directory=settings.output_directory / "games")
+    console.print(f"risk-bench running at [bold]http://{host}:{port}[/bold] — Ctrl+C to stop.")
+    uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
 def _print_standings(report: TournamentReport) -> None:
