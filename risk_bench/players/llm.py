@@ -16,6 +16,15 @@ from risk_bench.players.tools import (
 )
 
 
+class ProviderUnavailableError(Exception):
+    """Raised when a player's provider fails persistently (quota, outage, auth).
+
+    Distinct from transient failures, which only consume a retry: this aborts
+    the game so it pauses cleanly instead of silently degrading into random
+    play. The journal keeps the game resumable once the provider recovers.
+    """
+
+
 class LLMPlayer:
     """A player driven by an LLM through tool calling.
 
@@ -26,16 +35,28 @@ class LLMPlayer:
     Invalid tool calls are answered with the validation error and retried up to
     ``max_invalid_retries`` times, then a random legal action is substituted so
     a misbehaving model can never deadlock a game. Fallbacks are counted in
-    ``invalid_action_count`` — itself a benchmark signal. Provider API failures
-    (outages, content-policy flags) consume a retry the same way: a player's
-    provider must never be able to kill a running game.
+    ``invalid_action_count`` — itself a benchmark signal. A provider API
+    failure (outage, rate limit, content-policy flag) consumes a retry the
+    same way, but ``max_consecutive_provider_failures`` failures in a row —
+    the signature of an exhausted quota rather than a flaky call — raise
+    ``ProviderUnavailableError`` to pause the game instead of letting it
+    degrade into random play. Any successful call resets the streak.
     """
 
-    def __init__(self, player_id: PlayerId, agent: Agent, max_invalid_retries: int, rng: random.Random) -> None:
+    def __init__(
+        self,
+        player_id: PlayerId,
+        agent: Agent,
+        max_invalid_retries: int,
+        max_consecutive_provider_failures: int,
+        rng: random.Random,
+    ) -> None:
         self.player_id = player_id
         self.invalid_action_count = 0
         self._agent = agent
         self._max_invalid_retries = max_invalid_retries
+        self._max_consecutive_provider_failures = max_consecutive_provider_failures
+        self._consecutive_provider_failures = 0
         self._rng = rng
 
     def decide_action(self, request: DecisionRequest) -> Decision:
@@ -109,10 +130,18 @@ class LLMPlayer:
 
     def _respond_or_none(self, conversation: list[Message], tools: list[Tool]) -> Response | None:
         try:
-            return self._agent.respond(messages=conversation, tools=tools)
-        except Exception as error:  # noqa: BLE001 - a player's provider must never kill a running game
+            response = self._agent.respond(messages=conversation, tools=tools)
+        except Exception as error:  # noqa: BLE001 - transient provider failures must not kill the game
+            self._consecutive_provider_failures += 1
             print(f"[agent-error] {self.player_id}: {error}", file=sys.stderr)
+            if self._consecutive_provider_failures >= self._max_consecutive_provider_failures:
+                raise ProviderUnavailableError(
+                    f"{self.player_id}'s provider failed {self._consecutive_provider_failures} times in a row "
+                    f"(last error: {error}). Pausing the game; resume it once the provider recovers."
+                ) from error
             return None
+        self._consecutive_provider_failures = 0
+        return response
 
 
 def _thought_text(response: Response) -> str | None:

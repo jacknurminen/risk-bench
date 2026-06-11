@@ -1,9 +1,11 @@
 import random
 
+import pytest
+
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.game.actions import Attack, PlaceArmies
 from risk_bench.game.types import Phase, Territory
-from risk_bench.players.llm import LLMPlayer
+from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
 from tests.players.test_tools import ALICE, attack_request, reinforce_request_with_tradeable_set, request_for_phase
 
 
@@ -35,7 +37,9 @@ EXPECTED_ATTACK = Attack(from_territory=Territory.ALASKA, to_territory=Territory
 
 
 def llm_player(agent: StubAgent) -> LLMPlayer:
-    return LLMPlayer(player_id=ALICE, agent=agent, max_invalid_retries=2, rng=random.Random(0))
+    return LLMPlayer(
+        player_id=ALICE, agent=agent, max_invalid_retries=2, max_consecutive_provider_failures=6, rng=random.Random(0)
+    )
 
 
 def test_a_valid_tool_call_becomes_the_action():
@@ -98,7 +102,13 @@ class FailingAgent:
 
 
 def test_provider_failures_fall_back_instead_of_crashing_the_game():
-    player = LLMPlayer(player_id=ALICE, agent=FailingAgent(), max_invalid_retries=2, rng=random.Random(0))
+    player = LLMPlayer(
+        player_id=ALICE,
+        agent=FailingAgent(),
+        max_invalid_retries=2,
+        max_consecutive_provider_failures=10,
+        rng=random.Random(0),
+    )
     request = attack_request()
 
     decision = player.decide_action(request)
@@ -108,8 +118,56 @@ def test_provider_failures_fall_back_instead_of_crashing_the_game():
     assert player.invalid_action_count == 1
 
 
+def test_persistent_provider_failure_pauses_the_game_instead_of_playing_randomly():
+    player = LLMPlayer(
+        player_id=ALICE,
+        agent=FailingAgent(),
+        max_invalid_retries=2,
+        max_consecutive_provider_failures=6,
+        rng=random.Random(0),
+    )
+    request = attack_request()
+
+    player.decide_action(request)  # three failures: still transient, falls back to a random action
+    with pytest.raises(ProviderUnavailableError, match="failed 6 times in a row"):
+        player.decide_action(request)  # failures four through six trip the breaker
+
+
+def test_a_successful_call_resets_the_provider_failure_streak():
+    class FlakyAgent:
+        """Fails twice before every successful response, like an intermittent provider."""
+
+        def __init__(self) -> None:
+            self._calls = 0
+
+        def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
+            self._calls += 1
+            if self._calls % 3 != 0:
+                raise RuntimeError("429 rate limited")
+            return VALID_ATTACK_RESPONSE
+
+    player = LLMPlayer(
+        player_id=ALICE,
+        agent=FlakyAgent(),
+        max_invalid_retries=2,
+        max_consecutive_provider_failures=6,
+        rng=random.Random(0),
+    )
+    request = attack_request()
+
+    for _ in range(4):  # eight failures in total, but never six in a row
+        assert player.decide_action(request).actions == (EXPECTED_ATTACK,)
+    assert player.invalid_action_count == 0
+
+
 def test_provider_failures_during_negotiation_mean_silence():
-    player = LLMPlayer(player_id=ALICE, agent=FailingAgent(), max_invalid_retries=2, rng=random.Random(0))
+    player = LLMPlayer(
+        player_id=ALICE,
+        agent=FailingAgent(),
+        max_invalid_retries=2,
+        max_consecutive_provider_failures=10,
+        rng=random.Random(0),
+    )
     view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
 
     negotiation_turn = player.compose_messages(view=view)

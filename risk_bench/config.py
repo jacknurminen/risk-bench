@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # agent limits
     max_agent_tokens: int = 4096
     max_invalid_retries: int = 3
+    max_consecutive_provider_failures: int = 6
 
     # game and tournament defaults
     max_turns: int = 150

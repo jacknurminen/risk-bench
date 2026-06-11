@@ -9,6 +9,7 @@ from rich.table import Table
 from risk_bench import launch, specs
 from risk_bench.api.app import create_app
 from risk_bench.config import load_settings
+from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import TournamentRunner
 from risk_bench.viewer.html import render_viewer_html
@@ -58,6 +59,10 @@ def game(
             raise typer.BadParameter("Provide player specs, or --resume with a journal file.")
     except ValueError as error:
         raise typer.BadParameter(str(error)) from None
+    except ProviderUnavailableError as error:
+        console.print(f"\n[bold yellow]Game paused:[/bold yellow] {error}")
+        console.print("Resume it later with: game --resume <journal>")
+        raise typer.Exit(code=1) from None
 
     outcome = f"[bold green]{record.winner} wins[/bold green]" if record.winner else "[bold yellow]draw[/bold yellow]"
     console.print(f"\nGame over after {record.turn_count} turns: {outcome}")

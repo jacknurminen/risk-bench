@@ -92,7 +92,13 @@ def player_factory(spec: str, settings: Settings) -> PlayerFactory:
     agent = build_agent(spec=spec, settings=settings)
 
     def create_llm_player(player_id: PlayerId, rng: random.Random) -> Player:
-        return LLMPlayer(player_id=player_id, agent=agent, max_invalid_retries=settings.max_invalid_retries, rng=rng)
+        return LLMPlayer(
+            player_id=player_id,
+            agent=agent,
+            max_invalid_retries=settings.max_invalid_retries,
+            max_consecutive_provider_failures=settings.max_consecutive_provider_failures,
+            rng=rng,
+        )
 
     return create_llm_player
 

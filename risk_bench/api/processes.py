@@ -16,6 +16,7 @@ from pathlib import Path
 
 from risk_bench import launch
 from risk_bench.config import load_settings
+from risk_bench.players.llm import ProviderUnavailableError
 
 
 class GameProcessManager:
@@ -118,25 +119,31 @@ def _run_new_game_in_worker(
     journal_path: str,
 ) -> None:
     _redirect_output(log_path=log_path, append=False)
-    launch.run_new_game(
-        models=players,
-        seed=seed,
-        settings=load_settings(),
-        commentator_spec=commentator_spec,
-        journal_path=Path(journal_path),
-        max_turns=max_turns,
-        verbose=False,
-    )
+    try:
+        launch.run_new_game(
+            models=players,
+            seed=seed,
+            settings=load_settings(),
+            commentator_spec=commentator_spec,
+            journal_path=Path(journal_path),
+            max_turns=max_turns,
+            verbose=False,
+        )
+    except ProviderUnavailableError as error:
+        print(f"[paused] {error}")
 
 
 def _resume_game_in_worker(log_path: str, journal_path: str, commentator_spec: str | None) -> None:
     _redirect_output(log_path=log_path, append=True)
-    launch.resume_game(
-        journal_file=Path(journal_path),
-        settings=load_settings(),
-        commentator_spec=commentator_spec,
-        verbose=False,
-    )
+    try:
+        launch.resume_game(
+            journal_file=Path(journal_path),
+            settings=load_settings(),
+            commentator_spec=commentator_spec,
+            verbose=False,
+        )
+    except ProviderUnavailableError as error:
+        print(f"[paused] {error}")
 
 
 def _redirect_output(log_path: str, append: bool) -> None:
