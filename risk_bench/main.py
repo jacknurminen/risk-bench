@@ -1,5 +1,3 @@
-import random
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -8,12 +6,9 @@ import uvicorn
 from rich.console import Console
 from rich.table import Table
 
-from risk_bench import specs
+from risk_bench import launch, specs
 from risk_bench.api.app import create_app
-from risk_bench.config import Settings, load_settings
-from risk_bench.runner.commentary import Commentator
-from risk_bench.runner.game_runner import GameRecord, GameRunner
-from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, restore_game
+from risk_bench.config import load_settings
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import TournamentRunner
 from risk_bench.viewer.html import render_viewer_html
@@ -44,19 +39,19 @@ def game(
     """Run a single game between the given players (or resume a crashed one) and print the outcome."""
     settings = load_settings()
     try:
-        commentator_instance = specs.build_commentator(spec=commentator, settings=settings)
         if resume is not None:
-            record, journal_path = _resume_game(
-                journal_file=resume, settings=settings, commentator=commentator_instance, verbose=verbose
+            record = launch.resume_game(
+                journal_file=resume, settings=settings, commentator_spec=commentator, verbose=verbose
             )
+            journal_path = resume
         elif models:
-            record, journal_path = _run_new_game(
+            record, journal_path = launch.run_new_game(
                 models=models,
                 seed=seed,
                 settings=settings,
-                commentator=commentator_instance,
+                commentator_spec=commentator,
                 journal_path=journal,
-                max_turns=max_turns if max_turns is not None else settings.max_turns,
+                max_turns=max_turns,
                 verbose=verbose,
             )
         else:
@@ -69,78 +64,6 @@ def game(
     for player_id, mission in record.missions.items():
         console.print(f"  {player_id}: {mission.description}")
     console.print(f"Journal: {journal_path}")
-
-
-def _run_new_game(
-    models: list[str],
-    seed: int,
-    settings: Settings,
-    commentator: Commentator | None,
-    journal_path: Path | None,
-    max_turns: int,
-    verbose: bool,
-) -> tuple[GameRecord, Path]:
-    player_specs = specs.named_specs(specs=models)
-    players = {
-        name: specs.player_factory(spec=spec, settings=settings)(name, random.Random(f"{seed}:{name}"))
-        for name, spec in player_specs.items()
-    }
-    if journal_path is None:
-        started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
-        journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}.jsonl"
-    journal = JournalWriter(path=journal_path, append=False)
-    journal.write_header(
-        header=JournalHeader(
-            schema_version=SCHEMA_VERSION,
-            seed=seed,
-            player_specs=player_specs,
-            max_turns=max_turns,
-            allow_private_messages=settings.allow_private_messages,
-            max_negotiation_rounds=settings.max_negotiation_rounds,
-        )
-    )
-    runner = GameRunner(
-        players=players,
-        seed=seed,
-        max_turns=max_turns,
-        allow_private_messages=settings.allow_private_messages,
-        max_negotiation_rounds=settings.max_negotiation_rounds,
-        commentator=commentator,
-        journal=journal,
-        verbose=verbose,
-    )
-    try:
-        return runner.run(), journal_path
-    finally:
-        journal.close()
-
-
-def _resume_game(
-    journal_file: Path, settings: Settings, commentator: Commentator | None, verbose: bool
-) -> tuple[GameRecord, Path]:
-    restored = restore_game(path=journal_file)
-    if restored.is_finished:
-        raise typer.BadParameter(f"{journal_file} records a finished game; nothing to resume.")
-    header = restored.header
-    players = {
-        name: specs.player_factory(spec=spec, settings=settings)(name, random.Random(f"{header.seed}:{name}:resume"))
-        for name, spec in header.player_specs.items()
-    }
-    journal = JournalWriter(path=journal_file, append=True)
-    runner = GameRunner(
-        players=players,
-        seed=header.seed,
-        max_turns=header.max_turns,
-        allow_private_messages=header.allow_private_messages,
-        max_negotiation_rounds=header.max_negotiation_rounds,
-        commentator=commentator,
-        journal=journal,
-        verbose=verbose,
-    )
-    try:
-        return runner.resume(restored=restored), journal_file
-    finally:
-        journal.close()
 
 
 @app.command()

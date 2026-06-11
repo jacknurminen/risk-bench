@@ -1,0 +1,145 @@
+"""Worker processes for games launched from the web app.
+
+Each game runs in its own spawned daemon process calling the same
+``risk_bench.launch`` functions as the CLI. Daemon children are tied to the
+server's lifetime: shutting the server down terminates the games, which —
+because the journal is flushed per line — merely pauses them; they can be
+resumed later. Child stdout/stderr go to the game's ``.log`` file, which only
+carries errors since workers run non-verbose: the journal is the record.
+"""
+
+import multiprocessing
+import sys
+from collections.abc import Callable
+from multiprocessing.process import BaseProcess
+from pathlib import Path
+
+from risk_bench import launch
+from risk_bench.config import load_settings
+
+
+class GameProcessManager:
+    """Owns one worker process per running game: launch, resume, pause, liveness."""
+
+    def __init__(self) -> None:
+        self._context = multiprocessing.get_context("spawn")
+        self._processes: dict[str, BaseProcess] = {}
+
+    def launch_game(
+        self,
+        game_id: str,
+        players: list[str],
+        seed: int,
+        commentator_spec: str | None,
+        max_turns: int | None,
+        journal_path: Path,
+        log_path: Path,
+    ) -> None:
+        """Start a new game in its own worker process.
+
+        Args:
+            game_id: The game's identity within the manager.
+            players: Player specs in seating order.
+            seed: The game seed.
+            commentator_spec: Model spec for the commentator, or None.
+            max_turns: Turn limit, or None for the settings default.
+            journal_path: Where the worker writes the journal.
+            log_path: Where the worker's output goes.
+        """
+        arguments = (str(log_path), players, seed, commentator_spec, max_turns, str(journal_path))
+        self._start(game_id=game_id, target=_run_new_game_in_worker, arguments=arguments)
+
+    def resume_game(self, game_id: str, journal_path: Path, commentator_spec: str | None, log_path: Path) -> None:
+        """Continue a paused game in a new worker process.
+
+        Args:
+            game_id: The game's identity within the manager.
+            journal_path: The unfinished journal to resume from.
+            commentator_spec: Model spec for the commentator, or None.
+            log_path: Where the worker's output is appended.
+        """
+        arguments = (str(log_path), str(journal_path), commentator_spec)
+        self._start(game_id=game_id, target=_resume_game_in_worker, arguments=arguments)
+
+    def is_running(self, game_id: str) -> bool:
+        """Tell whether the game's worker process is currently alive.
+
+        Args:
+            game_id: The game to check.
+
+        Returns:
+            True while the worker runs; exited workers are reaped on the way.
+        """
+        process = self._processes.get(game_id)
+        if process is None:
+            return False
+        if process.is_alive():
+            return True
+        del self._processes[game_id]
+        return False
+
+    def pause_game(self, game_id: str) -> bool:
+        """Terminate the game's worker; the per-line-flushed journal keeps it resumable.
+
+        Args:
+            game_id: The game to pause.
+
+        Returns:
+            True if a running worker was terminated, False if none was running.
+        """
+        process = self._processes.get(game_id)
+        if process is None or not process.is_alive():
+            return False
+        process.terminate()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+        del self._processes[game_id]
+        return True
+
+    def shutdown(self) -> None:
+        """Pause every running game; called when the server shuts down."""
+        for game_id in list(self._processes):
+            self.pause_game(game_id=game_id)
+
+    def _start(self, game_id: str, target: Callable[..., object], arguments: tuple[object, ...]) -> None:
+        process = self._context.Process(target=target, args=arguments, daemon=True)
+        process.start()
+        self._processes[game_id] = process
+
+
+def _run_new_game_in_worker(
+    log_path: str,
+    players: list[str],
+    seed: int,
+    commentator_spec: str | None,
+    max_turns: int | None,
+    journal_path: str,
+) -> None:
+    _redirect_output(log_path=log_path, append=False)
+    launch.run_new_game(
+        models=players,
+        seed=seed,
+        settings=load_settings(),
+        commentator_spec=commentator_spec,
+        journal_path=Path(journal_path),
+        max_turns=max_turns,
+        verbose=False,
+    )
+
+
+def _resume_game_in_worker(log_path: str, journal_path: str, commentator_spec: str | None) -> None:
+    _redirect_output(log_path=log_path, append=True)
+    launch.resume_game(
+        journal_file=Path(journal_path),
+        settings=load_settings(),
+        commentator_spec=commentator_spec,
+        verbose=False,
+    )
+
+
+def _redirect_output(log_path: str, append: bool) -> None:
+    stream = open(log_path, "a" if append else "w", buffering=1, encoding="utf-8")  # noqa: SIM115 - lives until exit
+    sys.stdout = stream
+    sys.stderr = stream

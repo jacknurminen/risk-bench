@@ -1,9 +1,5 @@
 import json
-import os
 import re
-import signal
-import subprocess
-import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
 from risk_bench import specs
+from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     GameListResponse,
     GameSummary,
@@ -31,9 +28,10 @@ _LAUNCH_TIMEOUT_SECONDS = 15.0
 def create_app(games_directory: Path) -> FastAPI:
     """Create the web app: browse and watch games, and launch new ones.
 
-    The app is stateless: the games directory's journal files are the only
-    source of truth, and new games run as detached subprocesses of the CLI so
-    a server restart never kills a running game.
+    The journal files in the games directory are the only source of truth for
+    game content; the app's only state is the process manager owning one
+    daemonic worker per running game. Shutting the server down terminates the
+    workers, which merely pauses their games — journals keep them resumable.
 
     Args:
         games_directory: Where game journals live and new ones are created.
@@ -42,6 +40,8 @@ def create_app(games_directory: Path) -> FastAPI:
         The configured FastAPI application.
     """
     app = FastAPI(title="risk-bench")
+    manager = GameProcessManager()
+    app.add_event_handler("shutdown", manager.shutdown)
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -59,7 +59,7 @@ def create_app(games_directory: Path) -> FastAPI:
         summaries = [
             summary
             for path in sorted(games_directory.glob("*.jsonl"), reverse=True)
-            if (summary := _summarize_journal(path=path)) is not None
+            if (summary := _summarize_journal(path=path, running=manager.is_running(game_id=path.stem))) is not None
         ]
         return GameListResponse(games=summaries)
 
@@ -69,17 +69,18 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.post("/api/games", status_code=201)
     def launch_game(request: NewGameRequest) -> NewGameResponse:
-        return _launch_game(games_directory=games_directory, request=request)
+        return _launch_game(games_directory=games_directory, manager=manager, request=request)
 
     @app.post("/api/games/{game_id}/pause", status_code=204)
     def pause_game(game_id: str) -> None:
         _journal_path(games_directory=games_directory, game_id=game_id)
-        _pause_game(games_directory=games_directory, game_id=game_id)
+        if not manager.pause_game(game_id=game_id):
+            raise HTTPException(status_code=409, detail="The game is not running.")
 
     @app.post("/api/games/{game_id}/resume", status_code=204)
     def resume_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        _resume_game(games_directory=games_directory, game_id=game_id, journal_path=journal_path)
+        _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
 
     @app.get("/api/models")
     def model_catalog() -> ModelCatalogResponse:
@@ -111,7 +112,7 @@ def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
 
 
-def _summarize_journal(path: Path) -> GameSummary | None:
+def _summarize_journal(path: Path, running: bool) -> GameSummary | None:
     header: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     has_commentary = False
@@ -136,82 +137,46 @@ def _summarize_journal(path: Path) -> GameSummary | None:
         max_turns=int(header["max_turns"]),
         has_commentary=has_commentary,
         finished=result is not None,
-        running=_running_pid(games_directory=path.parent, game_id=path.stem) is not None,
+        running=running,
         winner=result["winner"] if result is not None else None,
         turn_count=int(result["turn_count"]) if result is not None else None,
         modified_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
     )
 
 
-def _launch_game(games_directory: Path, request: NewGameRequest) -> NewGameResponse:
+def _launch_game(games_directory: Path, manager: GameProcessManager, request: NewGameRequest) -> NewGameResponse:
     _validate_launch_request(request=request)
     game_id = _new_game_id(games_directory=games_directory, seed=request.seed)
     journal_path = games_directory / f"{game_id}.jsonl"
     games_directory.mkdir(parents=True, exist_ok=True)
-
-    command = [sys.executable, "-m", "risk_bench.main", "game", *request.players]
-    command += ["--seed", str(request.seed), "--journal", str(journal_path)]
-    if request.commentator is not None:
-        command += ["--commentator", request.commentator]
-    if request.max_turns is not None:
-        command += ["--max-turns", str(request.max_turns)]
-
     (games_directory / f"{game_id}.launch.json").write_text(request.model_dump_json(), encoding="utf-8")
-    process = _spawn_game_process(games_directory=games_directory, game_id=game_id, command=command, append_log=False)
-    _wait_for_journal_header(journal_path=journal_path, process=process, log_path=games_directory / f"{game_id}.log")
+    manager.launch_game(
+        game_id=game_id,
+        players=request.players,
+        seed=request.seed,
+        commentator_spec=request.commentator,
+        max_turns=request.max_turns,
+        journal_path=journal_path,
+        log_path=games_directory / f"{game_id}.log",
+    )
+    _wait_for_journal_header(
+        journal_path=journal_path, manager=manager, game_id=game_id, log_path=games_directory / f"{game_id}.log"
+    )
     return NewGameResponse(id=game_id)
 
 
-def _spawn_game_process(
-    games_directory: Path, game_id: str, command: list[str], append_log: bool
-) -> subprocess.Popen[bytes]:
-    log_path = games_directory / f"{game_id}.log"
-    with log_path.open("a" if append_log else "w", encoding="utf-8") as log_file:
-        process = subprocess.Popen(command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
-    (games_directory / f"{game_id}.pid").write_text(str(process.pid), encoding="utf-8")
-    return process
-
-
-def _running_pid(games_directory: Path, game_id: str) -> int | None:
-    pid_path = games_directory / f"{game_id}.pid"
-    if not pid_path.is_file():
-        return None
-    try:
-        pid = int(pid_path.read_text(encoding="utf-8").strip())
-    except ValueError:
-        return None
-    # /proc is Linux-specific; checking the command line guards against pid reuse
-    cmdline_path = Path(f"/proc/{pid}/cmdline")
-    if not cmdline_path.is_file() or game_id not in cmdline_path.read_bytes().decode(errors="replace"):
-        return None
-    return pid
-
-
-def _pause_game(games_directory: Path, game_id: str) -> None:
-    pid = _running_pid(games_directory=games_directory, game_id=game_id)
-    if pid is None:
-        raise HTTPException(status_code=409, detail="The game is not running.")
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.monotonic() + 5.0
-    while time.monotonic() < deadline:
-        if _running_pid(games_directory=games_directory, game_id=game_id) is None:
-            return
-        time.sleep(0.1)
-    raise HTTPException(status_code=500, detail="The game process did not exit after SIGTERM.")
-
-
-def _resume_game(games_directory: Path, game_id: str, journal_path: Path) -> None:
-    if _running_pid(games_directory=games_directory, game_id=game_id) is not None:
+def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
+    if manager.is_running(game_id=game_id):
         raise HTTPException(status_code=409, detail="The game is already running.")
-    summary = _summarize_journal(path=journal_path)
+    summary = _summarize_journal(path=journal_path, running=False)
     if summary is None or summary.finished:
         raise HTTPException(status_code=409, detail="The game is already finished; nothing to resume.")
-
-    command = [sys.executable, "-m", "risk_bench.main", "game", "--resume", str(journal_path)]
-    commentator = _launched_commentator(games_directory=games_directory, game_id=game_id)
-    if commentator is not None:
-        command += ["--commentator", commentator]
-    _spawn_game_process(games_directory=games_directory, game_id=game_id, command=command, append_log=True)
+    manager.resume_game(
+        game_id=game_id,
+        journal_path=journal_path,
+        commentator_spec=_launched_commentator(games_directory=games_directory, game_id=game_id),
+        log_path=games_directory / f"{game_id}.log",
+    )
 
 
 def _launched_commentator(games_directory: Path, game_id: str) -> str | None:
@@ -245,13 +210,13 @@ def _new_game_id(games_directory: Path, seed: int) -> str:
     return game_id
 
 
-def _wait_for_journal_header(journal_path: Path, process: subprocess.Popen[bytes], log_path: Path) -> None:
+def _wait_for_journal_header(journal_path: Path, manager: GameProcessManager, game_id: str, log_path: Path) -> None:
     deadline = time.monotonic() + _LAUNCH_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if journal_path.is_file() and journal_path.read_text(encoding="utf-8").startswith('{"type": "header"'):
             return
-        if process.poll() is not None:
-            log_tail = log_path.read_text(encoding="utf-8")[-2000:]
-            raise HTTPException(status_code=500, detail=f"The game process exited at startup: {log_tail}")
+        if not manager.is_running(game_id=game_id):
+            log_tail = log_path.read_text(encoding="utf-8")[-2000:] if log_path.is_file() else ""
+            raise HTTPException(status_code=500, detail=f"The game worker exited at startup: {log_tail}")
         time.sleep(0.1)
     raise HTTPException(status_code=500, detail="The game did not start within the launch timeout.")

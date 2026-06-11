@@ -21,7 +21,8 @@
   tr.game:hover td { background: #23252e; }
   tr:last-child td { border-bottom: none; }
   .status { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
-  .status.live { background: #2c4a2e; color: #9fdca4; }
+  .status.live { background: #2c4a2e; color: #9fdca4; animation: runningPulse 1.4s ease-in-out infinite; }
+  @keyframes runningPulse { 50% { opacity: .45; } }
   .status.done { background: #2a2d38; color: var(--dim); }
   .status.paused { background: #4a3d20; color: #e0c27a; }
   button.tiny { padding: 2px 8px; font-size: 12px; }

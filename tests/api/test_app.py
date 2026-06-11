@@ -1,5 +1,3 @@
-import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -117,25 +115,20 @@ def unfinished_journal(games_directory: Path, name: str) -> Path:
     return path
 
 
-def test_pausing_a_running_game_terminates_its_process(tmp_path: Path):
-    games_directory = tmp_path / "games"
-    unfinished_journal(games_directory=games_directory, name="running")
-    # a stand-in for the game process: the game id in argv satisfies the pid-reuse guard
-    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "running"])
-    (games_directory / "running.pid").write_text(str(process.pid), encoding="utf-8")
+def test_pausing_a_running_game_terminates_its_worker(tmp_path: Path):
     client = client_for(tmp_path=tmp_path)
-    try:
-        [game] = client.get("/api/games").json()["games"]
-        assert game["running"] is True and game["finished"] is False
+    # six random players and an unreachable turn limit keep the game running long enough to pause
+    response = client.post("/api/games", json={"players": ["random"] * 6, "seed": 5, "max_turns": 1_000_000})
+    assert response.status_code == 201
+    game_id = response.json()["id"]
 
-        assert client.post("/api/games/running/pause").status_code == 204
-        assert process.wait(timeout=5) != 0  # SIGTERM'd
+    [game] = client.get("/api/games").json()["games"]
+    assert game["running"] is True and game["finished"] is False
 
-        [game] = client.get("/api/games").json()["games"]
-        assert game["running"] is False and game["finished"] is False  # paused, resumable
-    finally:
-        if process.poll() is None:
-            process.kill()
+    assert client.post(f"/api/games/{game_id}/pause").status_code == 204
+
+    [game] = client.get("/api/games").json()["games"]
+    assert game["running"] is False and game["finished"] is False  # paused, resumable
 
 
 def test_pausing_a_game_that_is_not_running_is_rejected(tmp_path: Path):
