@@ -33,6 +33,7 @@ def test_view_model_snapshots_track_the_board_and_outcome(tmp_path: Path):
     first_board = model["steps"][0]["board"]
     assert len(first_board) == 42
     assert all(armies == 1 for _, armies in first_board.values())
+    assert all(player["income"] >= 3 for step in model["steps"] for player in step["players"])
 
     assert model["result"] is not None
     assert model["result"]["winner"] in PLAYER_NAMES

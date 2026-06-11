@@ -11,12 +11,18 @@ from risk_bench.game.types import Phase, PlayerId, Territory
 
 @dataclass(frozen=True)
 class PublicPlayerInfo:
-    """What everyone may know about a player: counts, not contents."""
+    """What everyone may know about a player: counts, not contents.
+
+    ``income`` is the player's current per-turn reinforcement count
+    (territories and continent bonuses, not card trades) — derivable from
+    the public board, so exposing it leaks nothing.
+    """
 
     player_id: PlayerId
     territory_count: int
     army_count: int
     card_count: int
+    income: int
     is_eliminated: bool
 
 

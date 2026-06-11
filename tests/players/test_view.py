@@ -68,6 +68,19 @@ def test_setup_placement_masks_other_players_armies_to_the_dealt_baseline():
     assert bob_info_for_alice.army_count == 41  # one per territory, placements hidden
 
 
+def test_view_exposes_each_players_current_income():
+    state = two_player_state()
+
+    view = build_player_view(
+        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+    )
+
+    alice_info = next(info for info in view.players if info.player_id == ALICE)
+    bob_info = next(info for info in view.players if info.player_id == BOB)
+    assert alice_info.income == 3  # one territory: the floor of 3, no continents
+    assert bob_info.income == 13 + 19  # 41 territories // 3, plus every continent except North America
+
+
 def test_armies_to_place_is_only_shown_to_the_current_player():
     state = two_player_state()
     state.armies_to_place = 7

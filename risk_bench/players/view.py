@@ -1,5 +1,6 @@
 from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.events import GameEvent
+from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId, Territory
 from risk_bench.players.base import PlayerView, PublicPlayerInfo
@@ -61,6 +62,7 @@ def _public_player_infos(state: GameState, visible_armies: dict[Territory, int])
             territory_count=len(state.territories_owned_by(player_id=player_id)),
             army_count=sum(visible_armies[territory] for territory in state.territories_owned_by(player_id=player_id)),
             card_count=len(player.cards),
+            income=reinforcement_count(state=state, player_id=player_id),
             is_eliminated=player.eliminated_by is not None,
         )
         for player_id, player in state.players.items()

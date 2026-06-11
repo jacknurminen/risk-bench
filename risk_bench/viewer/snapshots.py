@@ -14,6 +14,7 @@ from risk_bench.game.actions import (
 )
 from risk_bench.game.board import BOARD
 from risk_bench.game.engine import apply_action, setup_game
+from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
@@ -104,6 +105,7 @@ def _step(
                 "territories": len(state.territories_owned_by(player_id=name)),
                 "armies": state.army_count(player_id=name),
                 "cards": len(state.players[name].cards),
+                "income": reinforcement_count(state=state, player_id=name),
                 "eliminated": state.players[name].eliminated_by is not None,
             }
             for name in player_names

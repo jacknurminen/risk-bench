@@ -79,6 +79,33 @@ let timer = null;
 
 const el = id => document.getElementById(id);
 const pretty = name => name.replaceAll("_", " ");
+const escapeHtml = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+// Player-name highlighting: each player is matched by their full name and, when
+// unambiguous, by an informal first token ("gemini-3.5-flash" -> "gemini").
+const seatByAlias = {};
+{
+  const informalTokenCounts = {};
+  const informalToken = name => name.split(/[-#.:\s]/)[0].toLowerCase();
+  GAME.players.forEach(player => {
+    informalTokenCounts[informalToken(player.name)] = (informalTokenCounts[informalToken(player.name)] || 0) + 1;
+  });
+  GAME.players.forEach((player, seat) => {
+    seatByAlias[player.name.toLowerCase()] = seat;
+    const informal = informalToken(player.name);
+    if (informal && informalTokenCounts[informal] === 1) seatByAlias[informal] = seat;
+  });
+}
+const NAME_PATTERN = new RegExp(
+  "\\b(" + Object.keys(seatByAlias)
+    .sort((a, b) => b.length - a.length)  // longest first, so the full id wins over its informal token
+    .map(alias => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|") + ")\\b", "gi");
+
+function colorizeNames(text) {
+  return escapeHtml(text).replace(NAME_PATTERN, match =>
+    `<span style="color:${COLORS[seatByAlias[match.toLowerCase()]]};font-weight:600">${match}</span>`);
+}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const territoryShapes = {};
@@ -134,11 +161,12 @@ function appendChat(fromIndex) {
     div.className = "msg";
     div.id = "m-" + i;
     const channel = message.visibility === "private"
-      ? `<span class="priv">🔒 to ${message.recipient}</span>` : "to everyone";
-    div.innerHTML = `<div class="meta">turn ${message.turn_number} — <b>${message.sender}</b> ${channel}</div>
-      <div>${message.text}</div>`;
+      ? `<span class="priv">🔒 to ${colorizeNames(message.recipient)}</span>` : "to everyone";
+    div.innerHTML = `<div class="meta">turn ${message.turn_number} — ${colorizeNames(message.sender)} ${channel}</div>
+      <div>${colorizeNames(message.text)}</div>`;
     container.appendChild(div);
   }
+  if (LIVE && GAME.messages.length > fromIndex) el("chat").scrollTop = el("chat").scrollHeight;
 }
 
 function upsertLogEntry(i) {
@@ -151,8 +179,8 @@ function upsertLogEntry(i) {
     entry.onclick = () => show(i);
     el("entries").appendChild(entry);
   }
-  const events = step.events.map(text => `<div class="ev">${text}</div>`).join("");
-  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : step.action}</div>${events}`;
+  const events = step.events.map(text => `<div class="ev">${colorizeNames(text)}</div>`).join("");
+  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : colorizeNames(step.action)}</div>${events}`;
 }
 
 function appendLog(fromIndex) {
@@ -174,7 +202,7 @@ function show(newIndex) {
     card.classList.toggle("dead", stats.eliminated);
     card.classList.toggle("acting", GAME.players[seat].name === step.current_player);
     card.querySelector(".stats").textContent =
-      `${stats.territories} territories · ${stats.armies} armies · ${stats.cards} cards`;
+      `${stats.territories} territories · ${stats.armies} armies · ${stats.cards} cards · +${stats.income}/turn`;
   });
   GAME.messages.forEach((message, i) => el("m-" + i).classList.toggle("future", message.step > index));
   document.querySelectorAll(".entry.current").forEach(entry => entry.classList.remove("current"));

@@ -153,7 +153,7 @@ def _render_players(view: PlayerView) -> str:
         else:
             lines.append(
                 f"- {info.player_id}: {info.territory_count} territories, {info.army_count} armies, "
-                f"{info.card_count} cards"
+                f"{info.card_count} cards, income {info.income}/turn"
             )
     return "Players:\n" + "\n".join(lines)
 
