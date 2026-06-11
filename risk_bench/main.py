@@ -17,6 +17,7 @@ from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
+from risk_bench.runner.commentary import Commentator
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, restore_game
 from risk_bench.tournament.results import TournamentReport, write_report
@@ -39,14 +40,25 @@ def game(
     models: Annotated[list[str] | None, typer.Argument(help=MODELS_HELP)] = None,
     seed: Annotated[int, typer.Option(help="Random seed; the whole game is reproducible from it.")] = 0,
     resume: Annotated[Path | None, typer.Option(help="Resume a crashed game from its journal file.")] = None,
+    commentator: Annotated[
+        str | None,
+        typer.Option(help="Model spec for an omniscient commentator that comments after each turn."),
+    ] = None,
     verbose: Annotated[bool, typer.Option(help="Print events and chat as they happen.")] = True,
 ) -> None:
     """Run a single game between the given players (or resume a crashed one) and print the outcome."""
     settings = load_settings()
+    commentator_instance = (
+        Commentator(agent=_build_agent(spec=commentator, settings=settings)) if commentator is not None else None
+    )
     if resume is not None:
-        record, journal_path = _resume_game(journal_file=resume, settings=settings, verbose=verbose)
+        record, journal_path = _resume_game(
+            journal_file=resume, settings=settings, commentator=commentator_instance, verbose=verbose
+        )
     elif models:
-        record, journal_path = _run_new_game(models=models, seed=seed, settings=settings, verbose=verbose)
+        record, journal_path = _run_new_game(
+            models=models, seed=seed, settings=settings, commentator=commentator_instance, verbose=verbose
+        )
     else:
         raise typer.BadParameter("Provide player specs, or --resume with a journal file.")
 
@@ -57,7 +69,9 @@ def game(
     console.print(f"Journal: {journal_path}")
 
 
-def _run_new_game(models: list[str], seed: int, settings: Settings, verbose: bool) -> tuple[GameRecord, Path]:
+def _run_new_game(
+    models: list[str], seed: int, settings: Settings, commentator: Commentator | None, verbose: bool
+) -> tuple[GameRecord, Path]:
     specs = _named_specs(specs=models)
     players = {
         name: _player_factory(spec=spec, settings=settings)(name, random.Random(f"{seed}:{name}"))
@@ -82,6 +96,7 @@ def _run_new_game(models: list[str], seed: int, settings: Settings, verbose: boo
         max_turns=settings.max_turns,
         allow_private_messages=settings.allow_private_messages,
         max_negotiation_rounds=settings.max_negotiation_rounds,
+        commentator=commentator,
         journal=journal,
         verbose=verbose,
     )
@@ -91,7 +106,9 @@ def _run_new_game(models: list[str], seed: int, settings: Settings, verbose: boo
         journal.close()
 
 
-def _resume_game(journal_file: Path, settings: Settings, verbose: bool) -> tuple[GameRecord, Path]:
+def _resume_game(
+    journal_file: Path, settings: Settings, commentator: Commentator | None, verbose: bool
+) -> tuple[GameRecord, Path]:
     restored = restore_game(path=journal_file)
     if restored.is_finished:
         raise typer.BadParameter(f"{journal_file} records a finished game; nothing to resume.")
@@ -107,6 +124,7 @@ def _resume_game(journal_file: Path, settings: Settings, verbose: bool) -> tuple
         max_turns=header.max_turns,
         allow_private_messages=header.allow_private_messages,
         max_negotiation_rounds=header.max_negotiation_rounds,
+        commentator=commentator,
         journal=journal,
         verbose=verbose,
     )

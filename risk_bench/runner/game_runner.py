@@ -9,8 +9,12 @@ from risk_bench.game.rules import legal_actions
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
+from risk_bench.players.rendering import narrate_event
 from risk_bench.players.view import build_player_view
+from risk_bench.runner.commentary import Commentator
 from risk_bench.runner.journal import JournalWriter, RestoredGame
+
+_PREVIOUS_COMMENTARY_KEPT = 5
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,11 @@ class GameRunner:
     When a journal is given, every applied action, its events, and every chat
     message are appended to it as they happen, so a crashed game can be
     restored with ``journal.restore_game`` and continued via ``resume``.
+
+    A commentator, when given, is invoked after each player's completed turn
+    (and once more when the game ends) with the omniscient state and a log of
+    the turn; its commentary is journaled and printed but never shown to the
+    players, and its failures never affect the game.
     """
 
     def __init__(
@@ -56,6 +65,7 @@ class GameRunner:
         max_turns: int,
         allow_private_messages: bool,
         max_negotiation_rounds: int,
+        commentator: Commentator | None,
         journal: JournalWriter | None,
         verbose: bool,
     ) -> None:
@@ -64,12 +74,15 @@ class GameRunner:
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
         self._max_negotiation_rounds = max_negotiation_rounds
+        self._commentator = commentator
         self._journal = journal
         self._verbose = verbose
         # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
         self._all_events: list[GameEvent] = []
         self._pending_events: dict[PlayerId, list[GameEvent]] = {}
+        self._turn_log: list[str] = []
+        self._previous_commentary: list[str] = []
 
     def run(self) -> GameRecord:
         """Play the game from setup to completion.
@@ -114,12 +127,15 @@ class GameRunner:
         self._transcript = transcript
         self._all_events = []
         self._pending_events = {player_id: [] for player_id in self._players}
+        self._turn_log = []
+        self._previous_commentary = []
 
     def _play(self, state: GameState, rng: random.Random) -> GameRecord:
         missions = {player_id: player.mission for player_id, player in state.players.items()}
 
         # on resume this skips re-running the current turn's negotiation round
         last_negotiated_turn = state.turn_number
+        commented_turn = state.turn_number
         while state.phase is not Phase.GAME_OVER:
             if state.turn_number > self._max_turns:
                 self._record_events(state=state, events=(TurnLimitReached(turn_number=state.turn_number),))
@@ -128,6 +144,13 @@ class GameRunner:
                 last_negotiated_turn = state.turn_number
                 self._run_negotiation_round(state=state)
             state = self._decide_and_apply(state=state, rng=rng)
+            if state.turn_number != commented_turn and state.phase is not Phase.GAME_OVER:
+                self._commentate(state=state, turn_number=commented_turn)
+                commented_turn = state.turn_number
+
+        outcome = f"The game ended: {state.winner} won." if state.winner else "The game ended in a draw."
+        self._turn_log.append(outcome)
+        self._commentate(state=state, turn_number=state.turn_number)
 
         if self._journal is not None:
             self._journal.write_result(winner=state.winner, turn_count=state.turn_number)
@@ -168,6 +191,7 @@ class GameRunner:
     def _record_events(self, state: GameState, events: tuple[GameEvent, ...]) -> None:
         self._all_events.extend(events)
         for event in events:
+            self._turn_log.append(narrate_event(event=event))
             if self._verbose:
                 print(event)
             for player_id in self._players:
@@ -200,6 +224,7 @@ class GameRunner:
     def _record_thought(self, player_id: PlayerId, thought: str | None) -> None:
         if thought is None:
             return
+        self._turn_log.append(f"{player_id} (thinks): {thought}")
         if self._journal is not None:
             self._journal.write_thought(player_id=player_id, text=thought)
         if self._verbose:
@@ -208,12 +233,36 @@ class GameRunner:
     def _deliver_message(self, message: ChatMessage) -> bool:
         if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
             return False
+        channel = f"privately to {message.recipient}" if message.recipient else "to everyone"
+        self._turn_log.append(f"{message.sender} ({channel}): {message.text}")
         self._transcript.add(message=message)
         if self._journal is not None:
             self._journal.write_message(message=message)
         if self._verbose:
             print(message)
         return True
+
+    def _commentate(self, state: GameState, turn_number: int) -> None:
+        turn_log = self._turn_log
+        self._turn_log = []
+        if self._commentator is None or not turn_log:
+            return
+        commentary = self._commentator.comment_on_turn(
+            state=state, turn_number=turn_number, turn_log=turn_log, previous_commentary=self._previous_commentary
+        )
+        if commentary is None:
+            return
+        self._previous_commentary = (self._previous_commentary + [commentary.text])[-_PREVIOUS_COMMENTARY_KEPT:]
+        if self._journal is not None:
+            self._journal.write_commentary(
+                turn_number=turn_number,
+                text=commentary.text,
+                tags=[{"player": tag.player, "behavior": tag.behavior, "note": tag.note} for tag in commentary.tags],
+            )
+        if self._verbose:
+            print(f"[commentary] {commentary.text}")
+            for tag in commentary.tags:
+                print(f"[commentary]   {tag.behavior} — {tag.player}: {tag.note}")
 
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
         recent_events = tuple(self._pending_events[player_id])

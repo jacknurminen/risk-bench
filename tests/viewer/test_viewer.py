@@ -43,6 +43,19 @@ def test_view_model_snapshots_track_the_board_and_outcome(tmp_path: Path):
     json.dumps(model)  # must be embeddable in the HTML
 
 
+def test_commentary_records_appear_in_the_view_model(tmp_path: Path):
+    path = journal_with_game(tmp_path=tmp_path)
+    commentary_line = json.dumps({"type": "commentary", "turn": 1, "text": "A cagey opening.", "tags": []})
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(lines[:2] + [commentary_line] + lines[2:]) + "\n", encoding="utf-8")
+
+    model = build_view_model(journal_path=path)
+
+    assert len(model["commentary"]) == 1
+    assert model["commentary"][0]["text"] == "A cagey opening."
+    assert model["commentary"][0]["step"] >= 0
+
+
 def test_rendered_html_is_self_contained(tmp_path: Path):
     model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
 

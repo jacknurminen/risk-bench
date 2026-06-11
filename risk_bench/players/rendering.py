@@ -15,7 +15,7 @@ from risk_bench.game.events import (
     TurnLimitReached,
     TurnStarted,
 )
-from risk_bench.game.types import Continent, Phase
+from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 from risk_bench.players.base import DecisionRequest, PlayerView
 
 _RULES_SUMMARY: Final[str] = """\
@@ -162,17 +162,28 @@ def _render_players(view: PlayerView) -> str:
     return "Players:\n" + "\n".join(lines)
 
 
-def _render_board(view: PlayerView) -> str:
+def render_board_text(owner: dict[Territory, PlayerId], armies: dict[Territory, int]) -> str:
+    """Serialize the board grouped by continent with owners, army counts, and adjacency.
+
+    Args:
+        owner: The owning player of every territory.
+        armies: The army count on every territory.
+
+    Returns:
+        The board as prompt text; used in player prompts and by the commentator.
+    """
     lines = []
     for continent in Continent:
         continent_info = BOARD.continent_info(continent)
         lines.append(f"{continent} (+{continent_info.army_bonus} bonus for owning all of it):")
         for territory in sorted(continent_info.territories):
             neighbors = ", ".join(sorted(BOARD.neighbors_of(territory)))
-            lines.append(
-                f"  {territory}: {view.owner[territory]} with {view.armies[territory]} armies | borders: {neighbors}"
-            )
+            lines.append(f"  {territory}: {owner[territory]} with {armies[territory]} armies | borders: {neighbors}")
     return "Board:\n" + "\n".join(lines)
+
+
+def _render_board(view: PlayerView) -> str:
+    return render_board_text(owner=view.owner, armies=view.armies)
 
 
 def _render_hand(view: PlayerView) -> str:

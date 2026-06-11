@@ -57,6 +57,10 @@
   .entry .ev { color:var(--dim); padding-left:14px; }
   .entry .thought { display:none; color:#9d92c5; font-style:italic; padding-left:14px; }
   body.showThoughts .entry .thought { display:block; }
+  .entry .commentary { color:#d8b66a; padding:3px 6px 3px 14px; margin:2px 0; background:#2a2415;
+                       border-left:2px solid #d8b66a; border-radius:3px; }
+  .entry .commentary .tag { display:inline-block; font-size:10px; color:#14151a; background:#d8b66a;
+                            border-radius:3px; padding:0 5px; margin:1px 3px 1px 0; }
   #log h3 { display:flex; justify-content:space-between; align-items:center; }
   #log h3 label { text-transform:none; letter-spacing:normal; font-weight:400; cursor:pointer; }
   .banner { padding:4px 8px; border-radius:6px; background:#23252e; margin-bottom:8px; }
@@ -264,7 +268,16 @@ function upsertLogEntry(i) {
   const thoughts = GAME.thoughts.filter(thought => thought.step === i)
     .map(thought => `<div class="thought">🧠 ${colorizeNames(thought.player)}: ${richText(thought.text)}</div>`)
     .join("");
-  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}${thoughts}`;
+  const commentary = GAME.commentary.filter(comment => comment.step === i)
+    .map(comment => {
+      const tags = comment.tags
+        .map(tag => `<span class="tag" title="${escapeHtml(tag.note)}">${tag.behavior}: ${tag.player}</span>`)
+        .join("");
+      return `<div class="commentary">🎙️ ${richText(comment.text)}${tags ? "<br>" + tags : ""}</div>`;
+    })
+    .join("");
+  entry.innerHTML =
+    `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}${thoughts}${commentary}`;
 }
 
 function appendLog(fromIndex) {
@@ -334,8 +347,10 @@ async function refreshFromJournal() {
   const updated = await response.json();
   // the last known step can gain events after the fact (the journal writes them
   // on a separate line), so the fingerprint covers it, not just the counts
-  const fingerprint = JSON.stringify(
-    [updated.steps.length, updated.steps.at(-1), updated.messages.length, updated.thoughts.length, updated.result]);
+  const fingerprint = JSON.stringify([
+    updated.steps.length, updated.steps.at(-1),
+    updated.messages.length, updated.thoughts.length, updated.commentary.length, updated.result,
+  ]);
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
 
@@ -344,6 +359,7 @@ async function refreshFromJournal() {
   steps.splice(0, steps.length, ...updated.steps);
   GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
   GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
+  GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.result = updated.result;
   appendLog(Math.max(0, knownSteps - 1));
   appendChat(knownMessages);
