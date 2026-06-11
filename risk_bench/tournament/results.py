@@ -38,6 +38,7 @@ class TournamentReport(BaseModel):
     base_seed: int
     max_turns: int
     allow_private_messages: bool
+    max_negotiation_rounds: int
     standings: list[AgentStanding]
     results: list[GameResult]
 

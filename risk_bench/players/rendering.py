@@ -56,7 +56,9 @@ def render_system_prompt(view: PlayerView) -> str:
         f"You are '{view.player_id}', playing the board game Risk against: {opponents}.\n\n"
         f"{_RULES_SUMMARY}\n\n"
         f"Diplomacy: at the start of every turn there is a negotiation round where players may exchange "
-        f"messages. {privacy_note} Promises are not enforced by the rules.\n\n"
+        f"messages. The round runs in passes: as long as someone said something, everyone gets another "
+        f"chance to reply (up to a limit), so proposals can be answered and agreed within the same turn. "
+        f"{privacy_note} Promises are not enforced by the rules.\n\n"
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
         f"Never reveal your mission. Play to complete it as fast as possible; helping others costs you the game.\n"
         f"Always act by calling exactly one of the provided tools."
@@ -110,7 +112,8 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         _render_players(view=view),
         _render_board(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
-        "Send a message to influence the other players, or say nothing. Keep it short.",
+        "Send a message to influence the other players, or say nothing. If anyone speaks, everyone gets "
+        "another chance to reply; staying silent helps end the round. Keep it short.",
     ]
     return "\n\n".join(section for section in sections if section)
 

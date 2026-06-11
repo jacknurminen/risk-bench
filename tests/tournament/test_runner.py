@@ -25,6 +25,7 @@ def run_tournament(games: int, participant_names: list[str], players_per_game: i
         base_seed=100,
         max_turns=2_000,
         allow_private_messages=False,
+        max_negotiation_rounds=3,
         k_factor=32.0,
         verbose=False,
     )
@@ -85,6 +86,7 @@ def test_too_few_participants_for_the_seat_count_is_rejected():
             base_seed=0,
             max_turns=100,
             allow_private_messages=False,
+            max_negotiation_rounds=3,
             k_factor=32.0,
             verbose=False,
         )

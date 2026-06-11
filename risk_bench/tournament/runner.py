@@ -36,6 +36,7 @@ class TournamentRunner:
         base_seed: int,
         max_turns: int,
         allow_private_messages: bool,
+        max_negotiation_rounds: int,
         journal_directory: Path | None,
         k_factor: float,
         verbose: bool,
@@ -54,6 +55,7 @@ class TournamentRunner:
         self._base_seed = base_seed
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
+        self._max_negotiation_rounds = max_negotiation_rounds
         self._k_factor = k_factor
         self._verbose = verbose
 
@@ -95,6 +97,7 @@ class TournamentRunner:
             base_seed=self._base_seed,
             max_turns=self._max_turns,
             allow_private_messages=self._allow_private_messages,
+            max_negotiation_rounds=self._max_negotiation_rounds,
             standings=_standings(
                 ratings=ratings, games_played=games_played, wins=wins, draws=draws, invalid_actions=invalid_actions
             ),
@@ -119,6 +122,7 @@ class TournamentRunner:
             seed=seed,
             max_turns=self._max_turns,
             allow_private_messages=self._allow_private_messages,
+            max_negotiation_rounds=self._max_negotiation_rounds,
             journal=journal,
             verbose=self._verbose,
         )
@@ -141,6 +145,7 @@ class TournamentRunner:
                 player_specs={name: self._participant_specs[name] for name in seating},
                 max_turns=self._max_turns,
                 allow_private_messages=self._allow_private_messages,
+                max_negotiation_rounds=self._max_negotiation_rounds,
             )
         )
         return journal

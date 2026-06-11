@@ -30,6 +30,7 @@ class JournalHeader:
     player_specs: dict[PlayerId, str]  # player name -> CLI spec ('random', 'anthropic:lo', ...), in seat order
     max_turns: int
     allow_private_messages: bool
+    max_negotiation_rounds: int
 
 
 @dataclass
@@ -69,6 +70,7 @@ class JournalWriter:
                 "player_specs": header.player_specs,
                 "max_turns": header.max_turns,
                 "allow_private_messages": header.allow_private_messages,
+                "max_negotiation_rounds": header.max_negotiation_rounds,
             }
         )
 
@@ -181,4 +183,6 @@ def _header_from_json(data: dict[str, Any]) -> JournalHeader:
         player_specs={str(name): str(spec) for name, spec in data["player_specs"].items()},
         max_turns=int(data["max_turns"]),
         allow_private_messages=bool(data["allow_private_messages"]),
+        # journals written before multi-pass negotiation ran exactly one pass per turn
+        max_negotiation_rounds=int(data.get("max_negotiation_rounds", 1)),
     )

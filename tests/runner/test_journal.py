@@ -1,3 +1,4 @@
+import json
 import random
 from pathlib import Path
 
@@ -27,6 +28,7 @@ def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -
         seed=seed,
         max_turns=max_turns,
         allow_private_messages=False,
+        max_negotiation_rounds=3,
         journal=journal,
         verbose=False,
     )
@@ -41,6 +43,7 @@ def write_game_journal(path: Path, seed: int, max_turns: int):
             player_specs={name: "random" for name in PLAYER_NAMES},
             max_turns=max_turns,
             allow_private_messages=False,
+            max_negotiation_rounds=3,
         )
     )
     record = journaled_runner(journal=journal, seed=seed, max_turns=max_turns).run()
@@ -117,6 +120,19 @@ def test_resuming_a_finished_game_is_rejected(tmp_path: Path):
 
     with pytest.raises(ValueError, match="already finished"):
         journaled_runner(journal=None, seed=11, max_turns=2_000).resume(restored=restored)
+
+
+def test_headers_from_before_multi_pass_negotiation_restore_with_one_round(tmp_path: Path):
+    path = tmp_path / "game.jsonl"
+    write_game_journal(path=path, seed=11, max_turns=2_000)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    legacy_header = json.loads(lines[0])
+    del legacy_header["max_negotiation_rounds"]
+    path.write_text("\n".join([json.dumps(legacy_header)] + lines[1:]) + "\n", encoding="utf-8")
+
+    restored = restore_game(path=path)
+
+    assert restored.header.max_negotiation_rounds == 1
 
 
 def test_restore_rejects_files_without_a_header(tmp_path: Path):

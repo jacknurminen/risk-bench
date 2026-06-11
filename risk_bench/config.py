@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # game and tournament defaults
     max_turns: int = 150
     allow_private_messages: bool = False
+    max_negotiation_rounds: int = 3
     elo_k_factor: float = 32.0
     output_directory: Path = Path("data")
 

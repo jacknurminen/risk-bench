@@ -72,6 +72,7 @@ def _run_new_game(models: list[str], seed: int, settings: Settings, verbose: boo
             player_specs=specs,
             max_turns=settings.max_turns,
             allow_private_messages=settings.allow_private_messages,
+            max_negotiation_rounds=settings.max_negotiation_rounds,
         )
     )
     runner = GameRunner(
@@ -79,6 +80,7 @@ def _run_new_game(models: list[str], seed: int, settings: Settings, verbose: boo
         seed=seed,
         max_turns=settings.max_turns,
         allow_private_messages=settings.allow_private_messages,
+        max_negotiation_rounds=settings.max_negotiation_rounds,
         journal=journal,
         verbose=verbose,
     )
@@ -103,6 +105,7 @@ def _resume_game(journal_file: Path, settings: Settings, verbose: bool) -> tuple
         seed=header.seed,
         max_turns=header.max_turns,
         allow_private_messages=header.allow_private_messages,
+        max_negotiation_rounds=header.max_negotiation_rounds,
         journal=journal,
         verbose=verbose,
     )
@@ -133,6 +136,7 @@ def tournament(
         base_seed=seed,
         max_turns=settings.max_turns,
         allow_private_messages=settings.allow_private_messages,
+        max_negotiation_rounds=settings.max_negotiation_rounds,
         k_factor=settings.elo_k_factor,
         verbose=verbose,
     )

@@ -1,4 +1,5 @@
 import random
+from collections import Counter
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
 from risk_bench.game.actions import Action
@@ -15,9 +16,21 @@ def random_players(player_ids: list[PlayerId], seed: int) -> dict[PlayerId, Play
 
 def run_random_game(seed: int, max_turns: int) -> GameRecord:
     players = random_players(player_ids=["alice", "bob", "carla"], seed=seed)
+    return talking_runner(players=players, seed=seed, max_turns=max_turns, allow_private_messages=True).run()
+
+
+def talking_runner(
+    players: dict[PlayerId, Player], seed: int, max_turns: int, allow_private_messages: bool
+) -> GameRunner:
     return GameRunner(
-        players=players, seed=seed, max_turns=max_turns, allow_private_messages=True, journal=None, verbose=False
-    ).run()
+        players=players,
+        seed=seed,
+        max_turns=max_turns,
+        allow_private_messages=allow_private_messages,
+        max_negotiation_rounds=3,
+        journal=None,
+        verbose=False,
+    )
 
 
 def test_a_full_random_game_finishes_with_a_winner_and_a_complete_record():
@@ -56,6 +69,7 @@ class ScriptedTalker:
         self.player_id = player_id
         self.invalid_action_count = 0
         self.seen_views: list[PlayerView] = []
+        self.negotiation_views: list[PlayerView] = []
         self._random_player = RandomPlayer(player_id=player_id, rng=rng)
 
     def decide_action(self, request: DecisionRequest) -> Action:
@@ -64,6 +78,7 @@ class ScriptedTalker:
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
         self.seen_views.append(view)
+        self.negotiation_views.append(view)
         return [
             ChatMessage(
                 turn_number=view.turn_number,
@@ -79,22 +94,72 @@ def test_negotiation_messages_reach_other_players_views():
     talkers = {
         player_id: ScriptedTalker(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
     }
-    record = GameRunner(
-        players=dict(talkers), seed=3, max_turns=5, allow_private_messages=True, journal=None, verbose=False
-    ).run()
+    record = talking_runner(players=dict(talkers), seed=3, max_turns=5, allow_private_messages=True).run()
 
     assert len(record.chat) > 0
     alice_decision_views = [view for view in talkers["alice"].seen_views if view.visible_chat]
     assert any(message.sender == "bob" for view in alice_decision_views for message in view.visible_chat)
 
 
+class SilentPlayer(ScriptedTalker):
+    """Records negotiation opportunities like its parent but never says anything."""
+
+    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+        self.negotiation_views.append(view)
+        return []
+
+
+def test_negotiation_runs_until_the_round_cap_while_everyone_keeps_talking():
+    talkers = {
+        player_id: ScriptedTalker(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
+    }
+    talking_runner(players=dict(talkers), seed=3, max_turns=2, allow_private_messages=True).run()
+
+    for talker in talkers.values():
+        opportunities_per_turn = Counter(view.turn_number for view in talker.negotiation_views)
+        assert all(count == 3 for count in opportunities_per_turn.values())
+
+
+def test_a_silent_pass_ends_the_negotiation_round():
+    players = {
+        player_id: SilentPlayer(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
+    }
+    talking_runner(players=dict(players), seed=3, max_turns=2, allow_private_messages=True).run()
+
+    for player in players.values():
+        opportunities_per_turn = Counter(view.turn_number for view in player.negotiation_views)
+        assert all(count == 1 for count in opportunities_per_turn.values())
+
+
+def test_replies_become_visible_within_the_same_turns_negotiation_round():
+    talkers = {
+        player_id: ScriptedTalker(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
+    }
+    talking_runner(players=dict(talkers), seed=3, max_turns=2, allow_private_messages=True).run()
+
+    alice = talkers["alice"]
+    assert any(
+        message.turn_number == view.turn_number and message.sender != "alice"
+        for view in alice.negotiation_views
+        for message in view.visible_chat
+    )
+
+
+def test_dropped_private_messages_do_not_keep_the_negotiation_round_alive():
+    players = whisperers(seed=7)
+    talking_runner(players=dict(players), seed=7, max_turns=2, allow_private_messages=False).run()
+
+    for player in players.values():
+        assert isinstance(player, PrivateWhisperer)
+        opportunities_per_turn = Counter(view.turn_number for view in player.negotiation_views)
+        assert all(count == 1 for count in opportunities_per_turn.values())
+
+
 def test_setup_placements_of_others_are_not_delivered_as_events():
     talkers = {
         player_id: ScriptedTalker(player_id=player_id, rng=random.Random(5)) for player_id in ("alice", "bob", "carla")
     }
-    GameRunner(
-        players=dict(talkers), seed=5, max_turns=3, allow_private_messages=True, journal=None, verbose=False
-    ).run()
+    talking_runner(players=dict(talkers), seed=5, max_turns=3, allow_private_messages=True).run()
 
     for player_id, talker in talkers.items():
         for view in talker.seen_views:
@@ -115,6 +180,7 @@ class PrivateWhisperer(ScriptedTalker):
     """Sends one private message to a fixed recipient each negotiation opportunity."""
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+        self.negotiation_views.append(view)
         recipient = next(info.player_id for info in view.players if info.player_id != self.player_id)
         return [
             ChatMessage(
@@ -135,17 +201,13 @@ def whisperers(seed: int) -> dict[PlayerId, Player]:
 
 
 def test_private_messages_are_dropped_when_not_allowed():
-    record = GameRunner(
-        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=False, journal=None, verbose=False
-    ).run()
+    record = talking_runner(players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=False).run()
 
     assert record.chat == ()
 
 
 def test_private_messages_are_kept_when_allowed():
-    record = GameRunner(
-        players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=True, journal=None, verbose=False
-    ).run()
+    record = talking_runner(players=whisperers(seed=7), seed=7, max_turns=3, allow_private_messages=True).run()
 
     assert len(record.chat) > 0
     assert all(message.visibility is MessageVisibility.PRIVATE for message in record.chat)
@@ -153,7 +215,7 @@ def test_private_messages_are_kept_when_allowed():
 
 def test_views_expose_whether_private_messages_are_allowed():
     players = whisperers(seed=9)
-    GameRunner(players=players, seed=9, max_turns=2, allow_private_messages=False, journal=None, verbose=False).run()
+    talking_runner(players=players, seed=9, max_turns=2, allow_private_messages=False).run()
 
     alice = players["alice"]
     assert isinstance(alice, PrivateWhisperer)

@@ -30,9 +30,12 @@ class GameRecord:
 class GameRunner:
     """Runs one full game from setup to a completed mission or the turn limit.
 
-    Owns the game flow: each turn starts with a negotiation round (the active
-    player may send messages, then every other living player gets one reaction
-    opportunity), followed by the decide/apply loop through the turn's phases.
+    Owns the game flow: each turn starts with a negotiation round of up to
+    ``max_negotiation_rounds`` passes. In every pass the active player speaks
+    first and each other living player may react; a pass in which nobody says
+    anything ends the round, so quiet turns cost one pass while genuine
+    exchanges (proposal, counter, acceptance) resolve within a single turn.
+    Negotiation is followed by the decide/apply loop through the turn's phases.
     A game that reaches ``max_turns`` without a completed mission is recorded
     as a draw. Setup placements happen before any negotiation, and their events
     are delivered only to the placing player, keeping starting placements blind.
@@ -50,6 +53,7 @@ class GameRunner:
         seed: int,
         max_turns: int,
         allow_private_messages: bool,
+        max_negotiation_rounds: int,
         journal: JournalWriter | None,
         verbose: bool,
     ) -> None:
@@ -57,6 +61,7 @@ class GameRunner:
         self._seed = seed
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
+        self._max_negotiation_rounds = max_negotiation_rounds
         self._journal = journal
         self._verbose = verbose
         # per-game progress, (re)created by run()/resume()
@@ -167,16 +172,26 @@ class GameRunner:
             for player_id, player in state.players.items()
             if player.eliminated_by is None and player_id != state.current_player
         ]
-        for player_id in [state.current_player] + living_others:
+        speaking_order = [state.current_player] + living_others
+        for _ in range(self._max_negotiation_rounds):
+            if not self._run_negotiation_pass(state=state, speaking_order=speaking_order):
+                return
+
+    def _run_negotiation_pass(self, state: GameState, speaking_order: list[PlayerId]) -> bool:
+        anyone_spoke = False
+        for player_id in speaking_order:
             view = self._build_view(state=state, player_id=player_id)
             for message in self._players[player_id].compose_messages(view=view):
+                # a dropped private message was heard by nobody, so it must not extend the round
                 if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
                     continue
+                anyone_spoke = True
                 self._transcript.add(message=message)
                 if self._journal is not None:
                     self._journal.write_message(message=message)
                 if self._verbose:
                     print(message)
+        return anyone_spoke
 
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
         recent_events = tuple(self._pending_events[player_id])
