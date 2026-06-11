@@ -65,7 +65,9 @@ def render_system_prompt(view: PlayerView) -> str:
         f"ids (e.g. 'middle_east', 'north_america'), so everyone knows precisely what you mean.\n\n"
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
         f"Never reveal your mission. Play to complete it as fast as possible; helping others costs you the game.\n"
-        f"Always act by calling exactly one action tool, optionally adding one message tool call."
+        f"Always act by calling exactly one action tool, optionally adding one message tool call.\n"
+        f"Before your tool calls, briefly state your private reasoning as plain text — other players never "
+        f"see it; it is recorded only for post-game analysis."
     )
 
 

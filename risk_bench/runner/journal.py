@@ -100,6 +100,15 @@ class JournalWriter:
         """
         self._write_line(record={"type": "message", "message": chat_message_to_json(message)})
 
+    def write_thought(self, player_id: PlayerId, text: str) -> None:
+        """Record a player's private rationale; observational only, never replayed into the game.
+
+        Args:
+            player_id: The thinking player.
+            text: The rationale as the player stated it.
+        """
+        self._write_line(record={"type": "thought", "player": player_id, "text": text})
+
     def write_result(self, winner: PlayerId | None, turn_count: int) -> None:
         """Record the game outcome; marks the journal as finished.
 

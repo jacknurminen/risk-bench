@@ -1,8 +1,7 @@
 import random
 
-from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.types import PlayerId
-from risk_bench.players.base import Decision, DecisionRequest, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, PlayerView
 
 
 class RandomPlayer:
@@ -29,15 +28,15 @@ class RandomPlayer:
         Returns:
             A messageless decision with one of the legal actions.
         """
-        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None)
+        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None, thought=None)
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         """Stay silent; the random baseline never negotiates.
 
         Args:
             view: The player's current view of the game (unused).
 
         Returns:
-            An empty list.
+            An empty negotiation turn.
         """
-        return []
+        return NegotiationTurn(messages=(), thought=None)

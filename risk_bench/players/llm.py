@@ -3,7 +3,7 @@ import random
 from risk_bench.agents.base import Agent, Message, Response, ToolCall
 from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.types import PlayerId
-from risk_bench.players.base import Decision, DecisionRequest, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, PlayerView
 from risk_bench.players.rendering import render_decision_prompt, render_negotiation_prompt, render_system_prompt
 from risk_bench.players.tools import (
     InvalidToolCallError,
@@ -41,7 +41,8 @@ class LLMPlayer:
         Alongside the action tool call the model may include messaging tool
         calls; the first valid message is kept (one per decision), and only
         from the response whose action was legal — chatter on failed attempts
-        is never delivered.
+        is never delivered. Plain text accompanying the successful response is
+        captured as the decision's private thought.
 
         Args:
             request: The player's view and the legal actions.
@@ -67,31 +68,42 @@ class LLMPlayer:
                 conversation += _correction_messages(response=response, failed_call=action_calls[0], error=error)
                 continue
             return Decision(
-                actions=tuple(actions), chat_message=_first_valid_message(response=response, view=request.view)
+                actions=tuple(actions),
+                chat_message=_first_valid_message(response=response, view=request.view),
+                thought=_thought_text(response=response),
             )
 
         self.invalid_action_count += 1
-        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None)
+        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None, thought=None)
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         """Ask the model whether to send diplomacy messages.
+
+        Plain text in the response is captured as the turn's private thought.
 
         Args:
             view: The player's current view of the game.
 
         Returns:
-            Messages to send, empty for silence (also the fallback on invalid calls).
+            The negotiation turn; empty messages mean silence (also the
+            fallback on invalid calls).
         """
         conversation = [
             Message(role="system", content=render_system_prompt(view=view)),
             Message(role="user", content=render_negotiation_prompt(view=view)),
         ]
         response = self._agent.respond(messages=conversation, tools=tools_for_negotiation(view=view))
+        thought = _thought_text(response=response)
         try:
             parsed = [parse_negotiation_tool_call(call=call, view=view) for call in response.tool_calls]
         except InvalidToolCallError:
-            return []
-        return [message for message in parsed if message is not None]
+            return NegotiationTurn(messages=(), thought=thought)
+        return NegotiationTurn(messages=tuple(message for message in parsed if message is not None), thought=thought)
+
+
+def _thought_text(response: Response) -> str | None:
+    text = (response.text or "").strip()
+    return text or None
 
 
 def _first_valid_message(response: Response, view: PlayerView) -> ChatMessage | None:

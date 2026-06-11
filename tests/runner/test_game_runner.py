@@ -5,7 +5,7 @@ from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
 from risk_bench.game.actions import PlaceArmies
 from risk_bench.game.events import ArmiesPlaced, MissionCompleted, TurnLimitReached
 from risk_bench.game.types import Phase, PlayerId
-from risk_bench.players.base import Decision, DecisionRequest, Player, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, Player, PlayerView
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 
@@ -76,18 +76,17 @@ class ScriptedTalker:
         self.seen_views.append(request.view)
         return self._random_player.decide_action(request)
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         self.seen_views.append(view)
         self.negotiation_views.append(view)
-        return [
-            ChatMessage(
-                turn_number=view.turn_number,
-                sender=self.player_id,
-                visibility=MessageVisibility.PUBLIC,
-                recipient=None,
-                text=f"{self.player_id} greets everyone on turn {view.turn_number}.",
-            )
-        ]
+        greeting = ChatMessage(
+            turn_number=view.turn_number,
+            sender=self.player_id,
+            visibility=MessageVisibility.PUBLIC,
+            recipient=None,
+            text=f"{self.player_id} greets everyone on turn {view.turn_number}.",
+        )
+        return NegotiationTurn(messages=(greeting,), thought=None)
 
 
 def test_negotiation_messages_reach_other_players_views():
@@ -104,9 +103,9 @@ def test_negotiation_messages_reach_other_players_views():
 class SilentPlayer(ScriptedTalker):
     """Records negotiation opportunities like its parent but never says anything."""
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         self.negotiation_views.append(view)
-        return []
+        return NegotiationTurn(messages=(), thought=None)
 
 
 def test_negotiation_runs_until_the_round_cap_while_everyone_keeps_talking():
@@ -148,8 +147,8 @@ def test_replies_become_visible_within_the_same_turns_negotiation_round():
 class SplittingPlacer(ScriptedTalker):
     """Splits every multi-army placement across two territories in a single decision; never chats."""
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
-        return []
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
+        return NegotiationTurn(messages=(), thought=None)
 
     def decide_action(self, request: DecisionRequest) -> Decision:
         decision = super().decide_action(request)
@@ -163,7 +162,7 @@ class SplittingPlacer(ScriptedTalker):
             PlaceArmies(territory=action.territory, count=action.count - split),
             PlaceArmies(territory=other.territory, count=split),
         )
-        return Decision(actions=batch, chat_message=None)
+        return Decision(actions=batch, chat_message=None, thought=None)
 
 
 def test_batched_placements_apply_in_order_and_the_game_still_completes():
@@ -180,9 +179,9 @@ def test_batched_placements_apply_in_order_and_the_game_still_completes():
 class TableTalker(ScriptedTalker):
     """Stays silent in negotiation but attaches one message to every action it takes."""
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         self.negotiation_views.append(view)
-        return []
+        return NegotiationTurn(messages=(), thought=None)
 
     def decide_action(self, request: DecisionRequest) -> Decision:
         decision = super().decide_action(request)
@@ -193,7 +192,7 @@ class TableTalker(ScriptedTalker):
             recipient=None,
             text=f"{self.player_id} announces a {request.view.phase} move.",
         )
-        return Decision(actions=decision.actions, chat_message=announcement)
+        return Decision(actions=decision.actions, chat_message=announcement, thought=None)
 
 
 def test_table_talk_attached_to_actions_reaches_the_transcript_and_other_players():
@@ -245,18 +244,17 @@ def _happened_during_setup(view: PlayerView, event: ArmiesPlaced) -> bool:
 class PrivateWhisperer(ScriptedTalker):
     """Sends one private message to a fixed recipient each negotiation opportunity."""
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         self.negotiation_views.append(view)
         recipient = next(info.player_id for info in view.players if info.player_id != self.player_id)
-        return [
-            ChatMessage(
-                turn_number=view.turn_number,
-                sender=self.player_id,
-                visibility=MessageVisibility.PRIVATE,
-                recipient=recipient,
-                text="Psst. Truce?",
-            )
-        ]
+        whisper = ChatMessage(
+            turn_number=view.turn_number,
+            sender=self.player_id,
+            visibility=MessageVisibility.PRIVATE,
+            recipient=recipient,
+            text="Psst. Truce?",
+        )
+        return NegotiationTurn(messages=(whisper,), thought="hoping for a truce")
 
 
 def whisperers(seed: int) -> dict[PlayerId, Player]:

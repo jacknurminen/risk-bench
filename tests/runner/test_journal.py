@@ -122,6 +122,39 @@ def test_resuming_a_finished_game_is_rejected(tmp_path: Path):
         journaled_runner(journal=None, seed=11, max_turns=2_000).resume(restored=restored)
 
 
+def test_thoughts_are_journaled_but_ignored_by_replay(tmp_path: Path):
+    from tests.runner.test_game_runner import whisperers
+
+    path = tmp_path / "game.jsonl"
+    journal = JournalWriter(path=path, append=False)
+    journal.write_header(
+        header=JournalHeader(
+            schema_version=SCHEMA_VERSION,
+            seed=7,
+            player_specs={name: "random" for name in PLAYER_NAMES},
+            max_turns=3,
+            allow_private_messages=True,
+            max_negotiation_rounds=3,
+        )
+    )
+    GameRunner(
+        players=whisperers(seed=7),
+        seed=7,
+        max_turns=3,
+        allow_private_messages=True,
+        max_negotiation_rounds=3,
+        journal=journal,
+        verbose=False,
+    ).run()
+    journal.close()
+
+    thoughts = [record for record in read_journal(path=path) if record["type"] == "thought"]
+    assert thoughts and all(record["text"] == "hoping for a truce" for record in thoughts)
+    assert {record["player"] for record in thoughts} == set(PLAYER_NAMES)
+    restored = restore_game(path=path)  # thought lines are observational; replay must skip them
+    assert restored.is_finished
+
+
 def test_headers_from_before_multi_pass_negotiation_restore_with_one_round(tmp_path: Path):
     path = tmp_path / "game.jsonl"
     write_game_journal(path=path, seed=11, max_turns=2_000)

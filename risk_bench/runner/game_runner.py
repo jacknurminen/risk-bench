@@ -160,6 +160,7 @@ class GameRunner:
             state = result.state
             if state.phase is Phase.GAME_OVER:
                 break  # a placement can complete an occupy-with-two-armies mission mid-batch
+        self._record_thought(player_id=acting_player, thought=decision.thought)
         if decision.chat_message is not None:
             self._deliver_message(message=decision.chat_message)
         return state
@@ -189,10 +190,20 @@ class GameRunner:
         anyone_spoke = False
         for player_id in speaking_order:
             view = self._build_view(state=state, player_id=player_id)
-            for message in self._players[player_id].compose_messages(view=view):
+            negotiation_turn = self._players[player_id].compose_messages(view=view)
+            self._record_thought(player_id=player_id, thought=negotiation_turn.thought)
+            for message in negotiation_turn.messages:
                 # a dropped private message was heard by nobody, so it must not extend the round
                 anyone_spoke |= self._deliver_message(message=message)
         return anyone_spoke
+
+    def _record_thought(self, player_id: PlayerId, thought: str | None) -> None:
+        if thought is None:
+            return
+        if self._journal is not None:
+            self._journal.write_thought(player_id=player_id, text=thought)
+        if self._verbose:
+            print(f"({player_id} thinks) {thought}")
 
     def _deliver_message(self, message: ChatMessage) -> bool:
         if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:

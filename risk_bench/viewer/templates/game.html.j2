@@ -55,6 +55,10 @@
   .entry:hover { background:#262935; }
   .entry.current { background:#2e3342; }
   .entry .ev { color:var(--dim); padding-left:14px; }
+  .entry .thought { display:none; color:#9d92c5; font-style:italic; padding-left:14px; }
+  body.showThoughts .entry .thought { display:block; }
+  #log h3 { display:flex; justify-content:space-between; align-items:center; }
+  #log h3 label { text-transform:none; letter-spacing:normal; font-weight:400; cursor:pointer; }
   .banner { padding:4px 8px; border-radius:6px; background:#23252e; margin-bottom:8px; }
 </style>
 </head>
@@ -83,7 +87,10 @@
     <input type="range" id="slider" min="0" value="0">
     <span id="status"></span>
   </div>
-  <div id="log" class="panel"><h3>Event log</h3><div id="entries"></div></div>
+  <div id="log" class="panel">
+    <h3>Event log <label><input type="checkbox" id="thoughtsToggle"> 🧠 thoughts</label></h3>
+    <div id="entries"></div>
+  </div>
 </div>
 <script>
 const GAME = {{ game_json }};
@@ -254,7 +261,10 @@ function upsertLogEntry(i) {
     el("entries").appendChild(entry);
   }
   const events = step.events.map(text => `<div class="ev">${richText(text)}</div>`).join("");
-  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}`;
+  const thoughts = GAME.thoughts.filter(thought => thought.step === i)
+    .map(thought => `<div class="thought">🧠 ${colorizeNames(thought.player)}: ${richText(thought.text)}</div>`)
+    .join("");
+  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}${thoughts}`;
 }
 
 function appendLog(fromIndex) {
@@ -315,6 +325,7 @@ document.addEventListener("keydown", event => {
   if (event.key === "ArrowLeft") show(index - 1);
   if (event.key === "ArrowRight") show(index + 1);
 });
+el("thoughtsToggle").onchange = event => document.body.classList.toggle("showThoughts", event.target.checked);
 
 let lastFingerprint = null;
 async function refreshFromJournal() {
@@ -324,7 +335,7 @@ async function refreshFromJournal() {
   // the last known step can gain events after the fact (the journal writes them
   // on a separate line), so the fingerprint covers it, not just the counts
   const fingerprint = JSON.stringify(
-    [updated.steps.length, updated.steps.at(-1), updated.messages.length, updated.result]);
+    [updated.steps.length, updated.steps.at(-1), updated.messages.length, updated.thoughts.length, updated.result]);
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
 
@@ -332,6 +343,7 @@ async function refreshFromJournal() {
   const knownSteps = steps.length, knownMessages = GAME.messages.length;
   steps.splice(0, steps.length, ...updated.steps);
   GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
+  GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
   GAME.result = updated.result;
   appendLog(Math.max(0, knownSteps - 1));
   appendChat(knownMessages);

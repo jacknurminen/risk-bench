@@ -73,10 +73,26 @@ class Decision:
     strictly one per decision, since attacks need fresh dice results between
     choices. At most one message per decision keeps a turn's many decisions
     (every attack roll is one) from flooding the chat transcript.
+
+    ``thought`` is the player's private rationale: recorded in the journal for
+    analysis, never shown to other players.
     """
 
     actions: tuple[Action, ...]
     chat_message: ChatMessage | None
+    thought: str | None
+
+
+@dataclass(frozen=True)
+class NegotiationTurn:
+    """A player's contribution to one negotiation pass: messages plus private rationale.
+
+    Like ``Decision.thought``, the thought is observational only — journaled
+    for analysis, invisible to other players.
+    """
+
+    messages: tuple[ChatMessage, ...]
+    thought: str | None
 
 
 @runtime_checkable
@@ -104,13 +120,13 @@ class Player(Protocol):
         """
         ...
 
-    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         """Compose diplomacy messages for the current negotiation opportunity.
 
         Args:
             view: The player's current view of the game.
 
         Returns:
-            Messages to send, empty for silence.
+            The negotiation turn; empty messages mean silence.
         """
         ...

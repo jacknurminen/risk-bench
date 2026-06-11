@@ -193,15 +193,35 @@ def test_an_invalid_message_does_not_invalidate_a_legal_action():
     assert player.invalid_action_count == 0
 
 
-def test_compose_messages_parses_negotiation_calls():
+def test_thoughts_are_captured_from_the_successful_responses_text():
+    response = Response(
+        text="Kamchatka is weakly held; taking it cuts gpt off from Asia.",
+        tool_calls=VALID_ATTACK_RESPONSE.tool_calls,
+    )
+    decision = llm_player(agent=StubAgent(responses=[response])).decide_action(attack_request())
+
+    assert decision.actions == (EXPECTED_ATTACK,)
+    assert decision.thought == "Kamchatka is weakly held; taking it cuts gpt off from Asia."
+
+
+def test_a_responses_blank_text_means_no_thought():
+    decision = llm_player(agent=StubAgent(responses=[VALID_ATTACK_RESPONSE])).decide_action(attack_request())
+
+    assert decision.thought is None
+
+
+def test_compose_messages_parses_negotiation_calls_and_captures_the_thought():
     view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
-    agent = StubAgent(responses=[Response(text=None, tool_calls=(tool_call("send_public_message", text="Hi"),))])
+    agent = StubAgent(
+        responses=[Response(text="A truce buys me time.", tool_calls=(tool_call("send_public_message", text="Hi"),))]
+    )
 
-    messages = llm_player(agent=agent).compose_messages(view=view)
+    negotiation_turn = llm_player(agent=agent).compose_messages(view=view)
 
-    assert len(messages) == 1
-    assert messages[0].text == "Hi"
-    assert messages[0].sender == ALICE
+    assert len(negotiation_turn.messages) == 1
+    assert negotiation_turn.messages[0].text == "Hi"
+    assert negotiation_turn.messages[0].sender == ALICE
+    assert negotiation_turn.thought == "A truce buys me time."
 
 
 def test_compose_messages_falls_back_to_silence():
@@ -210,6 +230,9 @@ def test_compose_messages_falls_back_to_silence():
     broken = StubAgent(responses=[Response(text=None, tool_calls=(tool_call("send_telegram", text="?"),))])
     chatty_text_only = StubAgent(responses=[Response(text="Hello everyone!", tool_calls=())])
 
-    assert llm_player(agent=silent).compose_messages(view=view) == []
-    assert llm_player(agent=broken).compose_messages(view=view) == []
-    assert llm_player(agent=chatty_text_only).compose_messages(view=view) == []
+    assert llm_player(agent=silent).compose_messages(view=view).messages == ()
+    assert llm_player(agent=broken).compose_messages(view=view).messages == ()
+    # text without a message tool call stays private: a thought, not a message
+    chatty_turn = llm_player(agent=chatty_text_only).compose_messages(view=view)
+    assert chatty_turn.messages == ()
+    assert chatty_turn.thought == "Hello everyone!"

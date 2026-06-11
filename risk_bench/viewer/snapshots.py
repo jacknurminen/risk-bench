@@ -48,6 +48,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
 
     steps = [_step(state=state, player_names=player_names, action_text=None, events=[])]
     messages = []
+    thoughts = []
     result = None
     for record in records[1:]:
         match record["type"]:
@@ -67,6 +68,8 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 steps[-1]["events"] = [narrate_event(event=event_from_json(data)) for data in record["events"]]
             case "message":
                 messages.append({**record["message"], "step": len(steps) - 1})
+            case "thought":
+                thoughts.append({"player": record["player"], "text": record["text"], "step": len(steps) - 1})
             case "result":
                 result = {"winner": record["winner"], "turn_count": int(record["turn_count"])}
 
@@ -85,6 +88,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         ],
         "steps": steps,
         "messages": messages,
+        "thoughts": thoughts,
         "result": result,
     }
 
