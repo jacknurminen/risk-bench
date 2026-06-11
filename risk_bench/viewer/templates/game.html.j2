@@ -20,6 +20,17 @@
   #board .attribution a { color:var(--dim); }
   .acount { font:700 11px system-ui, sans-serif; text-anchor:middle; dominant-baseline:middle;
             fill:#101010; paint-order:stroke; stroke:#ffffffd0; stroke-width:2.5px; pointer-events:none; }
+  .tname  { font:400 5px system-ui, sans-serif; text-anchor:middle; dominant-baseline:middle;
+            fill:#1f2730; opacity:.85; paint-order:stroke; stroke:#ffffffa8; stroke-width:1.6px;
+            pointer-events:none; }
+  #board path.flash { animation: borderFlash 1.2s ease-out; }
+  @keyframes borderFlash {
+    0%   { stroke:#ffe066; stroke-width:4;   stroke-opacity:1; }
+    55%  { stroke:#ffe066; stroke-width:2.5; stroke-opacity:1; }
+    100% { stroke:#000000; stroke-width:1.2; stroke-opacity:.85; }
+  }
+  .tlink { border-bottom:1px dotted var(--dim); cursor:pointer; }
+  .tlink:hover { border-bottom-color:#ffe066; color:#ffe066; }
   button { background:#2a2d38; color:var(--text); border:1px solid var(--line); border-radius:5px;
            padding:4px 10px; cursor:pointer; font-size:13px; }
   button:hover { background:#343847; }
@@ -107,6 +118,27 @@ function colorizeNames(text) {
     `<span style="color:${COLORS[seatByAlias[match.toLowerCase()]]};font-weight:600">${match}</span>`);
 }
 
+// Territory mentions become links that flash the territory's borders on the map.
+const TERRITORY_PATTERN = new RegExp(
+  "\\b(" + Object.keys(steps[0].board).sort((a, b) => b.length - a.length).join("|") + ")\\b", "g");
+
+function richText(text) {
+  return colorizeNames(text).replace(TERRITORY_PATTERN, match =>
+    `<span class="tlink" data-territory="${match}">${match}</span>`);
+}
+
+function flashTerritory(territory) {
+  const path = territoryShapes[territory].path;
+  path.classList.remove("flash");
+  void path.getBoundingClientRect();  // force a reflow so re-adding the class restarts the animation
+  path.classList.add("flash");
+}
+
+document.addEventListener("click", event => {
+  const link = event.target.closest(".tlink");
+  if (link) flashTerritory(link.dataset.territory);
+});
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 const territoryShapes = {};
 
@@ -115,13 +147,20 @@ function buildBoard() {
   for (const territory of Object.keys(steps[0].board)) {
     const path = svg.getElementById(territory);
     const box = path.getBBox();
-    const label = document.createElementNS(SVG_NS, "text");
-    label.setAttribute("x", box.x + box.width / 2);
-    label.setAttribute("y", box.y + box.height / 2);
-    label.setAttribute("class", "acount");
-    // getBBox is in the path's local coordinates: the label must live in the same
+    const centerX = box.x + box.width / 2, centerY = box.y + box.height / 2;
+    // getBBox is in the path's local coordinates: the labels must live in the same
     // (transformed) layer group as the path, not at the svg root
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("x", centerX);
+    label.setAttribute("y", centerY);
+    label.setAttribute("class", "acount");
     path.parentNode.appendChild(label);
+    const nameLabel = document.createElementNS(SVG_NS, "text");
+    nameLabel.setAttribute("x", centerX);
+    nameLabel.setAttribute("y", centerY + 8);
+    nameLabel.setAttribute("class", "tname");
+    nameLabel.textContent = pretty(territory);
+    path.parentNode.appendChild(nameLabel);
     const tooltip = document.createElementNS(SVG_NS, "title");
     path.appendChild(tooltip);
     territoryShapes[territory] = { path, label, tooltip };
@@ -163,7 +202,7 @@ function appendChat(fromIndex) {
     const channel = message.visibility === "private"
       ? `<span class="priv">🔒 to ${colorizeNames(message.recipient)}</span>` : "to everyone";
     div.innerHTML = `<div class="meta">turn ${message.turn_number} — ${colorizeNames(message.sender)} ${channel}</div>
-      <div>${colorizeNames(message.text)}</div>`;
+      <div>${richText(message.text)}</div>`;
     container.appendChild(div);
   }
   if (LIVE && GAME.messages.length > fromIndex) el("chat").scrollTop = el("chat").scrollHeight;
@@ -179,8 +218,8 @@ function upsertLogEntry(i) {
     entry.onclick = () => show(i);
     el("entries").appendChild(entry);
   }
-  const events = step.events.map(text => `<div class="ev">${colorizeNames(text)}</div>`).join("");
-  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : colorizeNames(step.action)}</div>${events}`;
+  const events = step.events.map(text => `<div class="ev">${richText(text)}</div>`).join("");
+  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}`;
 }
 
 function appendLog(fromIndex) {
