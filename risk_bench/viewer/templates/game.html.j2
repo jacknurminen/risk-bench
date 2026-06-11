@@ -52,7 +52,9 @@
   </div>
   <div id="side">
     <div class="panel" id="playersPanel"><h3>Players</h3><div id="players"></div></div>
-    <div class="panel" id="chat"><h3>Chat</h3><div id="messages"></div></div>
+    <div class="panel" id="chat"><h3>Chat</h3><div id="messages">
+      <span id="noMessages" style="color:var(--dim)">No messages.</span>
+    </div></div>
   </div>
   <div id="controls" class="panel">
     <button id="first">⏮</button>
@@ -69,6 +71,7 @@
 </div>
 <script>
 const GAME = {{ game_json }};
+const LIVE = {{ live_json }};
 const COLORS = ["#c0504d","#4f81bd","#9bbb59","#8064a2","#f79646","#4bacc6"];
 const steps = GAME.steps;
 let index = 0;
@@ -108,20 +111,25 @@ function buildPlayers() {
       <div class="mission">${player.mission}</div><div class="stats"></div>`;
     container.appendChild(card);
   });
-  if (GAME.result) {
-    const banner = document.createElement("div");
-    banner.className = "banner";
-    banner.textContent = GAME.result.winner
-      ? `Winner: ${GAME.result.winner} (turn ${GAME.result.turn_count})`
-      : `Draw at the turn limit (turn ${GAME.result.turn_count})`;
-    container.prepend(banner);
-  }
+  updateResultBanner();
 }
 
-function buildChat() {
+function updateResultBanner() {
+  if (!GAME.result || el("resultBanner")) return;
+  const banner = document.createElement("div");
+  banner.className = "banner";
+  banner.id = "resultBanner";
+  banner.textContent = GAME.result.winner
+    ? `Winner: ${GAME.result.winner} (turn ${GAME.result.turn_count})`
+    : `Draw at the turn limit (turn ${GAME.result.turn_count})`;
+  el("players").prepend(banner);
+}
+
+function appendChat(fromIndex) {
   const container = el("messages");
-  if (!GAME.messages.length) { container.innerHTML = '<span style="color:var(--dim)">No messages.</span>'; return; }
-  GAME.messages.forEach((message, i) => {
+  if (GAME.messages.length > fromIndex) el("noMessages")?.remove();
+  for (let i = fromIndex; i < GAME.messages.length; i++) {
+    const message = GAME.messages[i];
     const div = document.createElement("div");
     div.className = "msg";
     div.id = "m-" + i;
@@ -130,20 +138,25 @@ function buildChat() {
     div.innerHTML = `<div class="meta">turn ${message.turn_number} — <b>${message.sender}</b> ${channel}</div>
       <div>${message.text}</div>`;
     container.appendChild(div);
-  });
+  }
 }
 
-function buildLog() {
-  const container = el("entries");
-  steps.forEach((step, i) => {
-    const entry = document.createElement("div");
+function upsertLogEntry(i) {
+  const step = steps[i];
+  let entry = document.getElementById("e-" + i);
+  if (!entry) {
+    entry = document.createElement("div");
     entry.className = "entry";
     entry.id = "e-" + i;
-    const events = step.events.map(text => `<div class="ev">${text}</div>`).join("");
-    entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : step.action}</div>${events}`;
     entry.onclick = () => show(i);
-    container.appendChild(entry);
-  });
+    el("entries").appendChild(entry);
+  }
+  const events = step.events.map(text => `<div class="ev">${text}</div>`).join("");
+  entry.innerHTML = `<div>${i === 0 ? "Game start: territories dealt" : step.action}</div>${events}`;
+}
+
+function appendLog(fromIndex) {
+  for (let i = fromIndex; i < steps.length; i++) upsertLogEntry(i);
 }
 
 function show(newIndex) {
@@ -169,7 +182,8 @@ function show(newIndex) {
   entry.classList.add("current");
   entry.scrollIntoView({ block: "nearest" });
   el("slider").value = index;
-  el("status").textContent = `step ${index}/${steps.length - 1} — turn ${step.turn}, ${pretty(step.phase)}`;
+  const liveMark = LIVE && !GAME.result ? " — LIVE" : "";
+  el("status").textContent = `step ${index}/${steps.length - 1} — turn ${step.turn}, ${pretty(step.phase)}${liveMark}`;
 }
 
 function stopPlaying() { clearInterval(timer); timer = null; el("play").textContent = "▶ play"; }
@@ -198,7 +212,32 @@ document.addEventListener("keydown", event => {
   if (event.key === "ArrowRight") show(index + 1);
 });
 
-buildBoard(); buildPlayers(); buildChat(); buildLog(); show(0);
+let lastFingerprint = null;
+async function refreshFromJournal() {
+  const response = await fetch("game.json", { cache: "no-store" });
+  if (!response.ok) return;
+  const updated = await response.json();
+  // the last known step can gain events after the fact (the journal writes them
+  // on a separate line), so the fingerprint covers it, not just the counts
+  const fingerprint = JSON.stringify(
+    [updated.steps.length, updated.steps.at(-1), updated.messages.length, updated.result]);
+  if (fingerprint === lastFingerprint) return;
+  lastFingerprint = fingerprint;
+
+  const wasFollowingLatest = index === steps.length - 1;
+  const knownSteps = steps.length, knownMessages = GAME.messages.length;
+  steps.splice(0, steps.length, ...updated.steps);
+  GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
+  GAME.result = updated.result;
+  appendLog(Math.max(0, knownSteps - 1));
+  appendChat(knownMessages);
+  updateResultBanner();
+  el("slider").max = steps.length - 1;
+  show(wasFollowingLatest ? steps.length - 1 : index);
+}
+
+buildBoard(); buildPlayers(); appendChat(0); appendLog(0); show(LIVE ? steps.length - 1 : 0);
+if (LIVE) setInterval(refreshFromJournal, 1000);
 </script>
 </body>
 </html>
