@@ -1,10 +1,10 @@
 import random
 
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
-from risk_bench.game.actions import Attack
+from risk_bench.game.actions import Attack, PlaceArmies
 from risk_bench.game.types import Phase, Territory
 from risk_bench.players.llm import LLMPlayer
-from tests.players.test_tools import ALICE, attack_request, request_for_phase
+from tests.players.test_tools import ALICE, attack_request, reinforce_request_with_tradeable_set, request_for_phase
 
 
 class StubAgent:
@@ -44,7 +44,7 @@ def test_a_valid_tool_call_becomes_the_action():
 
     decision = player.decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is None
     assert player.invalid_action_count == 0
     system_prompt = agent.conversations[0][0].content
@@ -57,7 +57,7 @@ def test_an_invalid_call_is_corrected_with_the_error_and_retried():
 
     decision = player.decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert player.invalid_action_count == 0
     retry_conversation = agent.conversations[1]
     tool_results = [message for message in retry_conversation if message.role == "tool"]
@@ -72,7 +72,7 @@ def test_exhausted_retries_fall_back_to_a_random_legal_action():
 
     decision = player.decide_action(request)
 
-    assert decision.action in request.legal_actions
+    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
     assert player.invalid_action_count == 1
     assert len(agent.conversations) == 3
 
@@ -84,10 +84,31 @@ def test_responses_without_tool_calls_are_nudged_then_fall_back():
 
     decision = player.decide_action(request)
 
-    assert decision.action in request.legal_actions
+    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
     assert player.invalid_action_count == 1
     nudges = [message for message in agent.conversations[1] if message.role == "user"]
     assert any(message.content is not None and "calling exactly one" in message.content for message in nudges)
+
+
+def test_a_placement_split_becomes_a_batch_of_actions_from_one_response():
+    response = Response(
+        text=None,
+        tool_calls=(
+            tool_call(
+                "place_armies",
+                placements=[{"territory": "alaska", "count": 3}, {"territory": "alberta", "count": 2}],
+            ),
+        ),
+    )
+    player = llm_player(agent=StubAgent(responses=[response]))
+
+    decision = player.decide_action(reinforce_request_with_tradeable_set())
+
+    assert decision.actions == (
+        PlaceArmies(territory=Territory.ALASKA, count=3),
+        PlaceArmies(territory=Territory.ALBERTA, count=2),
+    )
+    assert player.invalid_action_count == 0
 
 
 def test_a_message_call_alongside_the_action_becomes_table_talk():
@@ -102,7 +123,7 @@ def test_a_message_call_alongside_the_action_becomes_table_talk():
 
     decision = player.decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is not None
     assert decision.chat_message.text == "This is for Ukraine!"
     assert decision.chat_message.sender == ALICE
@@ -119,7 +140,7 @@ def test_only_the_first_message_call_per_decision_is_kept():
     )
     decision = llm_player(agent=StubAgent(responses=[response])).decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is not None and decision.chat_message.text == "First!"
 
 
@@ -129,7 +150,7 @@ def test_a_message_only_response_is_pushed_back_for_an_action():
 
     decision = llm_player(agent=agent).decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is None  # the chatter on the failed attempt is not delivered
     pushbacks = [message for message in agent.conversations[1] if message.role == "tool"]
     assert len(pushbacks) == 1
@@ -148,7 +169,7 @@ def test_messages_on_responses_with_invalid_actions_are_not_delivered():
 
     decision = llm_player(agent=agent).decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is None
     pushbacks = [message for message in agent.conversations[1] if message.role == "tool"]
     assert len(pushbacks) == 2  # both the failed action and the undelivered message are answered
@@ -167,7 +188,7 @@ def test_an_invalid_message_does_not_invalidate_a_legal_action():
 
     decision = player.decide_action(attack_request())
 
-    assert decision.action == EXPECTED_ATTACK
+    assert decision.actions == (EXPECTED_ATTACK,)
     assert decision.chat_message is None
     assert player.invalid_action_count == 0
 

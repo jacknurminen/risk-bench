@@ -82,30 +82,68 @@ def test_reinforce_exposes_trade_and_placement_tools_with_bounds():
 
     assert [tool.name for tool in tools] == ["place_armies", "trade_cards", "send_public_message"]
     place_tool, trade_tool = tools[0], tools[1]
-    assert place_tool.parameters["properties"]["count"]["maximum"] == 5
-    assert set(place_tool.parameters["properties"]["territory"]["enum"]) == {"alaska", "alberta"}
+    placement_item = place_tool.parameters["properties"]["placements"]["items"]
+    assert placement_item["properties"]["count"]["maximum"] == 5
+    assert set(placement_item["properties"]["territory"]["enum"]) == {"alaska", "alberta"}
     assert "infantry(alaska), infantry(peru), infantry(japan) -> 4 armies" in trade_tool.description
 
 
 def test_parse_round_trips_a_valid_attack():
-    action = parse_tool_call(
+    actions = parse_tool_call(
         call=call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=2),
         request=attack_request(),
     )
-    assert action == Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)
+    assert actions == [Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)]
 
 
 def test_parse_round_trips_placement_trade_and_phase_tools():
     request = reinforce_request_with_tradeable_set()
 
-    placement = parse_tool_call(call=call("place_armies", territory="alberta", count=5), request=request)
-    assert placement == PlaceArmies(territory=Territory.ALBERTA, count=5)
+    placements = parse_tool_call(
+        call=call("place_armies", placements=[{"territory": "alberta", "count": 5}]), request=request
+    )
+    assert placements == [PlaceArmies(territory=Territory.ALBERTA, count=5)]
 
-    trade = parse_tool_call(call=call("trade_cards", set_number=1), request=request)
+    [trade] = parse_tool_call(call=call("trade_cards", set_number=1), request=request)
     assert isinstance(trade, TradeCards)
     assert trade in request.legal_actions
 
-    assert parse_tool_call(call=call("end_attack_phase"), request=attack_request()) == EndAttackPhase()
+    assert parse_tool_call(call=call("end_attack_phase"), request=attack_request()) == [EndAttackPhase()]
+
+
+def test_placements_split_across_territories_become_a_batch_in_order():
+    request = reinforce_request_with_tradeable_set()
+
+    placements = parse_tool_call(
+        call=call(
+            "place_armies",
+            placements=[{"territory": "alaska", "count": 3}, {"territory": "alberta", "count": 2}],
+        ),
+        request=request,
+    )
+
+    assert placements == [
+        PlaceArmies(territory=Territory.ALASKA, count=3),
+        PlaceArmies(territory=Territory.ALBERTA, count=2),
+    ]
+
+
+def test_placement_batches_are_validated_as_a_whole():
+    request = reinforce_request_with_tradeable_set()
+    rejections = {
+        "empty array": call("place_armies", placements=[]),
+        "not an array": call("place_armies", placements="alaska"),
+        "malformed item": call("place_armies", placements=["alaska"]),
+        "missing count": call("place_armies", placements=[{"territory": "alaska"}]),
+        "unowned territory": call("place_armies", placements=[{"territory": "japan", "count": 1}]),
+        "total over the limit": call(
+            "place_armies",
+            placements=[{"territory": "alaska", "count": 3}, {"territory": "alberta", "count": 3}],
+        ),
+    }
+    for reason, bad_call in rejections.items():
+        with pytest.raises(InvalidToolCallError):
+            parse_tool_call(call=bad_call, request=request)
 
 
 def test_parse_rejects_illegal_or_malformed_calls_with_model_readable_messages():
@@ -127,17 +165,17 @@ def test_parse_rejects_illegal_or_malformed_calls_with_model_readable_messages()
 def test_parse_rejects_counts_over_the_legal_maximum():
     request = reinforce_request_with_tradeable_set()
     with pytest.raises(InvalidToolCallError, match="5"):
-        parse_tool_call(call=call("place_armies", territory="alaska", count=6), request=request)
+        parse_tool_call(call=call("place_armies", placements=[{"territory": "alaska", "count": 6}]), request=request)
     with pytest.raises(InvalidToolCallError, match="set_number"):
         parse_tool_call(call=call("trade_cards", set_number=2), request=request)
 
 
 def test_parse_accepts_whole_number_floats():
-    action = parse_tool_call(
+    actions = parse_tool_call(
         call=call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=2.0),
         request=attack_request(),
     )
-    assert action == Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)
+    assert actions == [Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)]
 
 
 def test_occupy_tool_round_trip():
@@ -147,8 +185,8 @@ def test_occupy_tool_round_trip():
     tools = tools_for_decision(request=occupy_request)
     assert [tool.name for tool in tools] == ["occupy", "send_public_message"]
 
-    action = parse_tool_call(call=call("occupy", armies_to_move=2), request=occupy_request)
-    assert action == Occupy(armies_to_move=2)
+    actions = parse_tool_call(call=call("occupy", armies_to_move=2), request=occupy_request)
+    assert actions == [Occupy(armies_to_move=2)]
     with pytest.raises(InvalidToolCallError):
         parse_tool_call(call=call("occupy", armies_to_move=4), request=occupy_request)
 
@@ -159,11 +197,11 @@ def test_fortify_tools_round_trip():
     tools = tools_for_decision(request=request)
     assert [tool.name for tool in tools] == ["fortify", "skip_fortify", "send_public_message"]
 
-    action = parse_tool_call(
+    [action] = parse_tool_call(
         call=call("fortify", from_territory="alaska", to_territory="alberta", count=3), request=request
     )
     assert action in request.legal_actions
-    assert parse_tool_call(call=call("skip_fortify"), request=request) == SkipFortify()
+    assert parse_tool_call(call=call("skip_fortify"), request=request) == [SkipFortify()]
 
 
 def test_decision_message_tools_respect_the_private_message_flag():

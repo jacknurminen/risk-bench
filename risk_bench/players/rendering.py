@@ -184,11 +184,15 @@ def _phase_instruction(view: PlayerView) -> str:
     match view.phase:
         case Phase.SETUP_PLACEMENT:
             return (
-                f"Setup: place your starting armies ({view.armies_to_place} left). Other players' placements "
-                f"are hidden until the game begins, and yours are hidden from them."
+                f"Setup: place your starting armies ({view.armies_to_place} left); you can split them across "
+                f"territories in one call. Other players' placements are hidden until the game begins, and "
+                f"yours are hidden from them."
             )
         case Phase.REINFORCE:
-            return f"Reinforce: you have {view.armies_to_place} armies to place. Trade cards first if you wish."
+            return (
+                f"Reinforce: you have {view.armies_to_place} armies to place, splittable across territories "
+                f"in one call. Trade cards first if you wish."
+            )
         case Phase.ATTACK:
             return "Attack: strike adjacent enemy territories, or end the attack phase."
         case Phase.OCCUPY:

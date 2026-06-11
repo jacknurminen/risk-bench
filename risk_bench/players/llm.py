@@ -62,14 +62,16 @@ class LLMPlayer:
                 conversation += _action_demand_messages(response=response)
                 continue
             try:
-                action = parse_tool_call(call=action_calls[0], request=request)
+                actions = parse_tool_call(call=action_calls[0], request=request)
             except InvalidToolCallError as error:
                 conversation += _correction_messages(response=response, failed_call=action_calls[0], error=error)
                 continue
-            return Decision(action=action, chat_message=_first_valid_message(response=response, view=request.view))
+            return Decision(
+                actions=tuple(actions), chat_message=_first_valid_message(response=response, view=request.view)
+            )
 
         self.invalid_action_count += 1
-        return Decision(action=self._rng.choice(request.legal_actions), chat_message=None)
+        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None)
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
         """Ask the model whether to send diplomacy messages.

@@ -66,13 +66,16 @@ class DecisionRequest:
 
 @dataclass(frozen=True)
 class Decision:
-    """A player's answer to one decision point: the action, optionally announced with table talk.
+    """A player's answer to one decision point, optionally announced with table talk.
 
-    At most one message per decision keeps a turn's many decisions (every
-    attack roll is one) from flooding the chat transcript.
+    ``actions`` is a sequence applied in order so a whole reinforcement split
+    can be decided at once; every action type other than army placement is
+    strictly one per decision, since attacks need fresh dice results between
+    choices. At most one message per decision keeps a turn's many decisions
+    (every attack roll is one) from flooding the chat transcript.
     """
 
-    action: Action
+    actions: tuple[Action, ...]
     chat_message: ChatMessage | None
 
 
@@ -89,14 +92,15 @@ class Player(Protocol):
     invalid_action_count: int
 
     def decide_action(self, request: DecisionRequest) -> Decision:
-        """Choose one of the legal actions at this decision point, optionally with a message.
+        """Choose legal actions for this decision point, optionally with a message.
 
         Args:
             request: The player's view and the legal actions.
 
         Returns:
-            The decision; its action must be among (or within the bounds of) the
-            legal ones, and its message (if any) is broadcast as the action is taken.
+            The decision; its actions must be among (or within the bounds of) the
+            legal ones when applied in order — more than one only for army
+            placements — and its message (if any) is broadcast as they are taken.
         """
         ...
 

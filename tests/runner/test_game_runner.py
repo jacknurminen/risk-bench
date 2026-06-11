@@ -2,6 +2,7 @@ import random
 from collections import Counter
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
+from risk_bench.game.actions import PlaceArmies
 from risk_bench.game.events import ArmiesPlaced, MissionCompleted, TurnLimitReached
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import Decision, DecisionRequest, Player, PlayerView
@@ -144,6 +145,38 @@ def test_replies_become_visible_within_the_same_turns_negotiation_round():
     )
 
 
+class SplittingPlacer(ScriptedTalker):
+    """Splits every multi-army placement across two territories in a single decision; never chats."""
+
+    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+        return []
+
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        decision = super().decide_action(request)
+        action = decision.actions[0]
+        if not isinstance(action, PlaceArmies) or action.count < 2:
+            return decision
+        placements = [placement for placement in request.legal_actions if isinstance(placement, PlaceArmies)]
+        other = next((placement for placement in placements if placement.territory != action.territory), action)
+        split = action.count // 2
+        batch = (
+            PlaceArmies(territory=action.territory, count=action.count - split),
+            PlaceArmies(territory=other.territory, count=split),
+        )
+        return Decision(actions=batch, chat_message=None)
+
+
+def test_batched_placements_apply_in_order_and_the_game_still_completes():
+    players = {
+        player_id: SplittingPlacer(player_id=player_id, rng=random.Random(13))
+        for player_id in ("alice", "bob", "carla")
+    }
+    record = talking_runner(players=dict(players), seed=13, max_turns=2_000, allow_private_messages=False).run()
+
+    assert record.winner in ("alice", "bob", "carla")
+    assert record.invalid_action_counts == {"alice": 0, "bob": 0, "carla": 0}
+
+
 class TableTalker(ScriptedTalker):
     """Stays silent in negotiation but attaches one message to every action it takes."""
 
@@ -160,7 +193,7 @@ class TableTalker(ScriptedTalker):
             recipient=None,
             text=f"{self.player_id} announces a {request.view.phase} move.",
         )
-        return Decision(action=decision.action, chat_message=announcement)
+        return Decision(actions=decision.actions, chat_message=announcement)
 
 
 def test_table_talk_attached_to_actions_reaches_the_transcript_and_other_players():

@@ -79,18 +79,21 @@ def is_message_tool_call(call: ToolCall) -> bool:
     return call.name in _MESSAGE_TOOL_NAMES
 
 
-def parse_tool_call(call: ToolCall, request: DecisionRequest) -> Action:
-    """Convert a model tool call back into a game action, checking full legality.
+def parse_tool_call(call: ToolCall, request: DecisionRequest) -> list[Action]:
+    """Convert a model tool call back into game actions, checking full legality.
 
-    Every constraint is verified against ``request.legal_actions``, so a
-    successfully parsed action is guaranteed to be accepted by the engine.
+    Every constraint is verified against ``request.legal_actions``, so the
+    parsed actions are guaranteed to be accepted by the engine when applied
+    in order. Only ``place_armies`` produces more than one action: its
+    placements batch into a sequence so a whole reinforcement split costs a
+    single model response.
 
     Args:
         call: The tool call returned by the model.
         request: The decision point the call answers.
 
     Returns:
-        The corresponding legal action.
+        The corresponding legal actions, in application order; never empty.
 
     Raises:
         InvalidToolCallError: If the tool name is unknown or arguments are
@@ -98,19 +101,19 @@ def parse_tool_call(call: ToolCall, request: DecisionRequest) -> Action:
     """
     match call.name:
         case "place_armies":
-            return _parse_place_armies(call=call, request=request)
+            return list(_parse_place_armies(call=call, request=request))
         case "trade_cards":
-            return _parse_trade_cards(call=call, request=request)
+            return [_parse_trade_cards(call=call, request=request)]
         case "attack":
-            return _parse_attack(call=call, request=request)
+            return [_parse_attack(call=call, request=request)]
         case "occupy":
-            return _parse_occupy(call=call, request=request)
+            return [_parse_occupy(call=call, request=request)]
         case "fortify":
-            return _parse_fortify(call=call, request=request)
+            return [_parse_fortify(call=call, request=request)]
         case "end_attack_phase":
-            return _parse_parameterless(request=request, action=EndAttackPhase(), tool_name=call.name)
+            return [_parse_parameterless(request=request, action=EndAttackPhase(), tool_name=call.name)]
         case "skip_fortify":
-            return _parse_parameterless(request=request, action=SkipFortify(), tool_name=call.name)
+            return [_parse_parameterless(request=request, action=SkipFortify(), tool_name=call.name)]
         case unknown_name:
             available = ", ".join(tool.name for tool in tools_for_decision(request=request))
             raise InvalidToolCallError(f"Unknown tool '{unknown_name}'. Available tools: {available}.")
@@ -219,14 +222,26 @@ def _place_armies_tool(placements: list[PlaceArmies]) -> Tool:
     maximum = placements[0].count
     return Tool(
         name="place_armies",
-        description=f"Place armies on one of your territories. You have {maximum} armies left to place.",
+        description=(
+            f"Place armies on your territories. You have {maximum} armies left to place; "
+            f"you can split them across territories by listing several placements in this one call."
+        ),
         parameters=_object_schema(
             properties={
-                "territory": _territory_property(
-                    territories=[placement.territory for placement in placements],
-                    description="One of your territories.",
-                ),
-                "count": _count_property(maximum=maximum, description="How many armies to place there."),
+                "placements": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": f"Where to place armies; the counts may total at most {maximum}.",
+                    "items": _object_schema(
+                        properties={
+                            "territory": _territory_property(
+                                territories=[placement.territory for placement in placements],
+                                description="One of your territories.",
+                            ),
+                            "count": _count_property(maximum=maximum, description="How many armies to place there."),
+                        }
+                    ),
+                },
             }
         ),
     )
@@ -316,22 +331,33 @@ def _fortify_tool(fortifications: list[Fortify]) -> Tool:
     )
 
 
-def _parse_place_armies(call: ToolCall, request: DecisionRequest) -> PlaceArmies:
-    territory = _parse_territory(value=_required_argument(call=call, key="territory"))
-    count = _parse_positive_int(value=_required_argument(call=call, key="count"), name="count")
-    template = next(
-        (
-            placement
-            for placement in _actions_of_type(request=request, action_type=PlaceArmies)
-            if placement.territory == territory
-        ),
-        None,
-    )
-    if template is None:
-        raise InvalidToolCallError(f"You cannot place armies on {territory}; it is not one of your territories.")
-    if count > template.count:
-        raise InvalidToolCallError(f"You only have {template.count} armies left to place, not {count}.")
-    return PlaceArmies(territory=territory, count=count)
+def _parse_place_armies(call: ToolCall, request: DecisionRequest) -> list[PlaceArmies]:
+    raw_placements = _required_argument(call=call, key="placements")
+    if not isinstance(raw_placements, list) or not raw_placements:
+        raise InvalidToolCallError("'placements' must be a non-empty array of {territory, count} objects.")
+    owned_territories = {
+        placement.territory for placement in _actions_of_type(request=request, action_type=PlaceArmies)
+    }
+    armies_available = _actions_of_type(request=request, action_type=PlaceArmies)[0].count
+
+    placements = []
+    for raw_placement in raw_placements:
+        if not isinstance(raw_placement, dict):
+            raise InvalidToolCallError("Each placement must be an object with 'territory' and 'count'.")
+        if "territory" not in raw_placement or "count" not in raw_placement:
+            raise InvalidToolCallError("Each placement must be an object with 'territory' and 'count'.")
+        territory = _parse_territory(value=raw_placement["territory"])
+        count = _parse_positive_int(value=raw_placement["count"], name="count")
+        if territory not in owned_territories:
+            raise InvalidToolCallError(f"You cannot place armies on {territory}; it is not one of your territories.")
+        placements.append(PlaceArmies(territory=territory, count=count))
+
+    total = sum(placement.count for placement in placements)
+    if total > armies_available:
+        raise InvalidToolCallError(
+            f"Your placements total {total} armies but you only have {armies_available} left to place."
+        )
+    return placements
 
 
 def _parse_trade_cards(call: ToolCall, request: DecisionRequest) -> TradeCards:

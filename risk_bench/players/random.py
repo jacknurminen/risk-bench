@@ -29,7 +29,7 @@ class RandomPlayer:
         Returns:
             A messageless decision with one of the legal actions.
         """
-        return Decision(action=self._rng.choice(request.legal_actions), chat_message=None)
+        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None)
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
         """Stay silent; the random baseline never negotiates.

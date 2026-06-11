@@ -151,14 +151,18 @@ class GameRunner:
             legal_actions=legal_actions(state=state),
         )
         decision = self._players[acting_player].decide_action(request)
-        result = apply_action(state=state, action=decision.action, rng=rng)
-        if self._journal is not None:
-            self._journal.write_action(player_id=acting_player, action=decision.action)
-            self._journal.write_events(events=result.events)
+        for action in decision.actions:
+            result = apply_action(state=state, action=action, rng=rng)
+            if self._journal is not None:
+                self._journal.write_action(player_id=acting_player, action=action)
+                self._journal.write_events(events=result.events)
+            self._record_events(state=state, events=result.events)
+            state = result.state
+            if state.phase is Phase.GAME_OVER:
+                break  # a placement can complete an occupy-with-two-armies mission mid-batch
         if decision.chat_message is not None:
             self._deliver_message(message=decision.chat_message)
-        self._record_events(state=state, events=result.events)
-        return result.state
+        return state
 
     def _record_events(self, state: GameState, events: tuple[GameEvent, ...]) -> None:
         self._all_events.extend(events)
