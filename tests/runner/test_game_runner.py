@@ -2,10 +2,9 @@ import random
 from collections import Counter
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
-from risk_bench.game.actions import Action
 from risk_bench.game.events import ArmiesPlaced, MissionCompleted, TurnLimitReached
 from risk_bench.game.types import Phase, PlayerId
-from risk_bench.players.base import DecisionRequest, Player, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, Player, PlayerView
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 
@@ -72,7 +71,7 @@ class ScriptedTalker:
         self.negotiation_views: list[PlayerView] = []
         self._random_player = RandomPlayer(player_id=player_id, rng=rng)
 
-    def decide_action(self, request: DecisionRequest) -> Action:
+    def decide_action(self, request: DecisionRequest) -> Decision:
         self.seen_views.append(request.view)
         return self._random_player.decide_action(request)
 
@@ -141,6 +140,40 @@ def test_replies_become_visible_within_the_same_turns_negotiation_round():
     assert any(
         message.turn_number == view.turn_number and message.sender != "alice"
         for view in alice.negotiation_views
+        for message in view.visible_chat
+    )
+
+
+class TableTalker(ScriptedTalker):
+    """Stays silent in negotiation but attaches one message to every action it takes."""
+
+    def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
+        self.negotiation_views.append(view)
+        return []
+
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        decision = super().decide_action(request)
+        announcement = ChatMessage(
+            turn_number=request.view.turn_number,
+            sender=self.player_id,
+            visibility=MessageVisibility.PUBLIC,
+            recipient=None,
+            text=f"{self.player_id} announces a {request.view.phase} move.",
+        )
+        return Decision(action=decision.action, chat_message=announcement)
+
+
+def test_table_talk_attached_to_actions_reaches_the_transcript_and_other_players():
+    players = {
+        player_id: TableTalker(player_id=player_id, rng=random.Random(3)) for player_id in ("alice", "bob", "carla")
+    }
+    record = talking_runner(players=dict(players), seed=3, max_turns=2, allow_private_messages=False).run()
+
+    assert any("announces" in message.text for message in record.chat)
+    bob_views = players["bob"].seen_views
+    assert any(
+        message.sender == "alice" and "announces" in message.text
+        for view in bob_views
         for message in view.visible_chat
     )
 

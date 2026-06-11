@@ -58,6 +58,18 @@ class DecisionRequest:
     legal_actions: list[Action]
 
 
+@dataclass(frozen=True)
+class Decision:
+    """A player's answer to one decision point: the action, optionally announced with table talk.
+
+    At most one message per decision keeps a turn's many decisions (every
+    attack roll is one) from flooding the chat transcript.
+    """
+
+    action: Action
+    chat_message: ChatMessage | None
+
+
 @runtime_checkable
 class Player(Protocol):
     """A game-playing strategy: decides actions and composes diplomacy messages.
@@ -70,14 +82,15 @@ class Player(Protocol):
 
     invalid_action_count: int
 
-    def decide_action(self, request: DecisionRequest) -> Action:
-        """Choose one of the legal actions at this decision point.
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        """Choose one of the legal actions at this decision point, optionally with a message.
 
         Args:
             request: The player's view and the legal actions.
 
         Returns:
-            The chosen action; must be among (or within the bounds of) the legal ones.
+            The decision; its action must be among (or within the bounds of) the
+            legal ones, and its message (if any) is broadcast as the action is taken.
         """
         ...
 

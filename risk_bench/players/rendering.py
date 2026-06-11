@@ -58,10 +58,12 @@ def render_system_prompt(view: PlayerView) -> str:
         f"Diplomacy: at the start of every turn there is a negotiation round where players may exchange "
         f"messages. The round runs in passes: as long as someone said something, everyone gets another "
         f"chance to reply (up to a limit), so proposals can be answered and agreed within the same turn. "
+        f"You may also attach one short message to any action you take during your turn — table talk that "
+        f"others see but can only answer in the next negotiation round. "
         f"{privacy_note} Promises are not enforced by the rules.\n\n"
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
         f"Never reveal your mission. Play to complete it as fast as possible; helping others costs you the game.\n"
-        f"Always act by calling exactly one of the provided tools."
+        f"Always act by calling exactly one action tool, optionally adding one message tool call."
     )
 
 
@@ -87,6 +89,8 @@ def render_decision_prompt(request: DecisionRequest) -> str:
         _render_hand(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
         _phase_instruction(view=view),
+        "You may optionally include ONE message tool call alongside your action tool call to address the "
+        "other players; most actions need no message.",
     ]
     return "\n\n".join(section for section in sections if section)
 

@@ -9,6 +9,7 @@ from risk_bench.game.types import Phase, PlayerId, Territory
 from risk_bench.players.base import DecisionRequest
 from risk_bench.players.tools import (
     InvalidToolCallError,
+    is_message_tool_call,
     parse_negotiation_tool_call,
     parse_tool_call,
     tools_for_decision,
@@ -68,7 +69,7 @@ def call(name: str, **arguments) -> ToolCall:
 def test_attack_phase_exposes_attack_and_end_attack_tools():
     tools = tools_for_decision(request=attack_request())
 
-    assert [tool.name for tool in tools] == ["attack", "end_attack_phase"]
+    assert [tool.name for tool in tools] == ["attack", "end_attack_phase", "send_public_message"]
     attack_tool = tools[0]
     assert attack_tool.parameters["properties"]["from_territory"]["enum"] == ["alaska"]
     assert set(attack_tool.parameters["properties"]["to_territory"]["enum"]) == {"kamchatka", "northwest_territory"}
@@ -79,8 +80,8 @@ def test_attack_phase_exposes_attack_and_end_attack_tools():
 def test_reinforce_exposes_trade_and_placement_tools_with_bounds():
     tools = tools_for_decision(request=reinforce_request_with_tradeable_set())
 
-    assert [tool.name for tool in tools] == ["place_armies", "trade_cards"]
-    place_tool, trade_tool = tools
+    assert [tool.name for tool in tools] == ["place_armies", "trade_cards", "send_public_message"]
+    place_tool, trade_tool = tools[0], tools[1]
     assert place_tool.parameters["properties"]["count"]["maximum"] == 5
     assert set(place_tool.parameters["properties"]["territory"]["enum"]) == {"alaska", "alberta"}
     assert "infantry(alaska), infantry(peru), infantry(japan) -> 4 armies" in trade_tool.description
@@ -144,7 +145,7 @@ def test_occupy_tool_round_trip():
     occupy_request = DecisionRequest(view=request.view, legal_actions=[Occupy(armies_to_move=3)])
 
     tools = tools_for_decision(request=occupy_request)
-    assert [tool.name for tool in tools] == ["occupy"]
+    assert [tool.name for tool in tools] == ["occupy", "send_public_message"]
 
     action = parse_tool_call(call=call("occupy", armies_to_move=2), request=occupy_request)
     assert action == Occupy(armies_to_move=2)
@@ -156,13 +157,28 @@ def test_fortify_tools_round_trip():
     request = request_for_phase(phase=Phase.FORTIFY, hand=[], private_messages_allowed=False)
 
     tools = tools_for_decision(request=request)
-    assert [tool.name for tool in tools] == ["fortify", "skip_fortify"]
+    assert [tool.name for tool in tools] == ["fortify", "skip_fortify", "send_public_message"]
 
     action = parse_tool_call(
         call=call("fortify", from_territory="alaska", to_territory="alberta", count=3), request=request
     )
     assert action in request.legal_actions
     assert parse_tool_call(call=call("skip_fortify"), request=request) == SkipFortify()
+
+
+def test_decision_message_tools_respect_the_private_message_flag():
+    with_private = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=True)
+
+    tool_names = [tool.name for tool in tools_for_decision(request=with_private)]
+
+    assert tool_names == ["attack", "end_attack_phase", "send_public_message", "send_private_message"]
+
+
+def test_message_tool_calls_are_distinguished_from_action_calls():
+    assert is_message_tool_call(call=call("send_public_message", text="Hi"))
+    assert is_message_tool_call(call=call("send_private_message", recipient=BOB, text="Psst"))
+    assert is_message_tool_call(call=call("say_nothing"))
+    assert not is_message_tool_call(call=call("attack"))
 
 
 def test_negotiation_tools_respect_the_private_message_flag():

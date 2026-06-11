@@ -1,9 +1,8 @@
 import random
 
 from risk_bench.chat.diplomacy import ChatMessage
-from risk_bench.game.actions import Action
 from risk_bench.game.types import PlayerId
-from risk_bench.players.base import DecisionRequest, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, PlayerView
 
 
 class RandomPlayer:
@@ -18,8 +17,8 @@ class RandomPlayer:
         self.invalid_action_count = 0
         self._rng = rng
 
-    def decide_action(self, request: DecisionRequest) -> Action:
-        """Choose a uniformly random legal action.
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        """Choose a uniformly random legal action, silently.
 
         Numeric fields keep the maximum values that ``legal_actions`` emits;
         sampling them lower would mostly produce slower, weaker play.
@@ -28,9 +27,9 @@ class RandomPlayer:
             request: The player's view and the legal actions.
 
         Returns:
-            One of the legal actions.
+            A messageless decision with one of the legal actions.
         """
-        return self._rng.choice(request.legal_actions)
+        return Decision(action=self._rng.choice(request.legal_actions), chat_message=None)
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
         """Stay silent; the random baseline never negotiates.

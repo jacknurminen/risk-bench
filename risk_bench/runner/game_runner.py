@@ -35,7 +35,9 @@ class GameRunner:
     first and each other living player may react; a pass in which nobody says
     anything ends the round, so quiet turns cost one pass while genuine
     exchanges (proposal, counter, acceptance) resolve within a single turn.
-    Negotiation is followed by the decide/apply loop through the turn's phases.
+    Negotiation is followed by the decide/apply loop through the turn's phases,
+    where a decision may carry one broadcast table-talk message alongside its
+    action; replies to it have to wait for the next negotiation round.
     A game that reaches ``max_turns`` without a completed mission is recorded
     as a draw. Setup placements happen before any negotiation, and their events
     are delivered only to the placing player, keeping starting placements blind.
@@ -148,11 +150,13 @@ class GameRunner:
             view=self._build_view(state=state, player_id=acting_player),
             legal_actions=legal_actions(state=state),
         )
-        action = self._players[acting_player].decide_action(request)
-        result = apply_action(state=state, action=action, rng=rng)
+        decision = self._players[acting_player].decide_action(request)
+        result = apply_action(state=state, action=decision.action, rng=rng)
         if self._journal is not None:
-            self._journal.write_action(player_id=acting_player, action=action)
+            self._journal.write_action(player_id=acting_player, action=decision.action)
             self._journal.write_events(events=result.events)
+        if decision.chat_message is not None:
+            self._deliver_message(message=decision.chat_message)
         self._record_events(state=state, events=result.events)
         return result.state
 
@@ -183,15 +187,18 @@ class GameRunner:
             view = self._build_view(state=state, player_id=player_id)
             for message in self._players[player_id].compose_messages(view=view):
                 # a dropped private message was heard by nobody, so it must not extend the round
-                if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
-                    continue
-                anyone_spoke = True
-                self._transcript.add(message=message)
-                if self._journal is not None:
-                    self._journal.write_message(message=message)
-                if self._verbose:
-                    print(message)
+                anyone_spoke |= self._deliver_message(message=message)
         return anyone_spoke
+
+    def _deliver_message(self, message: ChatMessage) -> bool:
+        if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
+            return False
+        self._transcript.add(message=message)
+        if self._journal is not None:
+            self._journal.write_message(message=message)
+        if self._verbose:
+            print(message)
+        return True
 
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
         recent_events = tuple(self._pending_events[player_id])

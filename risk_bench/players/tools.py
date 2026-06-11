@@ -26,13 +26,16 @@ class InvalidToolCallError(Exception):
 
 
 def tools_for_decision(request: DecisionRequest) -> list[Tool]:
-    """Build the tool schemas for a decision point, one tool per legal action type.
+    """Build the tool schemas for a decision point: one tool per legal action type, plus messaging.
 
     Territory parameters become JSON-schema enums restricted to the legal
     choices; numeric parameters (army counts, dice) carry minimum/maximum
     bounds instead of being enumerated. Pair constraints that JSON schema
     cannot express (which targets each territory may attack, per-pair dice
     limits) are spelled out in the tool descriptions and enforced on parsing.
+
+    The messaging tools are offered alongside the action tools so the model
+    can announce, threaten, or explain in the same response as its move.
 
     Args:
         request: The decision point to expose.
@@ -61,7 +64,19 @@ def tools_for_decision(request: DecisionRequest) -> list[Tool]:
         tools.append(Tool(name="end_attack_phase", description="Stop attacking and move on.", parameters=_NO_ARGS))
     if any(isinstance(action, SkipFortify) for action in request.legal_actions):
         tools.append(Tool(name="skip_fortify", description="End your turn without fortifying.", parameters=_NO_ARGS))
-    return tools
+    return tools + _message_tools(view=request.view)
+
+
+def is_message_tool_call(call: ToolCall) -> bool:
+    """Tell whether a tool call is messaging rather than a game action.
+
+    Args:
+        call: The tool call to classify.
+
+    Returns:
+        True for the messaging tools (including 'say_nothing'), False otherwise.
+    """
+    return call.name in _MESSAGE_TOOL_NAMES
 
 
 def parse_tool_call(call: ToolCall, request: DecisionRequest) -> Action:
@@ -113,27 +128,7 @@ def tools_for_negotiation(view: PlayerView) -> list[Tool]:
     Returns:
         The negotiation tools.
     """
-    tools = [
-        Tool(
-            name="send_public_message",
-            description="Say something all players will see.",
-            parameters=_object_schema(properties={"text": {"type": "string", "description": "Your message."}}),
-        )
-    ]
-    recipients = _valid_recipients(view=view)
-    if view.private_messages_allowed and recipients:
-        tools.append(
-            Tool(
-                name="send_private_message",
-                description="Whisper to one player; nobody else will see it.",
-                parameters=_object_schema(
-                    properties={
-                        "recipient": {"type": "string", "enum": recipients, "description": "Who to whisper to."},
-                        "text": {"type": "string", "description": "Your message."},
-                    }
-                ),
-            )
-        )
+    tools = _message_tools(view=view)
     tools.append(Tool(name="say_nothing", description="Send no message this round.", parameters=_NO_ARGS))
     return tools
 
@@ -172,6 +167,32 @@ def parse_negotiation_tool_call(call: ToolCall, view: PlayerView) -> ChatMessage
 
 
 _NO_ARGS: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
+_MESSAGE_TOOL_NAMES: frozenset[str] = frozenset({"send_public_message", "send_private_message", "say_nothing"})
+
+
+def _message_tools(view: PlayerView) -> list[Tool]:
+    tools = [
+        Tool(
+            name="send_public_message",
+            description="Say something all players will see.",
+            parameters=_object_schema(properties={"text": {"type": "string", "description": "Your message."}}),
+        )
+    ]
+    recipients = _valid_recipients(view=view)
+    if view.private_messages_allowed and recipients:
+        tools.append(
+            Tool(
+                name="send_private_message",
+                description="Whisper to one player; nobody else will see it.",
+                parameters=_object_schema(
+                    properties={
+                        "recipient": {"type": "string", "enum": recipients, "description": "Who to whisper to."},
+                        "text": {"type": "string", "description": "Your message."},
+                    }
+                ),
+            )
+        )
+    return tools
 
 
 def _object_schema(properties: dict[str, Any]) -> dict[str, Any]:

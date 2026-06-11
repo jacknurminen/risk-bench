@@ -1,13 +1,13 @@
 import random
 
-from risk_bench.agents.base import Agent, Message, Response
+from risk_bench.agents.base import Agent, Message, Response, ToolCall
 from risk_bench.chat.diplomacy import ChatMessage
-from risk_bench.game.actions import Action
 from risk_bench.game.types import PlayerId
-from risk_bench.players.base import DecisionRequest, PlayerView
+from risk_bench.players.base import Decision, DecisionRequest, PlayerView
 from risk_bench.players.rendering import render_decision_prompt, render_negotiation_prompt, render_system_prompt
 from risk_bench.players.tools import (
     InvalidToolCallError,
+    is_message_tool_call,
     parse_negotiation_tool_call,
     parse_tool_call,
     tools_for_decision,
@@ -35,14 +35,19 @@ class LLMPlayer:
         self._max_invalid_retries = max_invalid_retries
         self._rng = rng
 
-    def decide_action(self, request: DecisionRequest) -> Action:
-        """Ask the model to choose an action via tool calling.
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        """Ask the model to choose an action via tool calling, optionally with table talk.
+
+        Alongside the action tool call the model may include messaging tool
+        calls; the first valid message is kept (one per decision), and only
+        from the response whose action was legal — chatter on failed attempts
+        is never delivered.
 
         Args:
             request: The player's view and the legal actions.
 
         Returns:
-            The chosen action, or a random legal action after exhausted retries.
+            The decision, or a silent random legal action after exhausted retries.
         """
         conversation = [
             Message(role="system", content=render_system_prompt(view=request.view)),
@@ -52,19 +57,19 @@ class LLMPlayer:
 
         for _ in range(self._max_invalid_retries + 1):
             response = self._agent.respond(messages=conversation, tools=tools)
-            if not response.tool_calls:
-                conversation.append(Message(role="assistant", content=response.text or ""))
-                conversation.append(
-                    Message(role="user", content="You must act by calling exactly one of the available tools.")
-                )
+            action_calls = [call for call in response.tool_calls if not is_message_tool_call(call=call)]
+            if not action_calls:
+                conversation += _action_demand_messages(response=response)
                 continue
             try:
-                return parse_tool_call(call=response.tool_calls[0], request=request)
+                action = parse_tool_call(call=action_calls[0], request=request)
             except InvalidToolCallError as error:
-                conversation += _correction_messages(response=response, error=error)
+                conversation += _correction_messages(response=response, failed_call=action_calls[0], error=error)
+                continue
+            return Decision(action=action, chat_message=_first_valid_message(response=response, view=request.view))
 
         self.invalid_action_count += 1
-        return self._rng.choice(request.legal_actions)
+        return Decision(action=self._rng.choice(request.legal_actions), chat_message=None)
 
     def compose_messages(self, view: PlayerView) -> list[ChatMessage]:
         """Ask the model whether to send diplomacy messages.
@@ -87,14 +92,45 @@ class LLMPlayer:
         return [message for message in parsed if message is not None]
 
 
-def _correction_messages(response: Response, error: InvalidToolCallError) -> list[Message]:
-    failed_call, ignored_calls = response.tool_calls[0], response.tool_calls[1:]
-    corrections = [
-        Message(role="assistant", content=response.text, tool_calls=response.tool_calls),
-        Message(role="tool", content=f"Invalid action: {error} Try again.", tool_call_id=failed_call.id),
+def _first_valid_message(response: Response, view: PlayerView) -> ChatMessage | None:
+    for call in response.tool_calls:
+        if not is_message_tool_call(call=call):
+            continue
+        try:
+            message = parse_negotiation_tool_call(call=call, view=view)
+        except InvalidToolCallError:
+            continue
+        if message is not None:
+            return message
+    return None
+
+
+def _action_demand_messages(response: Response) -> list[Message]:
+    if not response.tool_calls:
+        return [
+            Message(role="assistant", content=response.text or ""),
+            Message(role="user", content="You must act by calling exactly one of the available tools."),
+        ]
+    demands = [Message(role="assistant", content=response.text, tool_calls=response.tool_calls)]
+    demands += [
+        Message(
+            role="tool",
+            content="Not delivered: you must include a game action tool call in the same response.",
+            tool_call_id=call.id,
+        )
+        for call in response.tool_calls
     ]
-    corrections += [
-        Message(role="tool", content="Ignored: only one action may be taken at a time.", tool_call_id=call.id)
-        for call in ignored_calls
-    ]
+    return demands
+
+
+def _correction_messages(response: Response, failed_call: ToolCall, error: InvalidToolCallError) -> list[Message]:
+    corrections = [Message(role="assistant", content=response.text, tool_calls=response.tool_calls)]
+    for call in response.tool_calls:
+        if call.id == failed_call.id:
+            content = f"Invalid action: {error} Try again."
+        elif is_message_tool_call(call=call):
+            content = "Not delivered: messages only count alongside a legal action; resend it with your retry."
+        else:
+            content = "Ignored: only one action may be taken at a time."
+        corrections.append(Message(role="tool", content=content, tool_call_id=call.id))
     return corrections

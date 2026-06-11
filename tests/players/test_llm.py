@@ -42,9 +42,10 @@ def test_a_valid_tool_call_becomes_the_action():
     agent = StubAgent(responses=[VALID_ATTACK_RESPONSE])
     player = llm_player(agent=agent)
 
-    action = player.decide_action(attack_request())
+    decision = player.decide_action(attack_request())
 
-    assert action == EXPECTED_ATTACK
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is None
     assert player.invalid_action_count == 0
     system_prompt = agent.conversations[0][0].content
     assert system_prompt is not None and "SECRET MISSION" in system_prompt
@@ -54,9 +55,9 @@ def test_an_invalid_call_is_corrected_with_the_error_and_retried():
     agent = StubAgent(responses=[INVALID_ATTACK_RESPONSE, VALID_ATTACK_RESPONSE])
     player = llm_player(agent=agent)
 
-    action = player.decide_action(attack_request())
+    decision = player.decide_action(attack_request())
 
-    assert action == EXPECTED_ATTACK
+    assert decision.action == EXPECTED_ATTACK
     assert player.invalid_action_count == 0
     retry_conversation = agent.conversations[1]
     tool_results = [message for message in retry_conversation if message.role == "tool"]
@@ -69,9 +70,9 @@ def test_exhausted_retries_fall_back_to_a_random_legal_action():
     player = llm_player(agent=agent)
     request = attack_request()
 
-    action = player.decide_action(request)
+    decision = player.decide_action(request)
 
-    assert action in request.legal_actions
+    assert decision.action in request.legal_actions
     assert player.invalid_action_count == 1
     assert len(agent.conversations) == 3
 
@@ -81,12 +82,94 @@ def test_responses_without_tool_calls_are_nudged_then_fall_back():
     player = llm_player(agent=agent)
     request = attack_request()
 
-    action = player.decide_action(request)
+    decision = player.decide_action(request)
 
-    assert action in request.legal_actions
+    assert decision.action in request.legal_actions
     assert player.invalid_action_count == 1
     nudges = [message for message in agent.conversations[1] if message.role == "user"]
     assert any(message.content is not None and "calling exactly one" in message.content for message in nudges)
+
+
+def test_a_message_call_alongside_the_action_becomes_table_talk():
+    response = Response(
+        text=None,
+        tool_calls=(
+            tool_call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=3),
+            tool_call("send_public_message", text="This is for Ukraine!"),
+        ),
+    )
+    player = llm_player(agent=StubAgent(responses=[response]))
+
+    decision = player.decide_action(attack_request())
+
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is not None
+    assert decision.chat_message.text == "This is for Ukraine!"
+    assert decision.chat_message.sender == ALICE
+
+
+def test_only_the_first_message_call_per_decision_is_kept():
+    response = Response(
+        text=None,
+        tool_calls=(
+            tool_call("send_public_message", text="First!"),
+            VALID_ATTACK_RESPONSE.tool_calls[0],
+            tool_call("send_public_message", text="Second!"),
+        ),
+    )
+    decision = llm_player(agent=StubAgent(responses=[response])).decide_action(attack_request())
+
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is not None and decision.chat_message.text == "First!"
+
+
+def test_a_message_only_response_is_pushed_back_for_an_action():
+    message_only = Response(text=None, tool_calls=(tool_call("send_public_message", text="Thinking out loud..."),))
+    agent = StubAgent(responses=[message_only, VALID_ATTACK_RESPONSE])
+
+    decision = llm_player(agent=agent).decide_action(attack_request())
+
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is None  # the chatter on the failed attempt is not delivered
+    pushbacks = [message for message in agent.conversations[1] if message.role == "tool"]
+    assert len(pushbacks) == 1
+    assert pushbacks[0].content is not None and "must include a game action" in pushbacks[0].content
+
+
+def test_messages_on_responses_with_invalid_actions_are_not_delivered():
+    invalid_with_message = Response(
+        text=None,
+        tool_calls=(
+            INVALID_ATTACK_RESPONSE.tool_calls[0],
+            tool_call("send_public_message", text="Goodbye, Japan!"),
+        ),
+    )
+    agent = StubAgent(responses=[invalid_with_message, VALID_ATTACK_RESPONSE])
+
+    decision = llm_player(agent=agent).decide_action(attack_request())
+
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is None
+    pushbacks = [message for message in agent.conversations[1] if message.role == "tool"]
+    assert len(pushbacks) == 2  # both the failed action and the undelivered message are answered
+    assert any(message.content is not None and "Not delivered" in message.content for message in pushbacks)
+
+
+def test_an_invalid_message_does_not_invalidate_a_legal_action():
+    response = Response(
+        text=None,
+        tool_calls=(
+            VALID_ATTACK_RESPONSE.tool_calls[0],
+            tool_call("send_private_message", recipient="bob", text="Psst"),  # private messages are off
+        ),
+    )
+    player = llm_player(agent=StubAgent(responses=[response]))
+
+    decision = player.decide_action(attack_request())
+
+    assert decision.action == EXPECTED_ATTACK
+    assert decision.chat_message is None
+    assert player.invalid_action_count == 0
 
 
 def test_compose_messages_parses_negotiation_calls():
