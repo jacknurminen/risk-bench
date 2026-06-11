@@ -15,6 +15,14 @@ def test_system_prompt_contains_identity_rules_and_secret_mission():
     assert "Rules summary" in prompt
 
 
+def test_system_prompt_tells_players_to_use_exact_ids_in_messages():
+    prompt = render_system_prompt(view=attack_request().view)
+
+    assert "refer to players by their exact ids" in prompt
+    assert "'bob'" in prompt  # the example uses a real opponent id
+    assert "territories and continents by their exact ids" in prompt
+
+
 def test_system_prompt_states_the_private_message_policy():
     public_only = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False)
     with_private = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=True)

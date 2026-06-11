@@ -10,7 +10,11 @@
   .layout { display:grid; grid-template-columns: 1fr 340px; grid-template-rows: minmax(0,1fr) auto 230px;
             gap:10px; padding:10px; height:100vh; }
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; }
-  #board { grid-row: 1; display:flex; flex-direction:column; overflow:hidden; }
+  #board { grid-row: 1; display:flex; flex-direction:column; overflow:hidden; position:relative; }
+  #continentLegend { position:absolute; left:16px; bottom:32px; background:#14151acc; border:1px solid var(--line);
+                     border-radius:6px; padding:5px 8px; font-size:10px; line-height:1.6; }
+  #continentLegend .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px;
+                          border:1px solid #ffffff44; background:transparent; vertical-align:-1px; }
   #side  { grid-row: 1 / span 2; grid-column: 2; display:flex; flex-direction:column; gap:10px; overflow:hidden; }
   #controls { grid-row: 2; grid-column: 1; display:flex; align-items:center; gap:8px; }
   #log { grid-row: 3; grid-column: 1 / span 2; }
@@ -58,6 +62,7 @@
 <div class="layout">
   <div id="board" class="panel">
     {{ board_svg }}
+    <div id="continentLegend"></div>
     <div class="attribution">Map: <a href="https://commons.wikimedia.org/wiki/File:Risk_board.svg">Risk board</a>
       by Gr0gmint, Wikimedia Commons, <a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a></div>
   </div>
@@ -118,13 +123,16 @@ function colorizeNames(text) {
     `<span style="color:${COLORS[seatByAlias[match.toLowerCase()]]};font-weight:600">${match}</span>`);
 }
 
-// Territory mentions become links that flash the territory's borders on the map.
-const TERRITORY_PATTERN = new RegExp(
-  "\\b(" + Object.keys(steps[0].board).sort((a, b) => b.length - a.length).join("|") + ")\\b", "g");
+// Territory and continent mentions become links that flash borders on the map.
+const CONTINENT_TERRITORIES = {};
+GAME.continents.forEach(continent => CONTINENT_TERRITORIES[continent.name] = continent.territories);
+const PLACE_PATTERN = new RegExp(
+  "\\b(" + [...Object.keys(steps[0].board), ...GAME.continents.map(continent => continent.name)]
+    .sort((a, b) => b.length - a.length).join("|") + ")\\b", "g");
 
 function richText(text) {
-  return colorizeNames(text).replace(TERRITORY_PATTERN, match =>
-    `<span class="tlink" data-territory="${match}">${match}</span>`);
+  return colorizeNames(text).replace(PLACE_PATTERN, match =>
+    `<span class="tlink" data-place="${match}">${match}</span>`);
 }
 
 function flashTerritory(territory) {
@@ -134,9 +142,16 @@ function flashTerritory(territory) {
   path.classList.add("flash");
 }
 
+const CONTINENT_OF = {};
+GAME.continents.forEach(continent => continent.territories.forEach(t => CONTINENT_OF[t] = continent.name));
+
+function flashPlace(place) {
+  for (const territory of CONTINENT_TERRITORIES[place] ?? [place]) flashTerritory(territory);
+}
+
 document.addEventListener("click", event => {
   const link = event.target.closest(".tlink");
-  if (link) flashTerritory(link.dataset.territory);
+  if (link) flashPlace(link.dataset.place);
 });
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -165,6 +180,26 @@ function buildBoard() {
     path.appendChild(tooltip);
     territoryShapes[territory] = { path, label, tooltip };
   }
+}
+
+function buildContinentLegend() {
+  const container = el("continentLegend");
+  GAME.continents.forEach((continent, i) => {
+    const row = document.createElement("div");
+    row.innerHTML = `<span class="dot" id="cl-${i}"></span>` +
+      `<span class="tlink" data-place="${continent.name}">${pretty(continent.name)}</span> +${continent.bonus}`;
+    container.appendChild(row);
+  });
+}
+
+function updateContinentLegend(step) {
+  GAME.continents.forEach((continent, i) => {
+    const seats = new Set(continent.territories.map(territory => step.board[territory][0]));
+    const controller = seats.size === 1 ? [...seats][0] : null;
+    const dot = el("cl-" + i);
+    dot.style.background = controller === null ? "transparent" : COLORS[controller];
+    dot.title = controller === null ? "contested" : GAME.players[controller].name;
+  });
 }
 
 function buildPlayers() {
@@ -234,7 +269,8 @@ function show(newIndex) {
     shape.path.style.fill = COLORS[seat];
     shape.path.style.fillOpacity = "0.78";
     shape.label.textContent = armies;
-    shape.tooltip.textContent = `${pretty(territory)} — ${GAME.players[seat].name}, ${armies} armies`;
+    shape.tooltip.textContent =
+      `${pretty(territory)} (${pretty(CONTINENT_OF[territory])}) — ${GAME.players[seat].name}, ${armies} armies`;
   }
   step.players.forEach((stats, seat) => {
     const card = el("p-" + seat);
@@ -243,6 +279,7 @@ function show(newIndex) {
     card.querySelector(".stats").textContent =
       `${stats.territories} territories · ${stats.armies} armies · ${stats.cards} cards · +${stats.income}/turn`;
   });
+  updateContinentLegend(step);
   GAME.messages.forEach((message, i) => el("m-" + i).classList.toggle("future", message.step > index));
   document.querySelectorAll(".entry.current").forEach(entry => entry.classList.remove("current"));
   const entry = el("e-" + index);
@@ -303,7 +340,7 @@ async function refreshFromJournal() {
   show(wasFollowingLatest ? steps.length - 1 : index);
 }
 
-buildBoard(); buildPlayers(); appendChat(0); appendLog(0); show(LIVE ? steps.length - 1 : 0);
+buildBoard(); buildContinentLegend(); buildPlayers(); appendChat(0); appendLog(0); show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
 </script>
 </body>
