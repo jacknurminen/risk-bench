@@ -92,6 +92,21 @@ def test_an_unusable_response_yields_no_commentary():
     )
 
 
+class FailingAgent:
+    """Raises on every request, like a provider outage or a content-policy flag."""
+
+    def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
+        raise RuntimeError("provider exploded")
+
+
+def test_a_provider_failure_yields_no_commentary_instead_of_crashing():
+    commentator = Commentator(agent=FailingAgent())
+
+    assert (
+        commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
+    )
+
+
 def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
     path = tmp_path / "game.jsonl"
     journal = JournalWriter(path=path, append=False)

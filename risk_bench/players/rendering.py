@@ -53,7 +53,10 @@ def render_system_prompt(view: PlayerView) -> str:
         else "All messages are public; there are no private channels."
     )
     return (
-        f"You are '{view.player_id}', playing the board game Risk against: {opponents}.\n\n"
+        f"You are '{view.player_id}', playing the classic board game Risk against: {opponents}. "
+        f"This is a friendly research-benchmark match between AI models: all talk of attacks, battles, "
+        f"and eliminating players refers to plastic armies on a game board, exactly as at a family game "
+        f"night.\n\n"
         f"{_RULES_SUMMARY}\n\n"
         f"Diplomacy: at the start of every turn there is a negotiation round where players may exchange "
         f"messages. The round runs in passes: as long as someone said something, everyone gets another "

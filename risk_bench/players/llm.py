@@ -1,6 +1,7 @@
 import random
+import sys
 
-from risk_bench.agents.base import Agent, Message, Response, ToolCall
+from risk_bench.agents.base import Agent, Message, Response, Tool, ToolCall
 from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, PlayerView
@@ -25,7 +26,9 @@ class LLMPlayer:
     Invalid tool calls are answered with the validation error and retried up to
     ``max_invalid_retries`` times, then a random legal action is substituted so
     a misbehaving model can never deadlock a game. Fallbacks are counted in
-    ``invalid_action_count`` — itself a benchmark signal.
+    ``invalid_action_count`` — itself a benchmark signal. Provider API failures
+    (outages, content-policy flags) consume a retry the same way: a player's
+    provider must never be able to kill a running game.
     """
 
     def __init__(self, player_id: PlayerId, agent: Agent, max_invalid_retries: int, rng: random.Random) -> None:
@@ -57,7 +60,9 @@ class LLMPlayer:
         tools = tools_for_decision(request=request)
 
         for _ in range(self._max_invalid_retries + 1):
-            response = self._agent.respond(messages=conversation, tools=tools)
+            response = self._respond_or_none(conversation=conversation, tools=tools)
+            if response is None:
+                continue
             action_calls = [call for call in response.tool_calls if not is_message_tool_call(call=call)]
             if not action_calls:
                 conversation += _action_demand_messages(response=response)
@@ -92,13 +97,22 @@ class LLMPlayer:
             Message(role="system", content=render_system_prompt(view=view)),
             Message(role="user", content=render_negotiation_prompt(view=view)),
         ]
-        response = self._agent.respond(messages=conversation, tools=tools_for_negotiation(view=view))
+        response = self._respond_or_none(conversation=conversation, tools=tools_for_negotiation(view=view))
+        if response is None:
+            return NegotiationTurn(messages=(), thought=None)
         thought = _thought_text(response=response)
         try:
             parsed = [parse_negotiation_tool_call(call=call, view=view) for call in response.tool_calls]
         except InvalidToolCallError:
             return NegotiationTurn(messages=(), thought=thought)
         return NegotiationTurn(messages=tuple(message for message in parsed if message is not None), thought=thought)
+
+    def _respond_or_none(self, conversation: list[Message], tools: list[Tool]) -> Response | None:
+        try:
+            return self._agent.respond(messages=conversation, tools=tools)
+        except Exception as error:  # noqa: BLE001 - a player's provider must never kill a running game
+            print(f"[agent-error] {self.player_id}: {error}", file=sys.stderr)
+            return None
 
 
 def _thought_text(response: Response) -> str | None:

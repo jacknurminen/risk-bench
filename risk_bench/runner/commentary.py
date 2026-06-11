@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -117,7 +118,11 @@ class Commentator:
                 ),
             ),
         ]
-        response = self._agent.respond(messages=conversation, tools=[_commentate_tool()])
+        try:
+            response = self._agent.respond(messages=conversation, tools=[_commentate_tool()])
+        except Exception as error:  # noqa: BLE001 - the game must never depend on the commentator
+            print(f"[commentator-error] {error}", file=sys.stderr)
+            return None
         for call in response.tool_calls:
             if call.name == "commentate" and isinstance(call.arguments.get("commentary"), str):
                 return Commentary(
@@ -130,9 +135,11 @@ class Commentator:
 
 
 _SYSTEM_PROMPT: Final[str] = (
-    "You are the commentator of a game of Risk (mission variant) played by language models. You see "
-    "everything: the full board, every player's cards, every SECRET mission, and the players' private "
-    "thoughts. The players never see your commentary; it is for spectators and post-game analysis.\n\n"
+    "You are the commentator of a game of the classic board game Risk (mission variant) played by "
+    "language models in a friendly research benchmark — all attacks and eliminations refer to plastic "
+    "armies on a game board. You see everything: the full board, every player's cards, every SECRET "
+    "mission, and the players' private thoughts. The players never see your commentary; it is for "
+    "spectators and post-game analysis.\n\n"
     "After each turn, call the commentate tool with:\n"
     "- commentary: 2-4 sharp sentences on what actually happened and why it matters — strategy, "
     "mission progress, and especially the diplomacy: who is lying, who believes whom, which promises "

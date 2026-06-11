@@ -90,6 +90,34 @@ def test_responses_without_tool_calls_are_nudged_then_fall_back():
     assert any(message.content is not None and "calling exactly one" in message.content for message in nudges)
 
 
+class FailingAgent:
+    """Raises on every request, like a provider outage or a content-policy flag."""
+
+    def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
+        raise RuntimeError("400 invalid_prompt: flagged as potentially violating our usage policy")
+
+
+def test_provider_failures_fall_back_instead_of_crashing_the_game():
+    player = LLMPlayer(player_id=ALICE, agent=FailingAgent(), max_invalid_retries=2, rng=random.Random(0))
+    request = attack_request()
+
+    decision = player.decide_action(request)
+
+    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
+    assert decision.chat_message is None and decision.thought is None
+    assert player.invalid_action_count == 1
+
+
+def test_provider_failures_during_negotiation_mean_silence():
+    player = LLMPlayer(player_id=ALICE, agent=FailingAgent(), max_invalid_retries=2, rng=random.Random(0))
+    view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
+
+    negotiation_turn = player.compose_messages(view=view)
+
+    assert negotiation_turn.messages == ()
+    assert negotiation_turn.thought is None
+
+
 def test_a_placement_split_becomes_a_batch_of_actions_from_one_response():
     response = Response(
         text=None,
