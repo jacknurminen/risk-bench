@@ -4,46 +4,47 @@
 <meta charset="utf-8">
 <title>risk-bench</title>
 <style>
-  :root { --paper:#f4f1ea; --panel:#fdfcf8; --line:#d8d2c3; --ink:#23211b; --dim:#7a7468; --accent:#7b2d26;
-          --serif: Georgia, "Iowan Old Style", "Times New Roman", serif; }
+  :root { --bg:#f6f6f4; --panel:#ffffff; --line:#e3e2de; --ink:#1f2329; --dim:#6e747d; --accent:#44546a;
+          --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.55 var(--serif); }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.55 var(--sans); }
   .wrap { max-width: 980px; margin: 0 auto; padding: 32px 16px; }
-  h1 { font: 700 24px var(--serif); margin: 0 0 4px; letter-spacing:.01em; }
+  h1 { font: 700 22px var(--sans); margin: 0 0 4px; letter-spacing:-.01em; }
   h1 .dice { color: var(--accent); }
-  .subtitle { color: var(--dim); margin-bottom: 28px; font-style: italic; }
-  h2 { font: 600 12px var(--serif); text-transform: uppercase; letter-spacing: .14em; color: var(--dim);
+  .subtitle { color: var(--dim); margin-bottom: 28px; }
+  h2 { font: 600 12px var(--sans); text-transform: uppercase; letter-spacing: .1em; color: var(--dim);
        margin: 30px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 5px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; color: var(--dim); font-weight: 600; font-size: 11px; text-transform: uppercase;
-       letter-spacing: .08em; padding: 6px 10px; border-bottom: 1.5px solid var(--ink); }
+       letter-spacing: .07em; padding: 6px 10px; border-bottom: 1.5px solid #c9c8c3; }
   td { padding: 8px 10px; border-bottom: 1px solid var(--line); }
   tr.game { cursor: pointer; }
-  tr.game:hover td { background: #efe9da; }
+  tr.game:hover td { background: #f0efec; }
   tr:last-child td { border-bottom: none; }
-  .status { font-size: 11px; padding: 1px 8px; border-radius: 9px; letter-spacing:.03em; }
-  .status.live { background: #e3ecdf; color: #2e6b34; animation: runningPulse 1.4s ease-in-out infinite; }
+  .status { font-size: 11px; padding: 1px 8px; border-radius: 9px; letter-spacing:.02em; }
+  .status.live { background: #e2efe1; color: #2e6b34; animation: runningPulse 1.4s ease-in-out infinite; }
   @keyframes runningPulse { 50% { opacity: .45; } }
-  .status.done { background: #ece7da; color: var(--dim); }
-  .status.paused { background: #f3ead0; color: #8a6d1f; }
+  .status.done { background: #ececea; color: var(--dim); }
+  .status.paused { background: #f5ecd2; color: #8a6d1f; }
   .winner { color: #2e6b34; font-weight: 600; }
   .mic { color: var(--accent); }
-  .empty { color: var(--dim); padding: 12px 10px; font-style: italic; }
+  .empty { color: var(--dim); padding: 12px 10px; }
   .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   label { color: var(--dim); font-size: 12px; }
   select, input[type=number], input[type=text] {
-    background: #fff; color: var(--ink); border: 1px solid #b7b0a0; border-radius: 3px;
-    padding: 6px 8px; font: 13px var(--serif); }
-  button { background: var(--accent); color: #fdfcf8; border: 1px solid var(--accent); border-radius: 3px;
-           padding: 8px 16px; font: 600 13px var(--serif); cursor: pointer; }
-  button:hover { filter: brightness(1.15); }
-  button.subtle { background: var(--panel); color: var(--ink); border-color: #b7b0a0; font-weight: 400; }
-  button.subtle:hover { background: #efe9da; filter: none; }
+    background: #fff; color: var(--ink); border: 1px solid #c6c5c0; border-radius: 5px;
+    padding: 6px 8px; font: 13px var(--sans); }
+  button { background: var(--accent); color: #ffffff; border: 1px solid var(--accent); border-radius: 5px;
+           padding: 8px 16px; font: 600 13px var(--sans); cursor: pointer; }
+  button:hover { filter: brightness(1.12); }
+  button.subtle { background: var(--panel); color: var(--ink); border-color: #c6c5c0; font-weight: 400; }
+  button.subtle:hover { background: #f0efec; filter: none; }
   button.tiny { padding: 2px 8px; font-size: 12px; }
-  #launchError { color: #9b2c20; margin-top: 8px; white-space: pre-wrap; }
+  #launchError { color: #b02a1f; margin-top: 8px; white-space: pre-wrap; }
   .playerRow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-  .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; font-variant: small-caps; }
+  .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; text-transform: uppercase;
+                     letter-spacing:.04em; }
 </style>
 </head>
 <body>
