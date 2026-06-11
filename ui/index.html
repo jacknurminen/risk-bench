@@ -23,6 +23,8 @@
   .status { font-size: 12px; padding: 1px 8px; border-radius: 10px; }
   .status.live { background: #2c4a2e; color: #9fdca4; }
   .status.done { background: #2a2d38; color: var(--dim); }
+  .status.paused { background: #4a3d20; color: #e0c27a; }
+  button.tiny { padding: 2px 8px; font-size: 12px; }
   .winner { color: #9fdca4; }
   .mic { color: var(--accent); }
   .empty { color: var(--dim); padding: 12px 10px; }
@@ -63,8 +65,8 @@
   <h2>Games</h2>
   <div class="panel">
     <table>
-      <thead><tr><th>started</th><th>players</th><th>status</th><th>winner</th><th>turns</th></tr></thead>
-      <tbody id="games"><tr><td class="empty" colspan="5">Loading…</td></tr></tbody>
+      <thead><tr><th>started</th><th>players</th><th>status</th><th>winner</th><th>turns</th><th></th></tr></thead>
+      <tbody id="games"><tr><td class="empty" colspan="6">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -130,23 +132,38 @@ async function launch() {
   }
 }
 
+async function gameAction(event, gameId, action) {
+  event.stopPropagation();
+  const response = await fetch(`/api/games/${gameId}/${action}`, { method: "POST" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    alert(payload.detail ?? `Could not ${action} the game.`);
+  }
+  loadGames();
+}
+
 async function loadGames() {
   const payload = await (await fetch("/api/games")).json();
   const body = el("games");
   if (!payload.games.length) {
-    body.innerHTML = '<tr><td class="empty" colspan="5">No games yet — start one above.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="6">No games yet — start one above.</td></tr>';
     return;
   }
   body.innerHTML = payload.games.map(game => {
     const started = new Date(game.modified_at).toLocaleString();
     const status = game.finished
       ? '<span class="status done">finished</span>'
-      : '<span class="status live">● running</span>';
+      : game.running
+        ? '<span class="status live">● running</span>'
+        : '<span class="status paused">⏸ paused</span>';
+    const control = game.finished ? "" : game.running
+      ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
+      : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
     const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
     const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
     return `<tr class="game" onclick="location.href='/games/${game.id}'">
       <td>${started}</td><td>${game.players.join(", ")}${mic}</td>
-      <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td></tr>`;
+      <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td><td>${control}</td></tr>`;
   }).join("");
 }
 

@@ -12,6 +12,7 @@ class GameSummary(BaseModel):
     max_turns: int
     has_commentary: bool
     finished: bool
+    running: bool
     winner: str | None
     turn_count: int | None
     modified_at: datetime

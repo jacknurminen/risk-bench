@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -103,6 +105,71 @@ def test_launch_requests_are_validated(tmp_path: Path):
     bad_provider = client.post("/api/games", json={"players": ["random", "random", "frontier:hi"]})
     assert bad_provider.status_code == 400
     assert "Unknown provider" in bad_provider.json()["detail"]
+
+
+def unfinished_journal(games_directory: Path, name: str) -> Path:
+    games_directory.mkdir(parents=True, exist_ok=True)
+    path = games_directory / f"{name}.jsonl"
+    write_game_journal(path=path, seed=11, max_turns=2_000)
+    # cut the journal mid-game, as if the game had been paused halfway
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(lines[: len(lines) // 2]) + "\n", encoding="utf-8")
+    return path
+
+
+def test_pausing_a_running_game_terminates_its_process(tmp_path: Path):
+    games_directory = tmp_path / "games"
+    unfinished_journal(games_directory=games_directory, name="running")
+    # a stand-in for the game process: the game id in argv satisfies the pid-reuse guard
+    process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "running"])
+    (games_directory / "running.pid").write_text(str(process.pid), encoding="utf-8")
+    client = client_for(tmp_path=tmp_path)
+    try:
+        [game] = client.get("/api/games").json()["games"]
+        assert game["running"] is True and game["finished"] is False
+
+        assert client.post("/api/games/running/pause").status_code == 204
+        assert process.wait(timeout=5) != 0  # SIGTERM'd
+
+        [game] = client.get("/api/games").json()["games"]
+        assert game["running"] is False and game["finished"] is False  # paused, resumable
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+
+def test_pausing_a_game_that_is_not_running_is_rejected(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    response = client.post(f"/api/games/{game_id}/pause")
+
+    assert response.status_code == 409
+    assert "not running" in response.json()["detail"]
+
+
+def test_resuming_a_paused_game_plays_it_to_completion(tmp_path: Path):
+    unfinished_journal(games_directory=tmp_path / "games", name="paused")
+    client = client_for(tmp_path=tmp_path)
+
+    assert client.post("/api/games/paused/resume").status_code == 204
+
+    deadline = time.monotonic() + 90
+    finished = False
+    while time.monotonic() < deadline and not finished:
+        time.sleep(0.5)
+        [game] = client.get("/api/games").json()["games"]
+        finished = game["finished"]
+    assert finished, "the resumed game never finished"
+    assert game["winner"] in PLAYER_NAMES
+
+
+def test_resuming_a_finished_game_is_rejected(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    response = client.post(f"/api/games/{game_id}/resume")
+
+    assert response.status_code == 409
+    assert "finished" in response.json()["detail"]
 
 
 def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path: Path):
