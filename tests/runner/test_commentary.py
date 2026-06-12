@@ -136,6 +136,7 @@ def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
         max_negotiation_rounds=3,
         commentator=commentator,
         journal=journal,
+        trace=None,
         verbose=False,
     ).run()
     journal.close()

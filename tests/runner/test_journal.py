@@ -31,6 +31,7 @@ def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -
         max_negotiation_rounds=3,
         commentator=None,
         journal=journal,
+        trace=None,
         verbose=False,
     )
 
@@ -146,6 +147,7 @@ def test_thoughts_are_journaled_but_ignored_by_replay(tmp_path: Path):
         max_negotiation_rounds=3,
         commentator=None,
         journal=journal,
+        trace=None,
         verbose=False,
     ).run()
     journal.close()

@@ -85,7 +85,7 @@ def tournament(
     try:
         player_specs = specs.named_specs(specs=models)
         participants = {
-            name: specs.player_factory(spec=spec, settings=settings) for name, spec in player_specs.items()
+            name: specs.player_factory(spec=spec, settings=settings, trace=None) for name, spec in player_specs.items()
         }
     except ValueError as error:
         raise typer.BadParameter(str(error)) from None
@@ -114,7 +114,7 @@ def view(
     output: Annotated[Path | None, typer.Option(help="Output HTML path; defaults to alongside the journal.")] = None,
 ) -> None:
     """Render a game journal into a self-contained HTML replay viewer."""
-    html = render_viewer_html(view_model=build_view_model(journal_path=journal))
+    html = render_viewer_html(view_model=build_view_model(journal_path=journal), trace_url="")
     destination = output if output is not None else journal.with_suffix(".html")
     destination.write_text(html, encoding="utf-8")
     console.print(f"Viewer written to {destination}")

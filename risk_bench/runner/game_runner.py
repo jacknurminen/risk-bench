@@ -1,6 +1,7 @@
 import random
 from dataclasses import dataclass
 
+from risk_bench.agents.tracing import TraceWriter
 from risk_bench.chat.diplomacy import ChatMessage, ChatTranscript, MessageVisibility
 from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached
@@ -67,6 +68,7 @@ class GameRunner:
         max_negotiation_rounds: int,
         commentator: Commentator | None,
         journal: JournalWriter | None,
+        trace: TraceWriter | None,
         verbose: bool,
     ) -> None:
         self._players = players
@@ -76,6 +78,7 @@ class GameRunner:
         self._max_negotiation_rounds = max_negotiation_rounds
         self._commentator = commentator
         self._journal = journal
+        self._trace = trace
         self._verbose = verbose
         # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
@@ -169,6 +172,8 @@ class GameRunner:
 
     def _decide_and_apply(self, state: GameState, rng: random.Random) -> GameState:
         acting_player = state.current_player
+        if self._trace is not None:
+            self._trace.set_context(turn=state.turn_number, kind="decision")
         request = DecisionRequest(
             view=self._build_view(state=state, player_id=acting_player),
             legal_actions=legal_actions(state=state),
@@ -206,6 +211,8 @@ class GameRunner:
             if player.eliminated_by is None and player_id != state.current_player
         ]
         speaking_order = [state.current_player] + living_others
+        if self._trace is not None:
+            self._trace.set_context(turn=state.turn_number, kind="negotiation")
         for _ in range(self._max_negotiation_rounds):
             if not self._run_negotiation_pass(state=state, speaking_order=speaking_order):
                 return
@@ -247,6 +254,8 @@ class GameRunner:
         self._turn_log = []
         if self._commentator is None or not turn_log:
             return
+        if self._trace is not None:
+            self._trace.set_context(turn=turn_number, kind="commentary")
         commentary = self._commentator.comment_on_turn(
             state=state, turn_number=turn_number, turn_log=turn_log, previous_commentary=self._previous_commentary
         )

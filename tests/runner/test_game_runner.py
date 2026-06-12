@@ -30,6 +30,7 @@ def talking_runner(
         max_negotiation_rounds=3,
         commentator=None,
         journal=None,
+        trace=None,
         verbose=False,
     )
 

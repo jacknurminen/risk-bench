@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
 from risk_bench import specs
+from risk_bench.agents.tracing import trace_path_for_journal
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     GameListResponse,
@@ -50,9 +51,12 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.get("/games/{game_id}", include_in_schema=False)
     def game_page(game_id: str) -> HTMLResponse:
         view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
+        trace_url = f"/api/games/{game_id}/trace"
         if view_model["result"] is not None:
-            return HTMLResponse(render_viewer_html(view_model=view_model))
-        return HTMLResponse(render_live_viewer_html(view_model=view_model, poll_url=f"/api/games/{game_id}"))
+            return HTMLResponse(render_viewer_html(view_model=view_model, trace_url=trace_url))
+        return HTMLResponse(
+            render_live_viewer_html(view_model=view_model, poll_url=f"/api/games/{game_id}", trace_url=trace_url)
+        )
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
@@ -82,6 +86,20 @@ def create_app(games_directory: Path) -> FastAPI:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
         _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
 
+    @app.get("/api/games/{game_id}/trace")
+    def trace_call_list(game_id: str) -> dict[str, Any]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        records = _read_trace_records(journal_path=journal_path)
+        return {"calls": [_trace_call_summary(record=record) for record in records]}
+
+    @app.get("/api/games/{game_id}/trace/{sequence_number}")
+    def trace_call_detail(game_id: str, sequence_number: int) -> dict[str, Any]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        for record in _read_trace_records(journal_path=journal_path):
+            if record.get("seq") == sequence_number:
+                return record
+        raise HTTPException(status_code=404, detail="No such trace record.")
+
     @app.get("/api/models")
     def model_catalog() -> ModelCatalogResponse:
         return ModelCatalogResponse(
@@ -110,6 +128,38 @@ def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
         return build_view_model(journal_path=path)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
+
+
+def _read_trace_records(journal_path: Path) -> list[dict[str, Any]]:
+    trace_path = trace_path_for_journal(journal_path=journal_path)
+    if not trace_path.is_file():
+        return []
+    records = []
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            break  # a partial trailing line from a crash or an in-flight write
+    return records
+
+
+def _trace_call_summary(record: dict[str, Any]) -> dict[str, Any]:
+    response = record.get("response")
+    tool_call_names = [call["name"] for call in response["tool_calls"]] if response else []
+    return {
+        "seq": record.get("seq"),
+        "time": record.get("time"),
+        "turn": record.get("turn"),
+        "kind": record.get("kind"),
+        "caller": record.get("caller"),
+        "model": record.get("model"),
+        "message_count": len(record.get("messages", [])),
+        "tool_call_names": tool_call_names,
+        "input_tokens": record.get("input_tokens"),
+        "output_tokens": record.get("output_tokens"),
+        "latency_ms": record.get("latency_ms"),
+        "error": record.get("error"),
+    }
 
 
 def _summarize_journal(path: Path, running: bool) -> GameSummary | None:
@@ -196,7 +246,7 @@ def _validate_launch_request(request: NewGameRequest) -> None:
         for spec in request.players:
             if spec != "random":
                 specs.build_agent(spec=spec, settings=settings)
-        specs.build_commentator(spec=request.commentator, settings=settings)
+        specs.build_commentator(spec=request.commentator, settings=settings, trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

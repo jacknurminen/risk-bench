@@ -125,6 +125,7 @@ class TournamentRunner:
             max_negotiation_rounds=self._max_negotiation_rounds,
             commentator=None,  # tournaments run uncommentated; commentary is a single-game spectator feature
             journal=journal,
+            trace=None,
             verbose=self._verbose,
         )
         try:

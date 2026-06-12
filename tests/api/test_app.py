@@ -1,3 +1,4 @@
+import json
 import time
 from pathlib import Path
 
@@ -163,6 +164,46 @@ def test_resuming_a_finished_game_is_rejected(tmp_path: Path):
 
     assert response.status_code == 409
     assert "finished" in response.json()["detail"]
+
+
+def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    trace_record = {
+        "seq": 1,
+        "time": "2026-06-12T10:00:00+00:00",
+        "turn": 2,
+        "kind": "decision",
+        "caller": PLAYER_NAMES[0],
+        "model": "claude-sonnet-4-6",
+        "messages": [{"role": "system", "content": "rules"}, {"role": "user", "content": "a very long prompt"}],
+        "tools": [{"name": "attack", "description": "Attack.", "parameters": {"type": "object"}}],
+        "response": {"text": None, "tool_calls": [{"id": "c1", "name": "attack", "arguments": {}}]},
+        "error": None,
+        "input_tokens": 2_341,
+        "output_tokens": 89,
+        "latency_ms": 1_200,
+    }
+    trace_path = tmp_path / "games" / f"{game_id}.trace.jsonl"
+    trace_path.write_text(json.dumps(trace_record) + "\n", encoding="utf-8")
+
+    [summary] = client.get(f"/api/games/{game_id}/trace").json()["calls"]
+    assert summary["seq"] == 1
+    assert summary["caller"] == PLAYER_NAMES[0]
+    assert summary["tool_call_names"] == ["attack"]
+    assert summary["message_count"] == 2
+    assert "messages" not in summary  # summaries stay light; bodies come from the detail endpoint
+
+    detail = client.get(f"/api/games/{game_id}/trace/1").json()
+    assert detail["messages"][1]["content"] == "a very long prompt"
+    assert detail["tools"][0]["name"] == "attack"
+
+    assert client.get(f"/api/games/{game_id}/trace/99").status_code == 404
+
+
+def test_a_game_without_a_trace_lists_no_calls(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    assert client.get(f"/api/games/{game_id}/trace").json() == {"calls": []}
 
 
 def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path: Path):

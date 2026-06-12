@@ -90,6 +90,29 @@
   #statsTable td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   #statsTable .tag { display:inline-block; font-size:10px; color:var(--accent); background:#e8ecf1;
                      border:1px solid #d4dae2; border-radius:3px; padding:0 5px; margin:1px 3px 1px 0; }
+  #usageNote { color:var(--dim); font-size:11px; margin-top:6px; }
+  #statsTabs { margin-left:auto; margin-right:12px; }
+  .tab { padding:3px 12px; font-size:12px; border-radius:0; }
+  .tab:first-child { border-radius:5px 0 0 5px; }
+  .tab:last-child { border-radius:0 5px 5px 0; margin-left:-1px; }
+  .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .call { border-bottom:1px solid var(--line); }
+  .callrow { padding:5px 6px; cursor:pointer; font-size:12px; }
+  .callrow:hover { background:#f0efec; }
+  .call.failed .callrow { background:#fbeeec; }
+  .callrow .callerr { color:#b02a1f; }
+  .calldetail { padding:4px 8px 10px; background:#fafaf8; border-top:1px dashed var(--line); }
+  .calldetail .m { margin:7px 0; }
+  .calldetail .role { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim);
+                      font-weight:600; }
+  .calldetail pre { margin:2px 0; padding:6px 8px; background:#fff; border:1px solid var(--line);
+                    border-radius:4px; white-space:pre-wrap; word-break:break-word; max-height:300px;
+                    overflow:auto; font-size:11px; }
+  .calldetail .m.system pre { border-left:3px solid var(--accent); }
+  .calldetail .mtool { font:11px ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:#4a5a3f;
+                       padding:2px 0 2px 10px; word-break:break-all; }
+  .calldetail details summary { cursor:pointer; color:var(--dim); font-size:11px; margin-top:6px; }
+  .empty { color:var(--dim); padding:10px 4px; }
 </style>
 </head>
 <body>
@@ -132,16 +155,31 @@
 </div>
 <div id="statsModal" hidden>
   <div id="statsBox" class="panel">
-    <h3>📊 Game statistics <button id="statsClose">✕ close</button></h3>
-    <div id="statsLegend"></div>
-    <div id="charts"></div>
-    <table id="statsTable"></table>
+    <h3>📊 Game statistics
+      <span id="statsTabs">
+        <button id="tabOverview" class="tab active">overview</button><button id="tabCalls" class="tab">API calls</button>
+      </span>
+      <button id="statsClose">✕ close</button></h3>
+    <div id="overviewSheet">
+      <div id="statsLegend"></div>
+      <div id="charts"></div>
+      <table id="statsTable"></table>
+      <div id="usageNote">Costs are estimated from list prices per token; unknown models show no cost.</div>
+    </div>
+    <div id="callsSheet" hidden>
+      <div class="row" style="margin:8px 0">
+        <label>caller <select id="callerFilter"></select></label>
+        <span id="callsStatus" style="color:var(--dim)"></span>
+      </div>
+      <div id="callsList"></div>
+    </div>
   </div>
 </div>
 <script>
 const GAME = {{ game_json }};
 const LIVE = {{ live_json }};
 const POLL_URL = {{ poll_url_json }};
+const TRACE_URL = {{ trace_url_json }};
 const COLORS = ["#a33f3b","#3c6c9e","#6e8f3a","#6b5288","#c97a29","#2f8a9e"];
 const steps = GAME.steps;
 let index = 0;
@@ -435,6 +473,16 @@ function buildChart(title, valuesBySeat, formatValue) {
   return chart;
 }
 
+function usageCells(caller) {
+  const usage = (GAME.stats.usage ?? {})[caller];
+  if (!usage) return "<td>—</td><td>—</td><td>—</td>";
+  const failed = usage.errors ? ` <span class="callerr">(${usage.errors} failed)</span>` : "";
+  const cost = usage.cost_usd == null ? "—" : `$${usage.cost_usd.toFixed(2)}`;
+  return `<td>${usage.calls}${failed}</td>
+    <td>${usage.input_tokens.toLocaleString("en-US")} / ${usage.output_tokens.toLocaleString("en-US")}</td>
+    <td>${cost}</td>`;
+}
+
 function renderStatsTable() {
   const rows = GAME.players.map((player, seat) => {
     const stats = GAME.stats.per_player[seat];
@@ -444,14 +492,110 @@ function renderStatsTable() {
       <td>${stats.attacks}</td><td>${stats.conquests}</td>
       <td>${stats.armies_destroyed} / ${stats.armies_lost}</td>
       <td>${stats.public_messages} 📢 &nbsp;${stats.private_messages} 🔒</td>
+      ${usageCells(player.name)}
       <td>${tags || "—"}</td></tr>`;
   });
+  if ((GAME.stats.usage ?? {}).commentator) {
+    rows.push(`<tr><td style="color:var(--dim);font-weight:700">🎙️ commentator</td>
+      <td>—</td><td>—</td><td>—</td><td>—</td>${usageCells("commentator")}<td>—</td></tr>`);
+  }
   el("statsTable").innerHTML = `<thead><tr><th>player</th><th>attacks</th><th>conquests</th>
-    <th>armies destroyed / lost</th><th>messages</th><th>behavior tags</th></tr></thead>
+    <th>armies destroyed / lost</th><th>messages</th>
+    <th>api calls</th><th>tokens in / out</th><th>est. cost</th>
+    <th>behavior tags</th></tr></thead>
     <tbody>${rows.join("")}</tbody>`;
 }
 
-el("statsButton").onclick = () => { renderStats(); el("statsModal").hidden = false; };
+// The API calls sheet: summaries come from the server's trace endpoint; the full
+// prompt/response of a call is fetched lazily when it is expanded.
+let traceCalls = null;
+
+function showStatsSheet(name) {
+  el("overviewSheet").hidden = name !== "overview";
+  el("callsSheet").hidden = name !== "calls";
+  el("tabOverview").classList.toggle("active", name === "overview");
+  el("tabCalls").classList.toggle("active", name === "calls");
+  if (name === "calls") loadCalls();
+}
+
+async function loadCalls() {
+  const container = el("callsList");
+  if (!TRACE_URL) {
+    el("callsStatus").textContent = "";
+    container.innerHTML = '<div class="empty">The API trace is only available when the game is served by the' +
+      ' web app; this static export does not include it.</div>';
+    return;
+  }
+  el("callsStatus").textContent = "loading…";
+  const response = await fetch(TRACE_URL, { cache: "no-store" });
+  if (!response.ok) { el("callsStatus").textContent = "could not load the trace"; return; }
+  traceCalls = (await response.json()).calls;
+  el("callsStatus").textContent = traceCalls.length
+    ? `${traceCalls.length} calls` : "no API calls recorded for this game";
+  const callers = [...new Set(traceCalls.map(call => call.caller))];
+  const selected = el("callerFilter").value;
+  el("callerFilter").innerHTML = '<option value="">all</option>' +
+    callers.map(caller => `<option${caller === selected ? " selected" : ""}>${caller}</option>`).join("");
+  renderCalls();
+}
+
+function renderCalls() {
+  const filter = el("callerFilter").value;
+  const rows = (traceCalls ?? []).filter(call => !filter || call.caller === filter).map(call => {
+    const outcome = call.error ? `<span class="callerr">✗ ${escapeHtml(call.error)}</span>`
+      : call.tool_call_names.length ? `→ ${call.tool_call_names.join(", ")}` : "→ text only";
+    const tokens = call.input_tokens == null ? ""
+      : `${call.input_tokens.toLocaleString("en-US")} → ${call.output_tokens.toLocaleString("en-US")} tok · `;
+    return `<div class="call${call.error ? " failed" : ""}">
+      <div class="callrow" onclick="toggleCallDetail(${call.seq})">
+        <span class="meta">#${call.seq} · turn ${call.turn} · ${call.kind} · </span>${colorizeNames(call.caller)}
+        <span class="meta"> · ${call.message_count} messages · ${tokens}${call.latency_ms} ms</span> ${outcome}
+      </div>
+      <div class="calldetail" id="detail-${call.seq}" hidden></div>
+    </div>`;
+  });
+  el("callsList").innerHTML = rows.join("") || '<div class="empty">No calls match the filter.</div>';
+}
+
+async function toggleCallDetail(seq) {
+  const detail = el("detail-" + seq);
+  if (!detail.hidden) { detail.hidden = true; return; }
+  if (!detail.innerHTML) {
+    detail.innerHTML = '<div class="empty">loading…</div>';
+    const record = await (await fetch(`${TRACE_URL}/${seq}`)).json();
+    detail.innerHTML = renderCallDetail(record);
+  }
+  detail.hidden = false;
+}
+
+function renderCallDetail(record) {
+  const toolCallLines = calls => (calls ?? [])
+    .map(call => `<div class="mtool">⚙ ${call.name}(${escapeHtml(JSON.stringify(call.arguments))})</div>`).join("");
+  const messages = record.messages.map(message =>
+    `<div class="m ${message.role}">
+      <span class="role">${message.role}${message.tool_call_id ? ` · result for ${message.tool_call_id}` : ""}</span>
+      ${message.content ? `<pre>${escapeHtml(message.content)}</pre>` : ""}${toolCallLines(message.tool_calls)}
+    </div>`).join("");
+  const response = record.response
+    ? `<div class="m"><span class="role">⬅ response</span>
+        ${record.response.text ? `<pre>${escapeHtml(record.response.text)}</pre>` : ""}
+        ${toolCallLines(record.response.tool_calls)}</div>`
+    : `<div class="m"><span class="role">⬅ error</span><pre>${escapeHtml(record.error ?? "")}</pre></div>`;
+  const tools = record.tools.length
+    ? `<details><summary>${record.tools.length} tools offered (schemas)</summary>
+        <pre>${escapeHtml(JSON.stringify(record.tools, null, 2))}</pre></details>` : "";
+  return messages + response + tools;
+}
+
+el("tabOverview").onclick = () => showStatsSheet("overview");
+el("tabCalls").onclick = () => showStatsSheet("calls");
+el("callerFilter").onchange = renderCalls;
+
+el("statsButton").onclick = () => {
+  renderStats();
+  if (!el("callsSheet").hidden) loadCalls();
+  el("statsModal").hidden = false;
+};
 el("statsClose").onclick = () => el("statsModal").hidden = true;
 el("statsModal").onclick = event => { if (event.target === el("statsModal")) el("statsModal").hidden = true; };
 

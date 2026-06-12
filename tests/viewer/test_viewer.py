@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from risk_bench.game.types import Territory
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
 from risk_bench.viewer.html import render_live_viewer_html, render_viewer_html
@@ -86,10 +88,57 @@ def test_view_model_stats_summarize_the_game(tmp_path: Path):
     assert all(marker["text"] and marker["turn"] in series["turns"] for marker in model["stats"]["markers"])
 
 
+def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):
+    path = journal_with_game(tmp_path=tmp_path)
+    trace_records = [
+        {
+            "seq": 1,
+            "caller": PLAYER_NAMES[0],
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "error": None,
+        },
+        {
+            "seq": 2,
+            "caller": PLAYER_NAMES[0],
+            "model": "claude-sonnet-4-6",
+            "input_tokens": 2_000,
+            "output_tokens": 200,
+            "error": None,
+        },
+        {
+            "seq": 3,
+            "caller": "commentator",
+            "model": "a-mystery-model",
+            "input_tokens": None,
+            "output_tokens": None,
+            "error": "RuntimeError: boom",
+        },
+    ]
+    trace_text = "".join(json.dumps(record) + "\n" for record in trace_records)
+    (tmp_path / "game.trace.jsonl").write_text(trace_text, encoding="utf-8")
+
+    usage = build_view_model(journal_path=path)["stats"]["usage"]
+
+    player_usage = usage[PLAYER_NAMES[0]]
+    assert (player_usage["calls"], player_usage["errors"]) == (2, 0)
+    assert (player_usage["input_tokens"], player_usage["output_tokens"]) == (3_000, 300)
+    assert player_usage["cost_usd"] == pytest.approx((3_000 * 3.00 + 300 * 15.00) / 1_000_000)
+    assert usage["commentator"]["errors"] == 1
+    assert usage["commentator"]["cost_usd"] is None  # unknown model: no price invented
+
+
+def test_a_game_without_a_trace_reports_no_usage(tmp_path: Path):
+    model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
+
+    assert model["stats"]["usage"] == {}
+
+
 def test_rendered_html_is_self_contained(tmp_path: Path):
     model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
 
-    html = render_viewer_html(view_model=model)
+    html = render_viewer_html(view_model=model, trace_url="")
 
     assert html.startswith("<!DOCTYPE html>")
     assert "const GAME =" in html
@@ -99,7 +148,9 @@ def test_rendered_html_is_self_contained(tmp_path: Path):
 
 
 def test_rendered_html_embeds_the_board_map_with_every_territory(tmp_path: Path):
-    html = render_viewer_html(view_model=build_view_model(journal_path=journal_with_game(tmp_path=tmp_path)))
+    html = render_viewer_html(
+        view_model=build_view_model(journal_path=journal_with_game(tmp_path=tmp_path)), trace_url=""
+    )
 
     assert "<svg" in html
     assert all(f'id="{territory}"' in html for territory in Territory)
@@ -109,7 +160,9 @@ def test_rendered_html_embeds_the_board_map_with_every_territory(tmp_path: Path)
 def test_live_rendering_polls_the_given_url(tmp_path: Path):
     model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
 
-    html = render_live_viewer_html(view_model=model, poll_url="/api/games/some-game")
+    html = render_live_viewer_html(
+        view_model=model, poll_url="/api/games/some-game", trace_url="/api/games/some-game/trace"
+    )
 
     assert "const LIVE = true" in html
     assert '"/api/games/some-game"' in html

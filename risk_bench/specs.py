@@ -12,6 +12,7 @@ from risk_bench.agents.base import Agent
 from risk_bench.agents.google import GeminiAgent
 from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
 from risk_bench.agents.openai import OpenAIAgent
+from risk_bench.agents.tracing import TraceWriter, TracingAgent
 from risk_bench.config import Settings
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
@@ -74,12 +75,13 @@ def named_specs(specs: list[str]) -> dict[str, str]:
     return named
 
 
-def player_factory(spec: str, settings: Settings) -> PlayerFactory:
+def player_factory(spec: str, settings: Settings, trace: TraceWriter | None) -> PlayerFactory:
     """Create a factory producing fresh players for the given spec.
 
     Args:
         spec: The player spec ('random' or a model spec).
         settings: Provides API keys and agent limits.
+        trace: Records every provider API call when given; None disables tracing.
 
     Returns:
         A factory taking (player_id, rng) and returning a new player.
@@ -90,11 +92,15 @@ def player_factory(spec: str, settings: Settings) -> PlayerFactory:
     if spec == "random":
         return lambda player_id, rng: RandomPlayer(player_id=player_id, rng=rng)
     agent = build_agent(spec=spec, settings=settings)
+    model = resolve_model(spec=spec)
 
     def create_llm_player(player_id: PlayerId, rng: random.Random) -> Player:
+        player_agent = (
+            agent if trace is None else TracingAgent(agent=agent, model=model, caller=player_id, writer=trace)
+        )
         return LLMPlayer(
             player_id=player_id,
-            agent=agent,
+            agent=player_agent,
             max_invalid_retries=settings.max_invalid_retries,
             max_consecutive_provider_failures=settings.max_consecutive_provider_failures,
             rng=rng,
@@ -130,12 +136,13 @@ def build_agent(spec: str, settings: Settings) -> Agent:
             raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
 
 
-def build_commentator(spec: str | None, settings: Settings) -> Commentator | None:
+def build_commentator(spec: str | None, settings: Settings, trace: TraceWriter | None) -> Commentator | None:
     """Build the commentator for a model spec, or None when no spec is given.
 
     Args:
         spec: A model spec for the commentator's agent, or None.
         settings: Provides API keys and the token limit.
+        trace: Records the commentator's API calls when given; None disables tracing.
 
     Returns:
         The commentator, or None.
@@ -145,7 +152,10 @@ def build_commentator(spec: str | None, settings: Settings) -> Commentator | Non
     """
     if spec is None:
         return None
-    return Commentator(agent=build_agent(spec=spec, settings=settings))
+    agent = build_agent(spec=spec, settings=settings)
+    if trace is not None:
+        agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller="commentator", writer=trace)
+    return Commentator(agent=agent)
 
 
 def _require_api_key(provider: str, settings: Settings) -> str:
