@@ -40,7 +40,7 @@ def run_new_game(
     player_specs = specs.named_specs(specs=models)
     if journal_path is None:
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
-        journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}.jsonl"
+        journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}" / "game.jsonl"
     trace = _trace_writer(
         journal_path=journal_path, player_specs=player_specs, commentator_spec=commentator_spec, append=False
     )

@@ -13,9 +13,9 @@ def client_for(tmp_path: Path) -> TestClient:
 
 
 def client_with_finished_game(tmp_path: Path) -> tuple[TestClient, str]:
-    games_directory = tmp_path / "games"
-    games_directory.mkdir()
-    write_game_journal(path=games_directory / "first-game.jsonl", seed=11, max_turns=2_000)
+    game_directory = tmp_path / "games" / "first-game"
+    game_directory.mkdir(parents=True)
+    write_game_journal(path=game_directory / "game.jsonl", seed=11, max_turns=2_000)
     return client_for(tmp_path=tmp_path), "first-game"
 
 
@@ -69,9 +69,9 @@ def test_the_game_page_renders_the_viewer(tmp_path: Path):
 
 
 def test_an_unfinished_game_page_polls_the_api(tmp_path: Path):
-    games_directory = tmp_path / "games"
-    games_directory.mkdir()
-    path = games_directory / "running.jsonl"
+    game_directory = tmp_path / "games" / "running"
+    game_directory.mkdir(parents=True)
+    path = game_directory / "game.jsonl"
     write_game_journal(path=path, seed=11, max_turns=2_000)
     lines = path.read_text(encoding="utf-8").splitlines()
     path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")  # drop the result line
@@ -84,7 +84,7 @@ def test_an_unfinished_game_page_polls_the_api(tmp_path: Path):
 
 def test_a_corrupted_journal_yields_a_conflict_not_a_crash(tmp_path: Path):
     client, game_id = client_with_finished_game(tmp_path=tmp_path)
-    path = tmp_path / "games" / f"{game_id}.jsonl"
+    path = tmp_path / "games" / game_id / "game.jsonl"
     lines = path.read_text(encoding="utf-8").splitlines()
     # duplicating an action makes the journal stop replaying cleanly
     path.write_text("\n".join(lines[:30] + lines[20:]) + "\n", encoding="utf-8")
@@ -130,8 +130,8 @@ def test_launch_requests_are_validated(tmp_path: Path):
 
 
 def unfinished_journal(games_directory: Path, name: str) -> Path:
-    games_directory.mkdir(parents=True, exist_ok=True)
-    path = games_directory / f"{name}.jsonl"
+    (games_directory / name).mkdir(parents=True, exist_ok=True)
+    path = games_directory / name / "game.jsonl"
     write_game_journal(path=path, seed=11, max_turns=2_000)
     # cut the journal mid-game, as if the game had been paused halfway
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -206,7 +206,7 @@ def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
         "output_tokens": 89,
         "latency_ms": 1_200,
     }
-    trace_path = tmp_path / "games" / f"{game_id}.trace.jsonl"
+    trace_path = tmp_path / "games" / game_id / "game.trace.jsonl"
     trace_path.write_text(json.dumps(trace_record) + "\n", encoding="utf-8")
 
     [summary] = client.get(f"/api/games/{game_id}/trace").json()["calls"]
@@ -244,7 +244,7 @@ def test_a_parallel_launch_becomes_a_grouped_tournament(tmp_path: Path):
     assert response.status_code == 201
     assert response.json()["tournament"] is True
     tournament_id = response.json()["id"]
-    assert (tmp_path / "games" / f"{tournament_id}.tournament.json").is_file()
+    assert (tmp_path / "games" / tournament_id / "tournament.json").is_file()
 
     payload = client.get("/api/games").json()
     [tournament] = payload["tournaments"]

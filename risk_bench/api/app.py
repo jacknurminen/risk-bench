@@ -28,6 +28,15 @@ _GAME_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _LAUNCH_TIMEOUT_SECONDS = 15.0
 
 
+class _UsageTotals(NamedTuple):
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
+
+
+_NO_USAGE = _UsageTotals(input_tokens=None, output_tokens=None, cost_usd=None)
+
+
 def create_app(games_directory: Path) -> FastAPI:
     """Create the web app: browse and watch games, and launch new ones.
 
@@ -64,22 +73,28 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
-        tournaments = _load_tournaments(games_directory=games_directory)
-        tournament_by_game = {game_id: t.id for t in tournaments for game_id in t.game_ids}
-        summaries = [
-            summary
-            for path in sorted(games_directory.glob("*.jsonl"), reverse=True)
-            if (
-                summary := _summarize_journal(
-                    path=path,
-                    running=manager.is_running(game_id=path.stem),
-                    tournament_id=tournament_by_game.get(path.stem),
-                    usage=_usage_totals(journal_path=path, cache=usage_totals_cache),
+        games: list[GameSummary] = []
+        tournaments: list[TournamentSummary] = []
+        for entry in sorted(games_directory.iterdir(), reverse=True) if games_directory.is_dir() else []:
+            if not entry.is_dir():
+                continue
+            manifest_path = entry / "tournament.json"
+            if manifest_path.is_file():
+                tournament = _tournament_summary(manifest_path=manifest_path)
+                tournaments.append(tournament)
+                member_directories = [entry / game_id for game_id in tournament.game_ids]
+            else:
+                member_directories = [entry]
+            for game_directory in member_directories:
+                summary = _summarize_game_directory(
+                    game_directory=game_directory,
+                    manager=manager,
+                    tournament_id=tournament.id if manifest_path.is_file() else None,
+                    usage_totals_cache=usage_totals_cache,
                 )
-            )
-            is not None
-        ]
-        return GameListResponse(games=summaries, tournaments=tournaments)
+                if summary is not None:
+                    games.append(summary)
+        return GameListResponse(games=games, tournaments=tournaments)
 
     @app.get("/api/games/{game_id}")
     def game_view_model(game_id: str) -> dict[str, Any]:
@@ -130,10 +145,13 @@ def create_app(games_directory: Path) -> FastAPI:
 def _journal_path(games_directory: Path, game_id: str) -> Path:
     if not _GAME_ID_PATTERN.match(game_id):
         raise HTTPException(status_code=404, detail="No such game.")
-    path = games_directory / f"{game_id}.jsonl"
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail="No such game.")
-    return path
+    # a game folder lives at the top level (standalone) or inside its tournament's folder
+    candidate_directories = [games_directory / game_id, *games_directory.glob(f"*/{game_id}")]
+    for game_directory in candidate_directories:
+        journal_path = game_directory / "game.jsonl"
+        if journal_path.is_file():
+            return journal_path
+    raise HTTPException(status_code=404, detail="No such game.")
 
 
 def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
@@ -179,28 +197,32 @@ def _trace_call_summary(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_tournaments(games_directory: Path) -> list[TournamentSummary]:
-    tournaments = []
-    for path in sorted(games_directory.glob("*.tournament.json"), reverse=True):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        tournaments.append(
-            TournamentSummary(
-                id=data["id"],
-                players=data["players"],
-                game_ids=data["game_ids"],
-                created_at=datetime.fromisoformat(data["created_at"]),
-            )
-        )
-    return tournaments
+def _tournament_summary(manifest_path: Path) -> TournamentSummary:
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return TournamentSummary(
+        id=data["id"],
+        players=data["players"],
+        game_ids=data["game_ids"],
+        created_at=datetime.fromisoformat(data["created_at"]),
+    )
 
 
-class _UsageTotals(NamedTuple):
-    input_tokens: int | None
-    output_tokens: int | None
-    cost_usd: float | None
-
-
-_NO_USAGE = _UsageTotals(input_tokens=None, output_tokens=None, cost_usd=None)
+def _summarize_game_directory(
+    game_directory: Path,
+    manager: GameProcessManager,
+    tournament_id: str | None,
+    usage_totals_cache: dict[str, tuple[tuple[float, int], _UsageTotals]],
+) -> GameSummary | None:
+    journal_path = game_directory / "game.jsonl"
+    if not journal_path.is_file():
+        return None
+    return _summarize_journal(
+        path=journal_path,
+        game_id=game_directory.name,
+        running=manager.is_running(game_id=game_directory.name),
+        tournament_id=tournament_id,
+        usage=_usage_totals(journal_path=journal_path, cache=usage_totals_cache),
+    )
 
 
 def _usage_totals(journal_path: Path, cache: dict[str, tuple[tuple[float, int], _UsageTotals]]) -> _UsageTotals:
@@ -224,7 +246,7 @@ def _usage_totals(journal_path: Path, cache: dict[str, tuple[tuple[float, int], 
 
 
 def _summarize_journal(
-    path: Path, running: bool, tournament_id: str | None, usage: _UsageTotals
+    path: Path, game_id: str, running: bool, tournament_id: str | None, usage: _UsageTotals
 ) -> GameSummary | None:
     header: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
@@ -250,7 +272,7 @@ def _summarize_journal(
         return None  # not a game journal
     final_turn = int(result["turn_count"]) if result is not None else None
     return GameSummary(
-        id=path.stem,
+        id=game_id,
         players=list(header["player_specs"]),
         seed=int(header["seed"]),
         max_turns=int(header["max_turns"]),
@@ -273,13 +295,15 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
     base_id = _new_game_id(games_directory=games_directory, seed=request.seed)
 
     if request.parallel_games == 1:
-        _start_game_worker(
-            games_directory=games_directory, manager=manager, game_id=base_id, request=request, seed=request.seed
-        )
-        _wait_for_journal_header(games_directory=games_directory, manager=manager, game_id=base_id)
+        game_directory = games_directory / base_id
+        _start_game_worker(game_directory=game_directory, manager=manager, request=request, seed=request.seed)
+        _wait_for_journal_header(game_directory=game_directory, manager=manager)
         return NewGameResponse(id=base_id, tournament=False)
 
-    # a tournament: the same setup replicated across workers on consecutive seeds
+    # a tournament: the same setup replicated across workers on consecutive seeds,
+    # each game in its own folder inside the tournament's folder
+    tournament_directory = games_directory / base_id
+    tournament_directory.mkdir(parents=True, exist_ok=True)
     game_ids = [f"{base_id}-g{index}" for index in range(1, request.parallel_games + 1)]
     manifest = {
         "id": base_id,
@@ -287,53 +311,51 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
         "game_ids": game_ids,
         "created_at": datetime.now(tz=UTC).isoformat(),
     }
-    (games_directory / f"{base_id}.tournament.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (tournament_directory / "tournament.json").write_text(json.dumps(manifest), encoding="utf-8")
     for index, game_id in enumerate(game_ids):
         _start_game_worker(
-            games_directory=games_directory,
-            manager=manager,
-            game_id=game_id,
-            request=request,
-            seed=request.seed + index,
+            game_directory=tournament_directory / game_id, manager=manager, request=request, seed=request.seed + index
         )
     for game_id in game_ids:
-        _wait_for_journal_header(games_directory=games_directory, manager=manager, game_id=game_id)
+        _wait_for_journal_header(game_directory=tournament_directory / game_id, manager=manager)
     return NewGameResponse(id=base_id, tournament=True)
 
 
-def _start_game_worker(
-    games_directory: Path, manager: GameProcessManager, game_id: str, request: NewGameRequest, seed: int
-) -> None:
+def _start_game_worker(game_directory: Path, manager: GameProcessManager, request: NewGameRequest, seed: int) -> None:
+    game_directory.mkdir(parents=True, exist_ok=True)
     # the launch record keeps the game's own seed so resume sees the game, not the tournament
     launch_record = request.model_copy(update={"seed": seed, "parallel_games": 1})
-    (games_directory / f"{game_id}.launch.json").write_text(launch_record.model_dump_json(), encoding="utf-8")
+    (game_directory / "launch.json").write_text(launch_record.model_dump_json(), encoding="utf-8")
     manager.launch_game(
-        game_id=game_id,
+        game_id=game_directory.name,
         players=request.players,
         seed=seed,
         commentator_spec=request.commentator,
         max_turns=request.max_turns,
-        journal_path=games_directory / f"{game_id}.jsonl",
-        log_path=games_directory / f"{game_id}.log",
+        journal_path=game_directory / "game.jsonl",
+        log_path=game_directory / "worker.log",
     )
 
 
 def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
     if manager.is_running(game_id=game_id):
         raise HTTPException(status_code=409, detail="The game is already running.")
-    summary = _summarize_journal(path=journal_path, running=False, tournament_id=None, usage=_NO_USAGE)
+    summary = _summarize_journal(
+        path=journal_path, game_id=game_id, running=False, tournament_id=None, usage=_NO_USAGE
+    )
     if summary is None or summary.finished:
         raise HTTPException(status_code=409, detail="The game is already finished; nothing to resume.")
+    game_directory = journal_path.parent
     manager.resume_game(
         game_id=game_id,
         journal_path=journal_path,
-        commentator_spec=_launched_commentator(games_directory=games_directory, game_id=game_id),
-        log_path=games_directory / f"{game_id}.log",
+        commentator_spec=_launched_commentator(game_directory=game_directory),
+        log_path=game_directory / "worker.log",
     )
 
 
-def _launched_commentator(games_directory: Path, game_id: str) -> str | None:
-    launch_path = games_directory / f"{game_id}.launch.json"
+def _launched_commentator(game_directory: Path) -> str | None:
+    launch_path = game_directory / "launch.json"
     if not launch_path.is_file():
         return None
     commentator = json.loads(launch_path.read_text(encoding="utf-8")).get("commentator")
@@ -357,20 +379,20 @@ def _validate_launch_request(request: NewGameRequest) -> None:
 def _new_game_id(games_directory: Path, seed: int) -> str:
     base_id = f"{datetime.now(tz=UTC).strftime('%Y%m%d-%H%M%S')}-seed{seed}"
     game_id, suffix = base_id, 2
-    while (games_directory / f"{game_id}.jsonl").exists() or (games_directory / f"{game_id}.tournament.json").exists():
+    while (games_directory / game_id).exists():
         game_id = f"{base_id}-{suffix}"
         suffix += 1
     return game_id
 
 
-def _wait_for_journal_header(games_directory: Path, manager: GameProcessManager, game_id: str) -> None:
-    journal_path = games_directory / f"{game_id}.jsonl"
-    log_path = games_directory / f"{game_id}.log"
+def _wait_for_journal_header(game_directory: Path, manager: GameProcessManager) -> None:
+    journal_path = game_directory / "game.jsonl"
+    log_path = game_directory / "worker.log"
     deadline = time.monotonic() + _LAUNCH_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if journal_path.is_file() and journal_path.read_text(encoding="utf-8").startswith('{"type": "header"'):
             return
-        if not manager.is_running(game_id=game_id):
+        if not manager.is_running(game_id=game_directory.name):
             log_tail = log_path.read_text(encoding="utf-8")[-2000:] if log_path.is_file() else ""
             raise HTTPException(status_code=500, detail=f"The game worker exited at startup: {log_tail}")
         time.sleep(0.1)
