@@ -8,6 +8,11 @@ UI_DIRECTORY = Path(__file__).parents[2] / "ui"
 _TEMPLATE_PATH = UI_DIRECTORY / "game.html.j2"
 _BOARD_SVG_PATH = UI_DIRECTORY / "board.svg"
 
+# loaded once at import: a running server must serve the template its own view-model
+# code was loaded with, or the page's JS and the embedded data can skew apart
+_TEMPLATE = jinja2.Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
+_BOARD_SVG = _BOARD_SVG_PATH.read_text(encoding="utf-8")
+
 
 def render_viewer_html(view_model: dict[str, Any], trace_url: str) -> str:
     """Render a game view model into a self-contained HTML replay viewer.
@@ -38,11 +43,10 @@ def render_live_viewer_html(view_model: dict[str, Any], poll_url: str, trace_url
 
 
 def _render(view_model: dict[str, Any], live: bool, poll_url: str, trace_url: str) -> str:
-    template = jinja2.Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
-    return template.render(
+    return _TEMPLATE.render(
         game_json=json.dumps(view_model),
         live_json=json.dumps(live),
         poll_url_json=json.dumps(poll_url),
         trace_url_json=json.dumps(trace_url),
-        board_svg=_BOARD_SVG_PATH.read_text(encoding="utf-8"),
+        board_svg=_BOARD_SVG,
     )
