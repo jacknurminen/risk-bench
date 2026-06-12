@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import openai
@@ -33,7 +34,11 @@ class OpenAIAgent:
             messages=[_to_openai_message(message=message) for message in messages],
             tools=[_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit,
         )
-        return _parse_response(message=response.choices[0].message)
+        parsed = _parse_response(message=response.choices[0].message)
+        usage = response.usage
+        if usage is None:
+            return parsed
+        return dataclasses.replace(parsed, input_tokens=usage.prompt_tokens, output_tokens=usage.completion_tokens)
 
 
 def _to_openai_message(message: Message) -> openai.types.chat.ChatCompletionMessageParam:

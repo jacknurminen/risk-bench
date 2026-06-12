@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 from google import genai
 from google.genai import types
 
@@ -35,7 +37,13 @@ class GeminiAgent:
                 tools=[_to_tool(tool=tool) for tool in tools] if tools else None,
             ),
         )
-        return _parse_response(response=response)
+        parsed = _parse_response(response=response)
+        usage = response.usage_metadata
+        if usage is None:
+            return parsed
+        # Gemini bills hidden thinking as output, so it counts toward output tokens here
+        output_tokens = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
+        return dataclasses.replace(parsed, input_tokens=usage.prompt_token_count, output_tokens=output_tokens)
 
 
 def _split_system(messages: list[Message]) -> tuple[str | None, list[types.Content]]:

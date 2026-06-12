@@ -52,10 +52,16 @@ class Message:
 
 @dataclass(frozen=True)
 class Response:
-    """The model's reply: free text, tool calls, or both."""
+    """The model's reply: free text, tool calls, or both.
+
+    Token counts are as reported by the provider (None when not reported);
+    output tokens include any hidden reasoning tokens the provider bills for.
+    """
 
     text: str | None
     tool_calls: tuple[ToolCall, ...] = field(default_factory=tuple)
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 @runtime_checkable

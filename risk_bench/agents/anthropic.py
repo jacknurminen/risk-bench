@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import Literal
 
 import anthropic
@@ -34,7 +35,10 @@ class AnthropicAgent:
             system=system_prompt if system_prompt else anthropic.omit,
             tools=[_to_anthropic_tool(tool=tool) for tool in tools] if tools else anthropic.omit,
         )
-        return _parse_response(content_blocks=response.content)
+        parsed = _parse_response(content_blocks=response.content)
+        return dataclasses.replace(
+            parsed, input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
+        )
 
 
 def _split_system(messages: list[Message]) -> tuple[str | None, list[anthropic.types.MessageParam]]:
