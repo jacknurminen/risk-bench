@@ -3,13 +3,13 @@ import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
 from risk_bench import specs
-from risk_bench.agents.tracing import trace_path_for_journal
+from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     GameListResponse,
@@ -44,6 +44,8 @@ def create_app(games_directory: Path) -> FastAPI:
     app = FastAPI(title="risk-bench")
     manager = GameProcessManager()
     app.add_event_handler("shutdown", manager.shutdown)
+    # traces can be large and the list is polled; totals are recomputed only when a trace changes
+    usage_totals_cache: dict[str, tuple[tuple[float, int], _UsageTotals]] = {}
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -71,6 +73,7 @@ def create_app(games_directory: Path) -> FastAPI:
                     path=path,
                     running=manager.is_running(game_id=path.stem),
                     tournament_id=tournament_by_game.get(path.stem),
+                    usage=_usage_totals(journal_path=path, cache=usage_totals_cache),
                 )
             )
             is not None
@@ -187,10 +190,42 @@ def _load_tournaments(games_directory: Path) -> list[TournamentSummary]:
     return tournaments
 
 
-def _summarize_journal(path: Path, running: bool, tournament_id: str | None) -> GameSummary | None:
+class _UsageTotals(NamedTuple):
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
+
+
+_NO_USAGE = _UsageTotals(input_tokens=None, output_tokens=None, cost_usd=None)
+
+
+def _usage_totals(journal_path: Path, cache: dict[str, tuple[tuple[float, int], _UsageTotals]]) -> _UsageTotals:
+    trace_path = trace_path_for_journal(journal_path=journal_path)
+    if not trace_path.is_file():
+        return _NO_USAGE
+    stat = trace_path.stat()
+    signature = (stat.st_mtime, stat.st_size)
+    cached = cache.get(str(trace_path))
+    if cached is not None and cached[0] == signature:
+        return cached[1]
+    usage = usage_by_caller(trace_path=trace_path)
+    known_costs = [entry["cost_usd"] for entry in usage.values() if entry["cost_usd"] is not None]
+    totals = _UsageTotals(
+        input_tokens=sum(entry["input_tokens"] for entry in usage.values()),
+        output_tokens=sum(entry["output_tokens"] for entry in usage.values()),
+        cost_usd=sum(known_costs) if known_costs else None,
+    )
+    cache[str(trace_path)] = (signature, totals)
+    return totals
+
+
+def _summarize_journal(
+    path: Path, running: bool, tournament_id: str | None, usage: _UsageTotals
+) -> GameSummary | None:
     header: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     has_commentary = False
+    latest_turn = 0
     for line in path.read_text(encoding="utf-8").splitlines():
         try:
             record = json.loads(line)
@@ -199,12 +234,17 @@ def _summarize_journal(path: Path, running: bool, tournament_id: str | None) -> 
         match record.get("type"):
             case "header":
                 header = record
+            case "events":
+                for event in record["events"]:
+                    if event.get("kind") == "turn_started":
+                        latest_turn = max(latest_turn, int(event["turn_number"]))
             case "result":
                 result = record
             case "commentary":
                 has_commentary = True
     if header is None:
         return None  # not a game journal
+    final_turn = int(result["turn_count"]) if result is not None else None
     return GameSummary(
         id=path.stem,
         players=list(header["player_specs"]),
@@ -214,7 +254,10 @@ def _summarize_journal(path: Path, running: bool, tournament_id: str | None) -> 
         finished=result is not None,
         running=running,
         winner=result["winner"] if result is not None else None,
-        turn_count=int(result["turn_count"]) if result is not None else None,
+        turn_count=final_turn if final_turn is not None else (latest_turn or None),
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cost_usd=usage.cost_usd,
         modified_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
         tournament_id=tournament_id,
     )
@@ -274,7 +317,7 @@ def _start_game_worker(
 def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
     if manager.is_running(game_id=game_id):
         raise HTTPException(status_code=409, detail="The game is already running.")
-    summary = _summarize_journal(path=journal_path, running=False, tournament_id=None)
+    summary = _summarize_journal(path=journal_path, running=False, tournament_id=None, usage=_NO_USAGE)
     if summary is None or summary.finished:
         raise HTTPException(status_code=409, detail="The game is already finished; nothing to resume.")
     manager.resume_game(

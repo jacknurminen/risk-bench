@@ -22,7 +22,10 @@
   tr.game { cursor: pointer; }
   tr.game:hover td { background: #f0efec; }
   tr:last-child td { border-bottom: none; }
-  .status { font-size: 11px; padding: 1px 8px; border-radius: 9px; letter-spacing:.02em; }
+  .status { font-size: 11px; padding: 1px 8px; border-radius: 9px; letter-spacing:.02em;
+            white-space: nowrap; display: inline-block; }
+  th.colStatus { min-width: 150px; }
+  td.num { white-space: nowrap; }
   .status.live { background: #e2efe1; color: #2e6b34; animation: runningPulse 1.4s ease-in-out infinite; }
   @keyframes runningPulse { 50% { opacity: .45; } }
   .status.done { background: #ececea; color: var(--dim); }
@@ -76,8 +79,9 @@
   <h2>Games</h2>
   <div class="panel">
     <table>
-      <thead><tr><th>started</th><th>players</th><th>status</th><th>winner</th><th>turns</th><th></th></tr></thead>
-      <tbody id="games"><tr><td class="empty" colspan="6">Loading…</td></tr></tbody>
+      <thead><tr><th>started</th><th>players</th><th class="colStatus">status</th><th>winner</th>
+        <th>turn</th><th>tokens in / out</th><th>est. cost</th><th></th></tr></thead>
+      <tbody id="games"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -169,6 +173,12 @@ function toggleTournament(tournamentId) {
   loadGames();
 }
 
+const compact = n => n == null ? null
+  : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
+const tokensCell = (inputTokens, outputTokens) =>
+  inputTokens == null ? "—" : `${compact(inputTokens)} / ${compact(outputTokens)}`;
+const costCell = cost => cost == null ? "—" : `$${cost.toFixed(2)}`;
+
 function gameRow(game, child) {
   const started = new Date(game.modified_at).toLocaleString();
   const status = game.finished
@@ -183,9 +193,12 @@ function gameRow(game, child) {
   const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
   const first = child ? `seed ${game.seed}` : started;
   const players = child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`;
+  const turn = game.turn_count == null ? "—" : game.finished ? game.turn_count : `${game.turn_count}…`;
   return `<tr class="game${child ? " child" : ""}" onclick="location.href='/games/${game.id}'">
     <td>${first}</td><td>${players}</td>
-    <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td><td>${control}</td></tr>`;
+    <td>${status}</td><td>${winner}</td><td class="num">${turn}</td>
+    <td class="num">${tokensCell(game.input_tokens, game.output_tokens)}</td>
+    <td class="num">${costCell(game.cost_usd)}</td><td>${control}</td></tr>`;
 }
 
 function tournamentRows(tournament, games) {
@@ -204,11 +217,17 @@ function tournamentRows(tournament, games) {
     .map(([name, wins]) => `<span class="winner">${name}</span>${wins > 1 ? ` ×${wins}` : ""}`).join(", ") || "—";
   const mic = games.some(game => game.has_commentary) ? ' <span class="mic" title="commentated">🎙️</span>' : "";
   const started = new Date(tournament.created_at).toLocaleString();
+  const totalOrNull = values => values.some(v => v != null) ? values.reduce((sum, v) => sum + (v ?? 0), 0) : null;
+  const inputTokens = totalOrNull(games.map(game => game.input_tokens));
+  const outputTokens = totalOrNull(games.map(game => game.output_tokens));
+  const cost = totalOrNull(games.map(game => game.cost_usd));
   const header = `<tr class="game" onclick="toggleTournament('${tournament.id}')">
     <td><span class="caret">${expanded ? "▾" : "▸"}</span>${started}</td>
     <td><span class="trophy">🏆</span>${tournament.players.join(", ")}${mic}
       <span style="color:var(--dim)"> — ${games.length} games</span></td>
-    <td>${status}</td><td>${winners}</td><td></td><td></td></tr>`;
+    <td>${status}</td><td>${winners}</td><td></td>
+    <td class="num">${tokensCell(inputTokens, outputTokens)}</td>
+    <td class="num">${costCell(cost)}</td><td></td></tr>`;
   return header + (expanded ? games.map(game => gameRow(game, true)).join("") : "");
 }
 
@@ -216,7 +235,7 @@ async function loadGames() {
   const payload = await (await fetch("/api/games")).json();
   const body = el("games");
   if (!payload.games.length) {
-    body.innerHTML = '<tr><td class="empty" colspan="6">No games yet — start one above.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="8">No games yet — start one above.</td></tr>';
     return;
   }
   const gamesByTournament = {};

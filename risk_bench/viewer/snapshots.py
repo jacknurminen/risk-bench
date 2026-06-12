@@ -1,10 +1,8 @@
-import json
 import random
 from pathlib import Path
 from typing import Any
 
-from risk_bench.agents.models import estimate_cost_usd
-from risk_bench.agents.tracing import trace_path_for_journal
+from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.game.actions import (
     Action,
     Attack,
@@ -134,7 +132,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 combat_totals=combat_totals,
                 markers=markers,
             ),
-            "usage": _usage_summary(trace_path=trace_path_for_journal(journal_path=journal_path)),
+            "usage": usage_by_caller(trace_path=trace_path_for_journal(journal_path=journal_path)),
         },
     }
 
@@ -189,32 +187,6 @@ def _build_stats(
             {**combat_totals[name], **message_counts[name], "tags": behavior_tag_counts[name]} for name in player_names
         ],
     }
-
-
-def _usage_summary(trace_path: Path) -> dict[str, dict[str, Any]]:
-    if not trace_path.exists():
-        return {}
-    usage: dict[str, dict[str, Any]] = {}
-    for line in trace_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            break  # a crash mid-write leaves at most one partial trailing line
-        entry = usage.setdefault(
-            record["caller"],
-            {"model": record["model"], "calls": 0, "errors": 0, "input_tokens": 0, "output_tokens": 0},
-        )
-        entry["calls"] += 1
-        entry["errors"] += 1 if record.get("error") else 0
-        entry["input_tokens"] += record.get("input_tokens") or 0
-        entry["output_tokens"] += record.get("output_tokens") or 0
-    for entry in usage.values():
-        entry["cost_usd"] = estimate_cost_usd(
-            model=entry["model"], input_tokens=entry["input_tokens"], output_tokens=entry["output_tokens"]
-        )
-    return usage
 
 
 def _end_of_turn_series(steps: list[dict[str, Any]], player_names: list[PlayerId]) -> dict[str, Any]:

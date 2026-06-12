@@ -37,6 +37,16 @@ def test_finished_games_are_listed_with_their_outcome(tmp_path: Path):
     assert game["winner"] in PLAYER_NAMES
     assert game["turn_count"] >= 1
     assert game["has_commentary"] is False
+    assert game["input_tokens"] is None  # no trace: random players never called an API
+
+
+def test_an_unfinished_game_lists_the_turn_it_reached(tmp_path: Path):
+    unfinished_journal(games_directory=tmp_path / "games", name="paused")
+
+    [game] = client_for(tmp_path=tmp_path).get("/api/games").json()["games"]
+
+    assert game["finished"] is False
+    assert game["turn_count"] >= 1  # the latest turn_started seen in the journal
 
 
 def test_the_game_view_model_is_served_as_json(tmp_path: Path):
@@ -198,6 +208,11 @@ def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
     assert detail["tools"][0]["name"] == "attack"
 
     assert client.get(f"/api/games/{game_id}/trace/99").status_code == 404
+
+    # the game listing rolls the trace up into token and cost totals
+    [game] = client.get("/api/games").json()["games"]
+    assert (game["input_tokens"], game["output_tokens"]) == (2_341, 89)
+    assert game["cost_usd"] == (2_341 * 3.00 + 89 * 15.00) / 1_000_000
 
 
 def test_a_game_without_a_trace_lists_no_calls(tmp_path: Path):

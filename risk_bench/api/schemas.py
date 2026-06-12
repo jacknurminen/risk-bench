@@ -4,7 +4,11 @@ from pydantic import BaseModel, Field
 
 
 class GameSummary(BaseModel):
-    """One journal's listing entry: identity, players, and outcome so far."""
+    """One journal's listing entry: identity, players, progress, and API spend so far.
+
+    ``turn_count`` is the latest turn reached (final when finished). Token and
+    cost totals come from the game's trace; all None when there is no trace.
+    """
 
     id: str
     players: list[str]
@@ -15,6 +19,9 @@ class GameSummary(BaseModel):
     running: bool
     winner: str | None
     turn_count: int | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cost_usd: float | None
     modified_at: datetime
     tournament_id: str | None
 
