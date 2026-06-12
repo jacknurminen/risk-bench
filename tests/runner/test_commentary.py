@@ -89,6 +89,53 @@ def test_plain_text_without_a_tool_call_still_becomes_commentary():
     assert commentary.tags == ()
 
 
+def test_a_tool_call_leaked_as_text_is_salvaged_not_shown_raw():
+    leaked = (
+        '<invoke name="commentate"><parameter name="commentary">alice played a strong turn.</parameter> '
+        '<parameter name="tags">[{"player": "alice", "behavior": "strong_move", "note": "good odds"}]'
+        "</parameter></invoke>"
+    )
+    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())))
+
+    commentary = commentator.comment_on_turn(
+        state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[]
+    )
+
+    assert commentary is not None
+    assert commentary.text == "alice played a strong turn."
+    assert "<parameter" not in commentary.text
+    assert commentary.tags == (BehaviorTag(player="alice", behavior="strong_move", note="good odds"),)
+
+
+def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
+    # the commonly observed shape: the text IS the commentary, then the tags parameter follows
+    leaked = (
+        "bob already privately decided to break the truce.</parameter>\n"
+        '<parameter name="tags">[{"player": "bob", "behavior": "deception", "note": "said one thing"}, '
+        '{"player": "alice", "behavior": "theory_of_mind", "note": "saw it coming and publicly wond'
+    )  # cut off mid-JSON, as max-token truncation leaves it
+    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())))
+
+    commentary = commentator.comment_on_turn(
+        state=game_state(), turn_number=1, turn_log=["bob spoke"], previous_commentary=[]
+    )
+
+    assert commentary is not None
+    assert commentary.text == "bob already privately decided to break the truce."
+    # the complete leading tag survives; the truncated trailing one is dropped
+    assert commentary.tags == (BehaviorTag(player="bob", behavior="deception", note="said one thing"),)
+
+
+def test_leaked_markup_without_salvageable_commentary_is_discarded():
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text='<parameter name="tags">[]</parameter>', tool_calls=()))
+    )
+
+    assert (
+        commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
+    )
+
+
 def test_an_unusable_response_yields_no_commentary():
     commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=())))
 

@@ -1,3 +1,5 @@
+import json
+import re
 import sys
 from dataclasses import dataclass
 from typing import Any, Final
@@ -179,9 +181,17 @@ class Commentator:
                     text=call.arguments["commentary"],
                     tags=_valid_tags(raw_tags=call.arguments.get("tags"), player_ids=set(state.players)),
                 )
-        if response.text and response.text.strip():
-            return Commentary(text=response.text.strip(), tags=())
-        return None
+        text = (response.text or "").strip()
+        if not text:
+            return None
+        if any(marker in text for marker in _LEAKED_TOOL_CALL_MARKERS):
+            # the model wrote its tool call as text instead of calling the tool;
+            # raw markup must never reach the feed, so salvage the parameters or drop it
+            salvaged = _salvage_leaked_tool_call(text=text, player_ids=set(state.players))
+            if salvaged is None:
+                print("[commentator-error] discarded a malformed textual tool call", file=sys.stderr)
+            return salvaged
+        return Commentary(text=text, tags=())
 
 
 _SYSTEM_PROMPT: Final[str] = (
@@ -274,6 +284,48 @@ def _render_previous_commentary(previous_commentary: list[str]) -> str:
         return ""
     lines = "\n".join(f"- {comment}" for comment in previous_commentary)
     return f"Your recent commentary, for continuity:\n{lines}"
+
+
+_LEAKED_TOOL_CALL_MARKERS: Final[tuple[str, ...]] = ("<parameter", "</parameter>", "<invoke", "<function")
+
+
+def _salvage_leaked_tool_call(text: str, player_ids: set[PlayerId]) -> Commentary | None:
+    prose = _leaked_commentary_prose(text=text)
+    if prose is None:
+        return None
+    return Commentary(text=prose, tags=_valid_tags(raw_tags=_leaked_tags(text=text), player_ids=player_ids))
+
+
+def _leaked_commentary_prose(text: str) -> str | None:
+    explicit = re.search(r'name="commentary"\s*>\s*(.*?)\s*</parameter>', text, re.DOTALL)
+    if explicit is not None:
+        return explicit.group(1).strip() or None
+    # the commentary parameter's opening tag is usually swallowed when the call
+    # leaks, so the text starts with the prose itself and markup follows
+    prose = text.split("</parameter>")[0].strip()
+    if not prose or any(marker in prose for marker in _LEAKED_TOOL_CALL_MARKERS) or prose.startswith("<"):
+        return None
+    return prose
+
+
+def _leaked_tags(text: str) -> Any:
+    tags_match = re.search(r'name="tags"\s*>\s*(\[.*)', text, re.DOTALL)
+    if tags_match is None:
+        return []
+    remainder = tags_match.group(1)
+    try:
+        tags, _ = json.JSONDecoder().raw_decode(remainder)
+        return tags
+    except json.JSONDecodeError:
+        pass
+    # truncated mid-array: keep the complete leading elements, drop the cut tail
+    last_complete_object_end = remainder.rfind("}")
+    if last_complete_object_end < 0:
+        return []
+    try:
+        return json.loads(remainder[: last_complete_object_end + 1] + "]")
+    except json.JSONDecodeError:
+        return []
 
 
 def _valid_tags(raw_tags: Any, player_ids: set[PlayerId]) -> tuple[BehaviorTag, ...]:
