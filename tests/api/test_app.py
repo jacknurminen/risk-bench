@@ -82,6 +82,19 @@ def test_an_unfinished_game_page_polls_the_api(tmp_path: Path):
     assert '"/api/games/running"' in page.text
 
 
+def test_a_corrupted_journal_yields_a_conflict_not_a_crash(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    path = tmp_path / "games" / f"{game_id}.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    # duplicating an action makes the journal stop replaying cleanly
+    path.write_text("\n".join(lines[:30] + lines[20:]) + "\n", encoding="utf-8")
+
+    for url in (f"/games/{game_id}", f"/api/games/{game_id}"):
+        response = client.get(url)
+        assert response.status_code == 409, url
+        assert "replay" in response.json()["detail"]
+
+
 def test_unknown_and_malformed_game_ids_are_rejected(tmp_path: Path):
     client = client_for(tmp_path=tmp_path)
 

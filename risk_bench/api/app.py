@@ -20,6 +20,7 @@ from risk_bench.api.schemas import (
     TournamentSummary,
 )
 from risk_bench.config import load_settings
+from risk_bench.game.engine import IllegalActionError
 from risk_bench.viewer.html import UI_DIRECTORY, render_live_viewer_html, render_viewer_html
 from risk_bench.viewer.snapshots import build_view_model
 
@@ -141,6 +142,9 @@ def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
         return build_view_model(journal_path=path)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
+    except IllegalActionError as error:
+        # the journal no longer replays: it was corrupted outside the engine's control
+        raise HTTPException(status_code=409, detail=f"The journal does not replay cleanly: {error}") from None
 
 
 def _read_trace_records(journal_path: Path) -> list[dict[str, Any]]:
