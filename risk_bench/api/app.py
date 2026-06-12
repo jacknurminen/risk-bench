@@ -17,6 +17,7 @@ from risk_bench.api.schemas import (
     ModelCatalogResponse,
     NewGameRequest,
     NewGameResponse,
+    TournamentSummary,
 )
 from risk_bench.config import load_settings
 from risk_bench.viewer.html import UI_DIRECTORY, render_live_viewer_html, render_viewer_html
@@ -60,12 +61,21 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
+        tournaments = _load_tournaments(games_directory=games_directory)
+        tournament_by_game = {game_id: t.id for t in tournaments for game_id in t.game_ids}
         summaries = [
             summary
             for path in sorted(games_directory.glob("*.jsonl"), reverse=True)
-            if (summary := _summarize_journal(path=path, running=manager.is_running(game_id=path.stem))) is not None
+            if (
+                summary := _summarize_journal(
+                    path=path,
+                    running=manager.is_running(game_id=path.stem),
+                    tournament_id=tournament_by_game.get(path.stem),
+                )
+            )
+            is not None
         ]
-        return GameListResponse(games=summaries)
+        return GameListResponse(games=summaries, tournaments=tournaments)
 
     @app.get("/api/games/{game_id}")
     def game_view_model(game_id: str) -> dict[str, Any]:
@@ -162,7 +172,22 @@ def _trace_call_summary(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _summarize_journal(path: Path, running: bool) -> GameSummary | None:
+def _load_tournaments(games_directory: Path) -> list[TournamentSummary]:
+    tournaments = []
+    for path in sorted(games_directory.glob("*.tournament.json"), reverse=True):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        tournaments.append(
+            TournamentSummary(
+                id=data["id"],
+                players=data["players"],
+                game_ids=data["game_ids"],
+                created_at=datetime.fromisoformat(data["created_at"]),
+            )
+        )
+    return tournaments
+
+
+def _summarize_journal(path: Path, running: bool, tournament_id: str | None) -> GameSummary | None:
     header: dict[str, Any] | None = None
     result: dict[str, Any] | None = None
     has_commentary = False
@@ -191,34 +216,65 @@ def _summarize_journal(path: Path, running: bool) -> GameSummary | None:
         winner=result["winner"] if result is not None else None,
         turn_count=int(result["turn_count"]) if result is not None else None,
         modified_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
+        tournament_id=tournament_id,
     )
 
 
 def _launch_game(games_directory: Path, manager: GameProcessManager, request: NewGameRequest) -> NewGameResponse:
     _validate_launch_request(request=request)
-    game_id = _new_game_id(games_directory=games_directory, seed=request.seed)
-    journal_path = games_directory / f"{game_id}.jsonl"
     games_directory.mkdir(parents=True, exist_ok=True)
-    (games_directory / f"{game_id}.launch.json").write_text(request.model_dump_json(), encoding="utf-8")
+    base_id = _new_game_id(games_directory=games_directory, seed=request.seed)
+
+    if request.parallel_games == 1:
+        _start_game_worker(
+            games_directory=games_directory, manager=manager, game_id=base_id, request=request, seed=request.seed
+        )
+        _wait_for_journal_header(games_directory=games_directory, manager=manager, game_id=base_id)
+        return NewGameResponse(id=base_id, tournament=False)
+
+    # a tournament: the same setup replicated across workers on consecutive seeds
+    game_ids = [f"{base_id}-g{index}" for index in range(1, request.parallel_games + 1)]
+    manifest = {
+        "id": base_id,
+        "players": request.players,
+        "game_ids": game_ids,
+        "created_at": datetime.now(tz=UTC).isoformat(),
+    }
+    (games_directory / f"{base_id}.tournament.json").write_text(json.dumps(manifest), encoding="utf-8")
+    for index, game_id in enumerate(game_ids):
+        _start_game_worker(
+            games_directory=games_directory,
+            manager=manager,
+            game_id=game_id,
+            request=request,
+            seed=request.seed + index,
+        )
+    for game_id in game_ids:
+        _wait_for_journal_header(games_directory=games_directory, manager=manager, game_id=game_id)
+    return NewGameResponse(id=base_id, tournament=True)
+
+
+def _start_game_worker(
+    games_directory: Path, manager: GameProcessManager, game_id: str, request: NewGameRequest, seed: int
+) -> None:
+    # the launch record keeps the game's own seed so resume sees the game, not the tournament
+    launch_record = request.model_copy(update={"seed": seed, "parallel_games": 1})
+    (games_directory / f"{game_id}.launch.json").write_text(launch_record.model_dump_json(), encoding="utf-8")
     manager.launch_game(
         game_id=game_id,
         players=request.players,
-        seed=request.seed,
+        seed=seed,
         commentator_spec=request.commentator,
         max_turns=request.max_turns,
-        journal_path=journal_path,
+        journal_path=games_directory / f"{game_id}.jsonl",
         log_path=games_directory / f"{game_id}.log",
     )
-    _wait_for_journal_header(
-        journal_path=journal_path, manager=manager, game_id=game_id, log_path=games_directory / f"{game_id}.log"
-    )
-    return NewGameResponse(id=game_id)
 
 
 def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
     if manager.is_running(game_id=game_id):
         raise HTTPException(status_code=409, detail="The game is already running.")
-    summary = _summarize_journal(path=journal_path, running=False)
+    summary = _summarize_journal(path=journal_path, running=False, tournament_id=None)
     if summary is None or summary.finished:
         raise HTTPException(status_code=409, detail="The game is already finished; nothing to resume.")
     manager.resume_game(
@@ -254,13 +310,15 @@ def _validate_launch_request(request: NewGameRequest) -> None:
 def _new_game_id(games_directory: Path, seed: int) -> str:
     base_id = f"{datetime.now(tz=UTC).strftime('%Y%m%d-%H%M%S')}-seed{seed}"
     game_id, suffix = base_id, 2
-    while (games_directory / f"{game_id}.jsonl").exists():
+    while (games_directory / f"{game_id}.jsonl").exists() or (games_directory / f"{game_id}.tournament.json").exists():
         game_id = f"{base_id}-{suffix}"
         suffix += 1
     return game_id
 
 
-def _wait_for_journal_header(journal_path: Path, manager: GameProcessManager, game_id: str, log_path: Path) -> None:
+def _wait_for_journal_header(games_directory: Path, manager: GameProcessManager, game_id: str) -> None:
+    journal_path = games_directory / f"{game_id}.jsonl"
+    log_path = games_directory / f"{game_id}.log"
     deadline = time.monotonic() + _LAUNCH_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if journal_path.is_file() and journal_path.read_text(encoding="utf-8").startswith('{"type": "header"'):

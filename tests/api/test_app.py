@@ -23,7 +23,7 @@ def test_an_empty_games_directory_lists_no_games(tmp_path: Path):
     response = client_for(tmp_path=tmp_path).get("/api/games")
 
     assert response.status_code == 200
-    assert response.json() == {"games": []}
+    assert response.json() == {"games": [], "tournaments": []}
 
 
 def test_finished_games_are_listed_with_their_outcome(tmp_path: Path):
@@ -206,11 +206,48 @@ def test_a_game_without_a_trace_lists_no_calls(tmp_path: Path):
     assert client.get(f"/api/games/{game_id}/trace").json() == {"calls": []}
 
 
+def test_a_parallel_launch_becomes_a_grouped_tournament(tmp_path: Path):
+    client = client_for(tmp_path=tmp_path)
+
+    response = client.post(
+        "/api/games",
+        json={"players": ["random", "random", "random"], "seed": 7, "max_turns": 40, "parallel_games": 3},
+    )
+    assert response.status_code == 201
+    assert response.json()["tournament"] is True
+    tournament_id = response.json()["id"]
+    assert (tmp_path / "games" / f"{tournament_id}.tournament.json").is_file()
+
+    payload = client.get("/api/games").json()
+    [tournament] = payload["tournaments"]
+    assert tournament["id"] == tournament_id
+    assert tournament["game_ids"] == [f"{tournament_id}-g{index}" for index in (1, 2, 3)]
+    assert len(payload["games"]) == 3
+    assert all(game["tournament_id"] == tournament_id for game in payload["games"])
+    assert sorted(game["seed"] for game in payload["games"]) == [7, 8, 9]  # consecutive seeds
+
+    deadline = time.monotonic() + 90
+    finished = 0
+    while time.monotonic() < deadline and finished < 3:
+        time.sleep(0.5)
+        finished = sum(game["finished"] for game in client.get("/api/games").json()["games"])
+    assert finished == 3, "the tournament's games never all finished"
+
+
+def test_oversized_tournaments_are_rejected(tmp_path: Path):
+    client = client_for(tmp_path=tmp_path)
+
+    response = client.post("/api/games", json={"players": ["random"] * 3, "parallel_games": 21})
+
+    assert response.status_code == 422  # pydantic bounds the field
+
+
 def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path: Path):
     client = client_for(tmp_path=tmp_path)
 
     response = client.post("/api/games", json={"players": ["random", "random", "random"], "seed": 3, "max_turns": 40})
     assert response.status_code == 201
+    assert response.json()["tournament"] is False
     game_id = response.json()["id"]
 
     deadline = time.monotonic() + 90

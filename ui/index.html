@@ -45,6 +45,10 @@
   .playerRow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; text-transform: uppercase;
                      letter-spacing:.04em; }
+  tr.child td { background: #fbfbfa; }
+  tr.child td:first-child { padding-left: 28px; color: var(--dim); }
+  .caret { color: var(--dim); font-size: 11px; margin-right: 6px; }
+  .trophy { margin-right: 4px; }
 </style>
 </head>
 <body>
@@ -62,6 +66,8 @@
       <label>commentator <select id="commentator"></select></label>
       <label>seed <input type="number" id="seed" value="0" style="width:90px"></label>
       <label>max turns <input type="number" id="maxTurns" placeholder="default" style="width:90px"></label>
+      <label title="above 1 launches a tournament: the same setup replicated on consecutive seeds">
+        parallel games <input type="number" id="parallelGames" value="1" min="1" max="20" style="width:70px"></label>
       <button id="launch">▶ start game</button>
     </div>
     <div id="launchError"></div>
@@ -120,6 +126,7 @@ async function launch() {
     seed: Number(el("seed").value) || 0,
     commentator: el("commentator").value || null,
     max_turns: el("maxTurns").value ? Number(el("maxTurns").value) : null,
+    parallel_games: Number(el("parallelGames").value) || 1,
   };
   el("launch").disabled = true;
   el("launch").textContent = "starting…";
@@ -129,7 +136,14 @@ async function launch() {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail ?? JSON.stringify(payload));
-    location.href = `/games/${payload.id}`;
+    if (payload.tournament) {
+      expandedTournaments.add(payload.id);
+      el("launch").disabled = false;
+      el("launch").textContent = "▶ start game";
+      loadGames();
+    } else {
+      location.href = `/games/${payload.id}`;
+    }
   } catch (error) {
     el("launchError").textContent = String(error.message ?? error);
     el("launch").disabled = false;
@@ -147,6 +161,57 @@ async function gameAction(event, gameId, action) {
   loadGames();
 }
 
+const expandedTournaments = new Set();
+
+function toggleTournament(tournamentId) {
+  if (expandedTournaments.has(tournamentId)) expandedTournaments.delete(tournamentId);
+  else expandedTournaments.add(tournamentId);
+  loadGames();
+}
+
+function gameRow(game, child) {
+  const started = new Date(game.modified_at).toLocaleString();
+  const status = game.finished
+    ? '<span class="status done">finished</span>'
+    : game.running
+      ? '<span class="status live">● running</span>'
+      : '<span class="status paused">⏸ paused</span>';
+  const control = game.finished ? "" : game.running
+    ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
+    : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
+  const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
+  const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
+  const first = child ? `seed ${game.seed}` : started;
+  const players = child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`;
+  return `<tr class="game${child ? " child" : ""}" onclick="location.href='/games/${game.id}'">
+    <td>${first}</td><td>${players}</td>
+    <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td><td>${control}</td></tr>`;
+}
+
+function tournamentRows(tournament, games) {
+  const expanded = expandedTournaments.has(tournament.id);
+  const running = games.filter(game => game.running).length;
+  const finished = games.filter(game => game.finished).length;
+  const paused = games.length - running - finished;
+  const status = [
+    running ? `<span class="status live">● ${running} running</span>` : "",
+    paused ? `<span class="status paused">⏸ ${paused} paused</span>` : "",
+    finished ? `<span class="status done">${finished} finished</span>` : "",
+  ].filter(Boolean).join(" ");
+  const winTally = {};
+  games.forEach(game => { if (game.winner) winTally[game.winner] = (winTally[game.winner] || 0) + 1; });
+  const winners = Object.entries(winTally).sort((a, b) => b[1] - a[1])
+    .map(([name, wins]) => `<span class="winner">${name}</span>${wins > 1 ? ` ×${wins}` : ""}`).join(", ") || "—";
+  const mic = games.some(game => game.has_commentary) ? ' <span class="mic" title="commentated">🎙️</span>' : "";
+  const started = new Date(tournament.created_at).toLocaleString();
+  const header = `<tr class="game" onclick="toggleTournament('${tournament.id}')">
+    <td><span class="caret">${expanded ? "▾" : "▸"}</span>${started}</td>
+    <td><span class="trophy">🏆</span>${tournament.players.join(", ")}${mic}
+      <span style="color:var(--dim)"> — ${games.length} games</span></td>
+    <td>${status}</td><td>${winners}</td><td></td><td></td></tr>`;
+  return header + (expanded ? games.map(game => gameRow(game, true)).join("") : "");
+}
+
 async function loadGames() {
   const payload = await (await fetch("/api/games")).json();
   const body = el("games");
@@ -154,22 +219,22 @@ async function loadGames() {
     body.innerHTML = '<tr><td class="empty" colspan="6">No games yet — start one above.</td></tr>';
     return;
   }
-  body.innerHTML = payload.games.map(game => {
-    const started = new Date(game.modified_at).toLocaleString();
-    const status = game.finished
-      ? '<span class="status done">finished</span>'
-      : game.running
-        ? '<span class="status live">● running</span>'
-        : '<span class="status paused">⏸ paused</span>';
-    const control = game.finished ? "" : game.running
-      ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
-      : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
-    const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
-    const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
-    return `<tr class="game" onclick="location.href='/games/${game.id}'">
-      <td>${started}</td><td>${game.players.join(", ")}${mic}</td>
-      <td>${status}</td><td>${winner}</td><td>${game.turn_count ?? ""}</td><td>${control}</td></tr>`;
-  }).join("");
+  const gamesByTournament = {};
+  const standaloneGames = [];
+  for (const game of payload.games) {
+    if (game.tournament_id) (gamesByTournament[game.tournament_id] ??= []).push(game);
+    else standaloneGames.push(game);
+  }
+  Object.values(gamesByTournament).forEach(games =>
+    games.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true })));
+  const entries = [
+    ...payload.tournaments.map(tournament => ({
+      time: tournament.created_at,
+      html: tournamentRows(tournament, gamesByTournament[tournament.id] ?? []),
+    })),
+    ...standaloneGames.map(game => ({ time: game.modified_at, html: gameRow(game, false) })),
+  ].sort((a, b) => new Date(b.time) - new Date(a.time));
+  body.innerHTML = entries.map(entry => entry.html).join("");
 }
 
 el("addPlayer").onclick = addPlayerRow;

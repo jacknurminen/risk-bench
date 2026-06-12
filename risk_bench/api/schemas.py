@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class GameSummary(BaseModel):
@@ -16,27 +16,44 @@ class GameSummary(BaseModel):
     winner: str | None
     turn_count: int | None
     modified_at: datetime
+    tournament_id: str | None
+
+
+class TournamentSummary(BaseModel):
+    """One tournament's listing entry; its games appear in the games list with this id."""
+
+    id: str
+    players: list[str]
+    game_ids: list[str]
+    created_at: datetime
 
 
 class GameListResponse(BaseModel):
-    """All journals in the games directory, newest first."""
+    """All journals in the games directory, newest first, with their tournament groupings."""
 
     games: list[GameSummary]
+    tournaments: list[TournamentSummary]
 
 
 class NewGameRequest(BaseModel):
-    """A request to launch a game: player specs plus optional knobs."""
+    """A request to launch a game: player specs plus optional knobs.
+
+    ``parallel_games`` above 1 turns the launch into a tournament: that many
+    games with the same setup run in parallel on consecutive seeds.
+    """
 
     players: list[str]
     seed: int = 0
     commentator: str | None = None
     max_turns: int | None = None
+    parallel_games: int = Field(default=1, ge=1, le=20)
 
 
 class NewGameResponse(BaseModel):
-    """The launched game's id, immediately watchable at /games/{id}."""
+    """The launched game or tournament id; games are watchable at /games/{id}."""
 
     id: str
+    tournament: bool
 
 
 class ModelCatalogResponse(BaseModel):
