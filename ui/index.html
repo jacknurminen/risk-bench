@@ -227,7 +227,9 @@ function tournamentRows(tournament, games) {
       <span style="color:var(--dim)"> — ${games.length} games</span></td>
     <td>${status}</td><td>${winners}</td><td></td>
     <td class="num">${tokensCell(inputTokens, outputTokens)}</td>
-    <td class="num">${costCell(cost)}</td><td></td></tr>`;
+    <td class="num">${costCell(cost)}</td>
+    <td><button class="tiny subtle"
+      onclick="event.stopPropagation();location.href='/tournaments/${tournament.id}'">📊 stats</button></td></tr>`;
   return header + (expanded ? games.map(game => gameRow(game, true)).join("") : "");
 }
 

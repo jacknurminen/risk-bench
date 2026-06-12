@@ -270,6 +270,25 @@ def test_oversized_tournaments_are_rejected(tmp_path: Path):
     assert response.status_code == 422  # pydantic bounds the field
 
 
+def test_the_tournament_stats_page_and_view_model_are_served(tmp_path: Path):
+    from tests.viewer.test_tournament import tournament_directory_with_games
+
+    tournament_directory = tournament_directory_with_games(tmp_path=tmp_path / "games", seeds=[11, 12])
+    client = client_for(tmp_path=tmp_path)
+    tournament_id = tournament_directory.name
+
+    page = client.get(f"/tournaments/{tournament_id}")
+    assert page.status_code == 200
+    assert "Cross-game statistics" in page.text
+    assert "const LIVE = false" in page.text  # both members finished: no polling
+
+    model = client.get(f"/api/tournaments/{tournament_id}").json()
+    assert len(model["games"]) == 2
+    assert set(model["metrics"]) >= {"army_share", "territories"}
+
+    assert client.get("/tournaments/no-such-tournament").status_code == 404
+
+
 def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path: Path):
     client = client_for(tmp_path=tmp_path)
 

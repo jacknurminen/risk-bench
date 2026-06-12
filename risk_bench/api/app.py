@@ -21,8 +21,9 @@ from risk_bench.api.schemas import (
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
-from risk_bench.viewer.html import UI_DIRECTORY, render_live_viewer_html, render_viewer_html
+from risk_bench.viewer.html import UI_DIRECTORY, render_live_viewer_html, render_tournament_html, render_viewer_html
 from risk_bench.viewer.snapshots import build_view_model
+from risk_bench.viewer.tournament import build_tournament_view_model
 
 _GAME_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _LAUNCH_TIMEOUT_SECONDS = 15.0
@@ -70,6 +71,18 @@ def create_app(games_directory: Path) -> FastAPI:
         return HTMLResponse(
             render_live_viewer_html(view_model=view_model, poll_url=f"/api/games/{game_id}", trace_url=trace_url)
         )
+
+    @app.get("/tournaments/{tournament_id}", include_in_schema=False)
+    def tournament_page(tournament_id: str) -> HTMLResponse:
+        view_model = _load_tournament_view_model(games_directory=games_directory, tournament_id=tournament_id)
+        live = not all(game["finished"] for game in view_model["games"])
+        return HTMLResponse(
+            render_tournament_html(view_model=view_model, live=live, poll_url=f"/api/tournaments/{tournament_id}")
+        )
+
+    @app.get("/api/tournaments/{tournament_id}")
+    def tournament_view_model(tournament_id: str) -> dict[str, Any]:
+        return _load_tournament_view_model(games_directory=games_directory, tournament_id=tournament_id)
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
@@ -152,6 +165,20 @@ def _journal_path(games_directory: Path, game_id: str) -> Path:
         if journal_path.is_file():
             return journal_path
     raise HTTPException(status_code=404, detail="No such game.")
+
+
+def _load_tournament_view_model(games_directory: Path, tournament_id: str) -> dict[str, Any]:
+    if not _GAME_ID_PATTERN.match(tournament_id):
+        raise HTTPException(status_code=404, detail="No such tournament.")
+    tournament_directory = games_directory / tournament_id
+    if not (tournament_directory / "tournament.json").is_file():
+        raise HTTPException(status_code=404, detail="No such tournament.")
+    try:
+        return build_tournament_view_model(tournament_directory=tournament_directory)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=f"The tournament is not viewable yet: {error}") from None
+    except IllegalActionError as error:
+        raise HTTPException(status_code=409, detail=f"A member journal does not replay cleanly: {error}") from None
 
 
 def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
