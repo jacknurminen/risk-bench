@@ -21,6 +21,7 @@ from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
 from risk_bench.players.rendering import narrate_event
+from risk_bench.runner.commentary import BEHAVIOR_VALENCE
 from risk_bench.runner.journal import read_journal
 
 
@@ -181,21 +182,25 @@ def _build_stats(
                 counts[tag["behavior"]] = counts.get(tag["behavior"], 0) + 1
 
     return {
-        "series": _end_of_turn_series(steps=steps, player_names=player_names),
+        "series": _end_of_turn_series(steps=steps, player_names=player_names, commentary=commentary),
         "markers": markers,
+        "tag_valence": BEHAVIOR_VALENCE,
         "per_player": [
             {**combat_totals[name], **message_counts[name], "tags": behavior_tag_counts[name]} for name in player_names
         ],
     }
 
 
-def _end_of_turn_series(steps: list[dict[str, Any]], player_names: list[PlayerId]) -> dict[str, Any]:
+def _end_of_turn_series(
+    steps: list[dict[str, Any]], player_names: list[PlayerId], commentary: list[dict[str, Any]]
+) -> dict[str, Any]:
     last_step_by_turn: dict[int, dict[str, Any]] = {}
     for step in steps:
         last_step_by_turn[step["turn"]] = step
     turns = sorted(last_step_by_turn)
     sampled_steps = [last_step_by_turn[turn] for turn in turns]
     army_totals = [sum(player["armies"] for player in step["players"]) for step in sampled_steps]
+    tag_increments = _valenced_tag_increments(commentary=commentary, player_names=player_names)
     return {
         "turns": turns,
         "players": [
@@ -208,10 +213,35 @@ def _end_of_turn_series(steps: list[dict[str, Any]], player_names: list[PlayerId
                 "territories": [step["players"][seat]["territories"] for step in sampled_steps],
                 "income": [step["players"][seat]["income"] for step in sampled_steps],
                 "cards": [step["players"][seat]["cards"] for step in sampled_steps],
+                "positive_tags": _cumulative(increments=tag_increments[name], turns=turns, valence="positive"),
+                "negative_tags": _cumulative(increments=tag_increments[name], turns=turns, valence="negative"),
             }
-            for seat in range(len(player_names))
+            for seat, name in enumerate(player_names)
         ],
     }
+
+
+def _valenced_tag_increments(
+    commentary: list[dict[str, Any]], player_names: list[PlayerId]
+) -> dict[PlayerId, dict[int, dict[str, int]]]:
+    increments: dict[PlayerId, dict[int, dict[str, int]]] = {name: {} for name in player_names}
+    for comment in commentary:
+        for tag in comment["tags"]:
+            valence = BEHAVIOR_VALENCE.get(tag["behavior"])
+            player_increments = increments.get(tag["player"])
+            if player_increments is None or valence not in ("positive", "negative"):
+                continue  # invented player names and neutral (descriptive) tags are not scored
+            turn_counts = player_increments.setdefault(int(comment["turn"]), {"positive": 0, "negative": 0})
+            turn_counts[valence] += 1
+    return increments
+
+
+def _cumulative(increments: dict[int, dict[str, int]], turns: list[int], valence: str) -> list[int]:
+    totals, running_total = [], 0
+    for turn in turns:
+        running_total += increments.get(turn, {}).get(valence, 0)
+        totals.append(running_total)
+    return totals
 
 
 def _continent_controllers(state: GameState) -> dict[str, PlayerId | None]:

@@ -4,7 +4,7 @@ from pathlib import Path
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.game.engine import setup_game
 from risk_bench.game.state import GameState
-from risk_bench.runner.commentary import BehaviorTag, Commentator
+from risk_bench.runner.commentary import BEHAVIOR_VALENCE, BEHAVIORS, BehaviorTag, Commentator
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal
 from tests.runner.test_game_runner import whisperers
@@ -31,6 +31,11 @@ def game_state() -> GameState:
 def commentate_response(commentary: str, tags: list[dict[str, str]]) -> Response:
     call = ToolCall(id="call-1", name="commentate", arguments={"commentary": commentary, "tags": tags})
     return Response(text=None, tool_calls=(call,))
+
+
+def test_every_behavior_has_exactly_one_valence():
+    assert set(BEHAVIOR_VALENCE) == set(BEHAVIORS)
+    assert set(BEHAVIOR_VALENCE.values()) == {"positive", "negative", "neutral"}
 
 
 def test_a_commentate_call_becomes_commentary_with_validated_tags():

@@ -88,6 +88,42 @@ def test_view_model_stats_summarize_the_game(tmp_path: Path):
     assert all(marker["text"] and marker["turn"] in series["turns"] for marker in model["stats"]["markers"])
 
 
+def test_valenced_tags_accumulate_into_per_turn_series(tmp_path: Path):
+    path = journal_with_game(tmp_path=tmp_path)
+    comments = [
+        {
+            "turn": 1,
+            "text": "Sharp start.",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "strong_move", "note": "good odds"},
+                {"player": PLAYER_NAMES[0], "behavior": "bluff", "note": "neutral: not scored"},
+                {"player": PLAYER_NAMES[1], "behavior": "strategic_blunder", "note": "bad odds"},
+            ],
+        },
+        {
+            "turn": 2,
+            "text": "Still sharp.",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "continent_prioritization", "note": "kept it up"},
+            ],
+        },
+    ]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    comment_lines = [json.dumps({"type": "commentary", **comment}) for comment in comments]
+    path.write_text("\n".join(lines[:-1] + comment_lines + lines[-1:]) + "\n", encoding="utf-8")
+
+    series = build_view_model(journal_path=path)["stats"]["series"]
+
+    turn_1, turn_2 = series["turns"].index(1), series["turns"].index(2)
+    first_player, second_player = series["players"][0], series["players"][1]
+    assert first_player["positive_tags"][turn_1] == 1
+    assert first_player["positive_tags"][turn_2] == 2  # cumulative
+    assert first_player["positive_tags"][-1] == 2  # flat after the last tag
+    assert first_player["negative_tags"][-1] == 0  # the bluff is neutral: not scored
+    assert second_player["negative_tags"][turn_1] == 1
+    assert build_view_model(journal_path=path)["stats"]["tag_valence"]["betrayal"] == "neutral"
+
+
 def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):
     path = journal_with_game(tmp_path=tmp_path)
     trace_records = [

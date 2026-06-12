@@ -26,6 +26,8 @@
   .comm.future { opacity:.35; }
   .comm .tag { display:inline-block; font-size:10px; color:var(--accent); background:#e8ecf1;
                border:1px solid #d4dae2; border-radius:3px; padding:0 5px; margin:2px 3px 0 0; }
+  .comm .tag.positive, #statsTable .tag.positive { color:#2e6b34; background:#e6efe4; border-color:#cfdfce; }
+  .comm .tag.negative, #statsTable .tag.negative { color:#a33f3b; background:#f7e9e7; border-color:#e8d3d0; }
   h3 { margin:2px 0 8px; font:600 11px var(--sans); text-transform:uppercase; letter-spacing:.1em;
        color:var(--dim); border-bottom:1px solid var(--line); padding-bottom:4px; }
   #board svg { flex:1; min-height:0; width:100%; height:100%; background:#ccdae3; border-radius:4px;
@@ -362,7 +364,8 @@ function appendCommentary(fromIndex) {
     div.className = "comm";
     div.id = "c-" + i;
     const tags = comment.tags
-      .map(tag => `<span class="tag" title="${escapeHtml(tag.note)}">${tag.behavior}: ${colorizeNames(tag.player)}</span>`)
+      .map(tag => `<span class="tag${valenceClass(tag.behavior)}" title="${escapeHtml(tag.note)}">` +
+        `${tag.behavior}: ${colorizeNames(tag.player)}</span>`)
       .join("");
     div.innerHTML = `<div class="meta">turn ${comment.turn}</div><div>${richText(comment.text)}</div>` +
       (tags ? `<div>${tags}</div>` : "");
@@ -423,6 +426,12 @@ function renderStats() {
   charts.appendChild(buildChart("territories", seriesByPlayer.map(s => s.territories), v => Math.round(v)));
   charts.appendChild(buildChart("income per turn", seriesByPlayer.map(s => s.income), v => Math.round(v)));
   charts.appendChild(buildChart("cards in hand", seriesByPlayer.map(s => s.cards), v => Math.round(v)));
+  if (GAME.commentary.length) {
+    charts.appendChild(
+      buildChart("positive behaviors, cumulative", seriesByPlayer.map(s => s.positive_tags), v => Math.round(v)));
+    charts.appendChild(
+      buildChart("negative behaviors, cumulative", seriesByPlayer.map(s => s.negative_tags), v => Math.round(v)));
+  }
   renderStatsTable();
 }
 
@@ -473,6 +482,11 @@ function buildChart(title, valuesBySeat, formatValue) {
   return chart;
 }
 
+// Neutral (descriptive / alignment-relevant) tags keep the default chip style:
+// they are deliberately not scored as good or bad play.
+const valenceClass = behavior =>
+  ({ positive: " positive", negative: " negative" })[(GAME.stats.tag_valence ?? {})[behavior]] ?? "";
+
 function usageCells(caller) {
   const usage = (GAME.stats.usage ?? {})[caller];
   if (!usage) return "<td>—</td><td>—</td><td>—</td>";
@@ -487,7 +501,8 @@ function renderStatsTable() {
   const rows = GAME.players.map((player, seat) => {
     const stats = GAME.stats.per_player[seat];
     const tags = Object.entries(stats.tags).sort((a, b) => b[1] - a[1])
-      .map(([behavior, count]) => `<span class="tag">${behavior}${count > 1 ? ` ×${count}` : ""}</span>`).join("");
+      .map(([behavior, count]) =>
+        `<span class="tag${valenceClass(behavior)}">${behavior}${count > 1 ? ` ×${count}` : ""}</span>`).join("");
     return `<tr><td style="color:${COLORS[seat]};font-weight:700">${player.name}</td>
       <td>${stats.attacks}</td><td>${stats.conquests}</td>
       <td>${stats.armies_destroyed} / ${stats.armies_lost}</td>
