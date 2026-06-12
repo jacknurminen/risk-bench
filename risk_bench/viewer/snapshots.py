@@ -14,6 +14,7 @@ from risk_bench.game.actions import (
 )
 from risk_bench.game.board import BOARD
 from risk_bench.game.engine import apply_action, setup_game
+from risk_bench.game.events import BattleResolved, CardsTraded, GameEvent, PlayerEliminated, TerritoryConquered
 from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
@@ -51,6 +52,11 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     thoughts = []
     commentary = []
     result = None
+    combat_totals = {
+        name: {"attacks": 0, "conquests": 0, "armies_destroyed": 0, "armies_lost": 0} for name in player_names
+    }
+    markers: list[dict[str, Any]] = []
+    continent_controllers = _continent_controllers(state=state)
     for record in records[1:]:
         match record["type"]:
             case "action":
@@ -65,8 +71,23 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                         events=[],
                     )
                 )
+                if isinstance(action, Attack):
+                    combat_totals[acting_player]["attacks"] += 1
+                current_controllers = _continent_controllers(state=state)
+                markers.extend(
+                    _continent_change_markers(
+                        previous=continent_controllers,
+                        current=current_controllers,
+                        step_index=len(steps) - 1,
+                        turn=state.turn_number,
+                    )
+                )
+                continent_controllers = current_controllers
             case "events":
-                steps[-1]["events"] = [narrate_event(event=event_from_json(data)) for data in record["events"]]
+                events = [event_from_json(data) for data in record["events"]]
+                steps[-1]["events"] = [narrate_event(event=event) for event in events]
+                _accumulate_combat_totals(combat_totals=combat_totals, events=events)
+                markers.extend(_event_markers(events=events, step_index=len(steps) - 1, turn=steps[-1]["turn"]))
             case "message":
                 messages.append({**record["message"], "step": len(steps) - 1})
             case "thought":
@@ -101,6 +122,14 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         "thoughts": thoughts,
         "commentary": commentary,
         "result": result,
+        "stats": _build_stats(
+            steps=steps,
+            player_names=player_names,
+            messages=messages,
+            commentary=commentary,
+            combat_totals=combat_totals,
+            markers=markers,
+        ),
     }
 
 
@@ -126,6 +155,115 @@ def _step(
             for name in player_names
         ],
     }
+
+
+def _build_stats(
+    steps: list[dict[str, Any]],
+    player_names: list[PlayerId],
+    messages: list[dict[str, Any]],
+    commentary: list[dict[str, Any]],
+    combat_totals: dict[PlayerId, dict[str, int]],
+    markers: list[dict[str, Any]],
+) -> dict[str, Any]:
+    message_counts = {name: {"public_messages": 0, "private_messages": 0} for name in player_names}
+    for message in messages:
+        message_counts[message["sender"]][f"{message['visibility']}_messages"] += 1
+
+    behavior_tag_counts: dict[PlayerId, dict[str, int]] = {name: {} for name in player_names}
+    for comment in commentary:
+        for tag in comment["tags"]:
+            counts = behavior_tag_counts.get(tag["player"])
+            if counts is not None:  # the commentator occasionally invents player names; drop those
+                counts[tag["behavior"]] = counts.get(tag["behavior"], 0) + 1
+
+    return {
+        "series": _end_of_turn_series(steps=steps, player_names=player_names),
+        "markers": markers,
+        "per_player": [
+            {**combat_totals[name], **message_counts[name], "tags": behavior_tag_counts[name]} for name in player_names
+        ],
+    }
+
+
+def _end_of_turn_series(steps: list[dict[str, Any]], player_names: list[PlayerId]) -> dict[str, Any]:
+    last_step_by_turn: dict[int, dict[str, Any]] = {}
+    for step in steps:
+        last_step_by_turn[step["turn"]] = step
+    turns = sorted(last_step_by_turn)
+    sampled_steps = [last_step_by_turn[turn] for turn in turns]
+    army_totals = [sum(player["armies"] for player in step["players"]) for step in sampled_steps]
+    return {
+        "turns": turns,
+        "players": [
+            {
+                "armies": [step["players"][seat]["armies"] for step in sampled_steps],
+                "army_share": [
+                    round(step["players"][seat]["armies"] / total, 4)
+                    for step, total in zip(sampled_steps, army_totals)
+                ],
+                "territories": [step["players"][seat]["territories"] for step in sampled_steps],
+                "income": [step["players"][seat]["income"] for step in sampled_steps],
+                "cards": [step["players"][seat]["cards"] for step in sampled_steps],
+            }
+            for seat in range(len(player_names))
+        ],
+    }
+
+
+def _continent_controllers(state: GameState) -> dict[str, PlayerId | None]:
+    controllers: dict[str, PlayerId | None] = {}
+    for continent in Continent:
+        owners = {state.owner[territory] for territory in BOARD.continent_info(continent).territories}
+        controllers[str(continent)] = next(iter(owners)) if len(owners) == 1 else None
+    return controllers
+
+
+def _continent_change_markers(
+    previous: dict[str, PlayerId | None],
+    current: dict[str, PlayerId | None],
+    step_index: int,
+    turn: int,
+) -> list[dict[str, Any]]:
+    markers = []
+    for continent, controller in current.items():
+        former_controller = previous[continent]
+        if controller == former_controller:
+            continue
+        if controller is not None and former_controller is not None:
+            player, text = controller, f"{controller} takes {continent} from {former_controller}"
+        elif controller is not None:
+            player, text = controller, f"{controller} takes control of {continent}"
+        else:
+            player, text = former_controller, f"{former_controller} loses control of {continent}"
+        markers.append({"step": step_index, "turn": turn, "kind": "continent", "player": player, "text": text})
+    return markers
+
+
+def _event_markers(events: list[GameEvent], step_index: int, turn: int) -> list[dict[str, Any]]:
+    markers = []
+    for event in events:
+        match event:
+            case PlayerEliminated(eliminated_player=eliminated, eliminated_by=eliminator):
+                text = f"{eliminator} eliminates {eliminated}"
+                markers.append(
+                    {"step": step_index, "turn": turn, "kind": "elimination", "player": eliminator, "text": text}
+                )
+            case CardsTraded(player_id=player_id, bonus_armies=bonus_armies):
+                text = f"{player_id} trades cards for +{bonus_armies} armies"
+                markers.append({"step": step_index, "turn": turn, "kind": "trade", "player": player_id, "text": text})
+    return markers
+
+
+def _accumulate_combat_totals(combat_totals: dict[PlayerId, dict[str, int]], events: list[GameEvent]) -> None:
+    for event in events:
+        match event:
+            case BattleResolved(attacker=attacker, defender=defender, outcome=outcome):
+                combat_totals[attacker]["armies_lost"] += outcome.attacker_losses
+                combat_totals[attacker]["armies_destroyed"] += outcome.defender_losses
+                combat_totals[defender]["armies_lost"] += outcome.defender_losses
+                combat_totals[defender]["armies_destroyed"] += outcome.attacker_losses
+            case TerritoryConquered(player_id=player_id):
+                combat_totals[player_id]["conquests"] += 1
 
 
 def _describe_action(player_id: PlayerId, action: Action) -> str:

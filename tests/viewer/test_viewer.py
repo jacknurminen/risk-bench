@@ -42,7 +42,12 @@ def test_view_model_snapshots_track_the_board_and_outcome(tmp_path: Path):
 
 def test_commentary_records_appear_in_the_view_model(tmp_path: Path):
     path = journal_with_game(tmp_path=tmp_path)
-    commentary_line = json.dumps({"type": "commentary", "turn": 1, "text": "A cagey opening.", "tags": []})
+    tags = [
+        {"player": PLAYER_NAMES[0], "behavior": "turtling", "note": "hoarding on one border"},
+        {"player": PLAYER_NAMES[0], "behavior": "turtling", "note": "still hoarding"},
+        {"player": "someone-not-in-the-game", "behavior": "betrayal", "note": "an invented player"},
+    ]
+    commentary_line = json.dumps({"type": "commentary", "turn": 1, "text": "A cagey opening.", "tags": tags})
     lines = path.read_text(encoding="utf-8").splitlines()
     path.write_text("\n".join(lines[:2] + [commentary_line] + lines[2:]) + "\n", encoding="utf-8")
 
@@ -51,6 +56,34 @@ def test_commentary_records_appear_in_the_view_model(tmp_path: Path):
     assert len(model["commentary"]) == 1
     assert model["commentary"][0]["text"] == "A cagey opening."
     assert model["commentary"][0]["step"] >= 0
+    # tags roll up into the per-player stats; tags for invented player names are dropped
+    assert model["stats"]["per_player"][0]["tags"] == {"turtling": 2}
+    assert all(not player_stats["tags"] for player_stats in model["stats"]["per_player"][1:])
+
+
+def test_view_model_stats_summarize_the_game(tmp_path: Path):
+    model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
+
+    series = model["stats"]["series"]
+    turn_count = len(series["turns"])
+    assert series["turns"] == sorted({step["turn"] for step in model["steps"]})  # one sample per played turn
+    assert series["turns"][-1] == model["steps"][-1]["turn"]
+    for player_series in series["players"]:
+        assert all(len(values) == turn_count for values in player_series.values())
+    for turn_index in range(turn_count):
+        total_share = sum(player_series["army_share"][turn_index] for player_series in series["players"])
+        assert abs(total_share - 1.0) < 1e-3
+
+    per_player = model["stats"]["per_player"]
+    assert len(per_player) == len(PLAYER_NAMES)
+    assert sum(player_stats["attacks"] for player_stats in per_player) > 0
+    assert sum(player_stats["conquests"] for player_stats in per_player) > 0
+    destroyed = sum(player_stats["armies_destroyed"] for player_stats in per_player)
+    lost = sum(player_stats["armies_lost"] for player_stats in per_player)
+    assert destroyed == lost > 0  # every destroyed army is some other player's loss
+
+    assert all(marker["kind"] in {"elimination", "continent", "trade"} for marker in model["stats"]["markers"])
+    assert all(marker["text"] and marker["turn"] in series["turns"] for marker in model["stats"]["markers"])
 
 
 def test_rendered_html_is_self_contained(tmp_path: Path):

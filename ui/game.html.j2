@@ -71,6 +71,25 @@
   #log h3 label { text-transform:none; letter-spacing:normal; font-weight:400; cursor:pointer; }
   .banner { padding:4px 8px; border-radius:4px; background:#f0efec; border:1px solid var(--line);
             margin-bottom:8px; }
+  #statsModal { position:fixed; inset:0; background:#1f232955; display:flex; align-items:center;
+                justify-content:center; z-index:10; }
+  #statsModal[hidden] { display:none; }
+  #statsBox { width:min(1080px, 94vw); max-height:92vh; overflow:auto; padding:16px 20px; }
+  #statsBox h3 { display:flex; justify-content:space-between; align-items:center; }
+  #statsLegend span { margin-right:12px; font-weight:600; }
+  #statsLegend .markerKey { color:var(--dim); font-weight:400; float:right; }
+  #charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px; }
+  .chart h4 { margin:0 0 4px; font:600 10px var(--sans); text-transform:uppercase; letter-spacing:.08em;
+              color:var(--dim); }
+  .chart svg { width:100%; height:auto; background:#fcfcfb; border:1px solid var(--line); border-radius:4px; }
+  .chart text.axis { font:9px var(--sans); fill:var(--dim); }
+  .chart text.marker { font:8px var(--sans); cursor:default; }
+  #statsTable { width:100%; border-collapse:collapse; margin-top:16px; font-size:12px; }
+  #statsTable th { text-align:left; color:var(--dim); font-weight:600; font-size:10px; text-transform:uppercase;
+                   letter-spacing:.07em; padding:4px 8px; border-bottom:1.5px solid #c9c8c3; }
+  #statsTable td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  #statsTable .tag { display:inline-block; font-size:10px; color:var(--accent); background:#e8ecf1;
+                     border:1px solid #d4dae2; border-radius:3px; padding:0 5px; margin:1px 3px 1px 0; }
 </style>
 </head>
 <body>
@@ -95,6 +114,7 @@
     <button id="next">▶</button>
     <button id="nextTurn">turn»</button>
     <button id="last">⏭</button>
+    <button id="statsButton">📊 stats</button>
     <input type="range" id="slider" min="0" value="0">
     <span id="status"></span>
   </div>
@@ -108,6 +128,14 @@
       <span id="noCommentary" style="color:var(--dim)">No commentary in this journal.
         Run the game with --commentator &lt;model spec&gt; to get one.</span>
     </div>
+  </div>
+</div>
+<div id="statsModal" hidden>
+  <div id="statsBox" class="panel">
+    <h3>📊 Game statistics <button id="statsClose">✕ close</button></h3>
+    <div id="statsLegend"></div>
+    <div id="charts"></div>
+    <table id="statsTable"></table>
   </div>
 </div>
 <script>
@@ -342,6 +370,91 @@ function show(newIndex) {
   el("status").textContent = `step ${index}/${steps.length - 1} — turn ${step.turn}, ${pretty(step.phase)}${liveMark}`;
 }
 
+// Stats modal: hand-rolled SVG line charts (per-turn series computed in Python
+// from the replay, so the page never re-derives game rules) plus a per-player table.
+const MARKER_GLYPHS = { elimination: "✕", continent: "◆", trade: "▲" };
+
+function renderStats() {
+  el("statsLegend").innerHTML = GAME.players
+    .map((player, seat) => `<span style="color:${COLORS[seat]}">${player.name}</span>`).join("")
+    + '<span class="markerKey">✕ elimination &nbsp;◆ continent control &nbsp;▲ card trade</span>';
+  const seriesByPlayer = GAME.stats.series.players;
+  const charts = el("charts");
+  charts.innerHTML = "";
+  charts.appendChild(buildChart("army share", seriesByPlayer.map(s => s.army_share), v => Math.round(v * 100) + "%"));
+  charts.appendChild(buildChart("territories", seriesByPlayer.map(s => s.territories), v => Math.round(v)));
+  charts.appendChild(buildChart("income per turn", seriesByPlayer.map(s => s.income), v => Math.round(v)));
+  charts.appendChild(buildChart("cards in hand", seriesByPlayer.map(s => s.cards), v => Math.round(v)));
+  renderStatsTable();
+}
+
+function buildChart(title, valuesBySeat, formatValue) {
+  const W = 470, H = 230, PAD = { left: 38, right: 12, top: 26, bottom: 18 };
+  const turns = GAME.stats.series.turns;
+  // integer-valued charts round the axis up to an even maximum so the midpoint label is exact
+  const dataMax = Math.max(...valuesBySeat.flat()) || 1;
+  const yMax = valuesBySeat.flat().every(Number.isInteger) ? Math.max(2, Math.ceil(dataMax / 2) * 2) : dataMax;
+  const xAt = i => PAD.left + (turns.length < 2 ? 0 : i * (W - PAD.left - PAD.right) / (turns.length - 1));
+  const yAt = v => H - PAD.bottom - (v / yMax) * (H - PAD.top - PAD.bottom);
+  const parts = [];
+
+  for (const fraction of [0, 0.5, 1]) {
+    const gy = yAt(yMax * fraction);
+    parts.push(`<line x1="${PAD.left}" y1="${gy}" x2="${W - PAD.right}" y2="${gy}" stroke="#e8e7e3"/>`);
+    parts.push(`<text x="${PAD.left - 4}" y="${gy + 3}" class="axis" text-anchor="end">${formatValue(yMax * fraction)}</text>`);
+  }
+  parts.push(`<text x="${PAD.left}" y="${H - 4}" class="axis">turn ${turns[0]}</text>`);
+  parts.push(`<text x="${W - PAD.right}" y="${H - 4}" class="axis" text-anchor="end">turn ${turns.at(-1)}</text>`);
+
+  const markersByTurn = {};
+  for (const marker of GAME.stats.markers) (markersByTurn[marker.turn] ??= []).push(marker);
+  for (const [turn, markers] of Object.entries(markersByTurn)) {
+    const turnIndex = turns.indexOf(Number(turn));
+    if (turnIndex < 0) continue;
+    const mx = xAt(turnIndex);
+    parts.push(`<line x1="${mx}" y1="${PAD.top - 6}" x2="${mx}" y2="${H - PAD.bottom}"
+      stroke="#c9c8c3" stroke-dasharray="3 3"/>`);
+    markers.forEach((marker, level) => {
+      const seat = GAME.players.findIndex(player => player.name === marker.player);
+      parts.push(`<text x="${mx}" y="${10 + level * 10}" class="marker" text-anchor="middle"
+        fill="${COLORS[seat] ?? "#888"}">${MARKER_GLYPHS[marker.kind] ?? "•"}
+        <title>turn ${turn}: ${escapeHtml(marker.text)}</title></text>`);
+    });
+  }
+
+  valuesBySeat.forEach((values, seat) => {
+    const points = values.map((value, i) => `${xAt(i)},${yAt(value)}`).join(" ");
+    parts.push(`<polyline points="${points}" fill="none" stroke="${COLORS[seat]}" stroke-width="1.6"/>`);
+    if (turns.length <= 40) values.forEach((value, i) =>
+      parts.push(`<circle cx="${xAt(i)}" cy="${yAt(value)}" r="2" fill="${COLORS[seat]}"/>`));
+  });
+
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
+  return chart;
+}
+
+function renderStatsTable() {
+  const rows = GAME.players.map((player, seat) => {
+    const stats = GAME.stats.per_player[seat];
+    const tags = Object.entries(stats.tags).sort((a, b) => b[1] - a[1])
+      .map(([behavior, count]) => `<span class="tag">${behavior}${count > 1 ? ` ×${count}` : ""}</span>`).join("");
+    return `<tr><td style="color:${COLORS[seat]};font-weight:700">${player.name}</td>
+      <td>${stats.attacks}</td><td>${stats.conquests}</td>
+      <td>${stats.armies_destroyed} / ${stats.armies_lost}</td>
+      <td>${stats.public_messages} 📢 &nbsp;${stats.private_messages} 🔒</td>
+      <td>${tags || "—"}</td></tr>`;
+  });
+  el("statsTable").innerHTML = `<thead><tr><th>player</th><th>attacks</th><th>conquests</th>
+    <th>armies destroyed / lost</th><th>messages</th><th>behavior tags</th></tr></thead>
+    <tbody>${rows.join("")}</tbody>`;
+}
+
+el("statsButton").onclick = () => { renderStats(); el("statsModal").hidden = false; };
+el("statsClose").onclick = () => el("statsModal").hidden = true;
+el("statsModal").onclick = event => { if (event.target === el("statsModal")) el("statsModal").hidden = true; };
+
 function stopPlaying() { clearInterval(timer); timer = null; el("play").textContent = "▶ play"; }
 function turnBoundary(direction) {
   const turn = steps[index].turn;
@@ -364,6 +477,7 @@ el("play").onclick = () => {
   timer = setInterval(() => { if (index >= steps.length - 1) stopPlaying(); else show(index + 1); }, 250);
 };
 document.addEventListener("keydown", event => {
+  if (event.key === "Escape") el("statsModal").hidden = true;
   if (event.key === "ArrowLeft") show(index - 1);
   if (event.key === "ArrowRight") show(index + 1);
 });
@@ -390,6 +504,8 @@ async function refreshFromJournal() {
   GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.result = updated.result;
+  GAME.stats = updated.stats;
+  if (!el("statsModal").hidden) renderStats();
   appendLog(Math.max(0, knownSteps - 1));
   appendChat(knownMessages);
   appendCommentary(knownCommentary);
