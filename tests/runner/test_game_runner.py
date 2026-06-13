@@ -28,7 +28,7 @@ def talking_runner(
         max_turns=max_turns,
         allow_private_messages=allow_private_messages,
         max_negotiation_rounds=3,
-        commentator=None,
+        commentators=(),
         journal=None,
         trace=None,
         verbose=False,

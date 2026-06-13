@@ -18,7 +18,7 @@ from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
-from risk_bench.runner.commentary import Commentator
+from risk_bench.runner.commentary import RUBRICS, Commentator
 from risk_bench.tournament.runner import PlayerFactory
 
 TIER_MODELS_BY_PROVIDER: Final[dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]]] = {
@@ -136,26 +136,70 @@ def build_agent(spec: str, settings: Settings) -> Agent:
             raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
 
 
-def build_commentator(spec: str | None, settings: Settings, trace: TraceWriter | None) -> Commentator | None:
-    """Build the commentator for a model spec, or None when no spec is given.
+def build_commentators(
+    rubric_specs: dict[str, str], settings: Settings, trace: TraceWriter | None
+) -> tuple[Commentator, ...]:
+    """Build one commentator per rubric from a rubric→model-spec mapping.
 
     Args:
-        spec: A model spec for the commentator's agent, or None.
+        rubric_specs: Maps each rubric name (e.g. 'skill', 'conduct') to the model spec that
+            should run it; empty for an uncommentated game.
         settings: Provides API keys and the token limit.
-        trace: Records the commentator's API calls when given; None disables tracing.
+        trace: Records the commentators' API calls when given; None disables tracing.
 
     Returns:
-        The commentator, or None.
+        One commentator per requested rubric, in the canonical rubric order.
 
     Raises:
-        ValueError: If the spec is invalid or the provider's API key is missing.
+        ValueError: If a rubric name is unknown, or a spec is invalid or its API key is missing.
     """
-    if spec is None:
-        return None
+    unknown = set(rubric_specs) - set(RUBRICS)
+    if unknown:
+        raise ValueError(f"Unknown commentator rubric(s) {sorted(unknown)}; choose from {sorted(RUBRICS)}.")
+    return tuple(
+        _build_commentator(rubric_name=name, spec=rubric_specs[name], settings=settings, trace=trace)
+        for name in RUBRICS
+        if name in rubric_specs
+    )
+
+
+def _build_commentator(rubric_name: str, spec: str, settings: Settings, trace: TraceWriter | None) -> Commentator:
     agent = build_agent(spec=spec, settings=settings)
     if trace is not None:
-        agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller="commentator", writer=trace)
-    return Commentator(agent=agent)
+        agent = TracingAgent(
+            agent=agent, model=resolve_model(spec=spec), caller=f"commentator:{rubric_name}", writer=trace
+        )
+    return Commentator(agent=agent, rubric=RUBRICS[rubric_name])
+
+
+def parse_commentator_specs(values: list[str]) -> dict[str, str]:
+    """Parse CLI '--commentator' values into a rubric→model-spec mapping.
+
+    Each value is either 'rubric=spec' (assigns one rubric) or a bare 'spec' (assigns every
+    rubric to that one model). Later values override earlier ones for the same rubric.
+
+    Args:
+        values: Raw '--commentator' option values, possibly empty.
+
+    Returns:
+        A rubric→spec mapping; empty when no values were given.
+
+    Raises:
+        ValueError: If a value names an unknown rubric or is malformed.
+    """
+    rubric_specs: dict[str, str] = {}
+    for value in values:
+        if "=" not in value:
+            rubric_specs = {name: value for name in RUBRICS}
+            continue
+        rubric_name, _, spec = value.partition("=")
+        rubric_name, spec = rubric_name.strip(), spec.strip()
+        if rubric_name not in RUBRICS:
+            raise ValueError(f"Unknown commentator rubric '{rubric_name}'; choose from {sorted(RUBRICS)}.")
+        if not spec:
+            raise ValueError(f"Commentator rubric '{rubric_name}' has no model spec; use '{rubric_name}=<spec>'.")
+        rubric_specs[rubric_name] = spec
+    return rubric_specs
 
 
 def _require_api_key(provider: str, settings: Settings) -> str:

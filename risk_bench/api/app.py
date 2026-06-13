@@ -357,7 +357,7 @@ def _start_game_worker(game_directory: Path, manager: GameProcessManager, reques
         game_id=game_directory.name,
         players=request.players,
         seed=seed,
-        commentator_spec=request.commentator,
+        commentator_specs=_commentator_specs(spec=request.commentator),
         max_turns=request.max_turns,
         journal_path=game_directory / "game.jsonl",
         log_path=game_directory / "worker.log",
@@ -376,9 +376,14 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
     manager.resume_game(
         game_id=game_id,
         journal_path=journal_path,
-        commentator_spec=_launched_commentator(game_directory=game_directory),
+        commentator_specs=_commentator_specs(spec=_launched_commentator(game_directory=game_directory)),
         log_path=game_directory / "worker.log",
     )
+
+
+def _commentator_specs(spec: str | None) -> dict[str, str]:
+    # the web UI offers a single commentator model; run every rubric on it
+    return specs.parse_commentator_specs(values=[spec] if spec else [])
 
 
 def _launched_commentator(game_directory: Path) -> str | None:
@@ -398,7 +403,9 @@ def _validate_launch_request(request: NewGameRequest) -> None:
         for spec in request.players:
             if spec != "random":
                 specs.build_agent(spec=spec, settings=settings)
-        specs.build_commentator(spec=request.commentator, settings=settings, trace=None)
+        specs.build_commentators(
+            rubric_specs=_commentator_specs(spec=request.commentator), settings=settings, trace=None
+        )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

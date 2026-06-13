@@ -53,10 +53,11 @@ class GameRunner:
     message are appended to it as they happen, so a crashed game can be
     restored with ``journal.restore_game`` and continued via ``resume``.
 
-    A commentator, when given, is invoked after each player's completed turn
-    (and once more when the game ends) with the omniscient state and a log of
+    Each commentator, when any are given, is invoked after each player's completed
+    turn (and once more when the game ends) with the omniscient state and a log of
     the turn; its commentary is journaled and printed but never shown to the
-    players, and its failures never affect the game.
+    players, and its failures never affect the game. Multiple commentators each
+    apply their own rubric (e.g. skill and conduct) to the same turn.
     """
 
     def __init__(
@@ -66,7 +67,7 @@ class GameRunner:
         max_turns: int,
         allow_private_messages: bool,
         max_negotiation_rounds: int,
-        commentator: Commentator | None,
+        commentators: tuple[Commentator, ...],
         journal: JournalWriter | None,
         trace: TraceWriter | None,
         verbose: bool,
@@ -76,7 +77,7 @@ class GameRunner:
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
         self._max_negotiation_rounds = max_negotiation_rounds
-        self._commentator = commentator
+        self._commentators = commentators
         self._journal = journal
         self._trace = trace
         self._verbose = verbose
@@ -85,7 +86,8 @@ class GameRunner:
         self._all_events: list[GameEvent] = []
         self._pending_events: dict[PlayerId, list[GameEvent]] = {}
         self._turn_log: list[str] = []
-        self._previous_commentary: list[str] = []
+        # recent commentary kept per rubric, so each commentator only sees its own continuity
+        self._previous_commentary: dict[str, list[str]] = {}
 
     def run(self) -> GameRecord:
         """Play the game from setup to completion.
@@ -131,7 +133,7 @@ class GameRunner:
         self._all_events = []
         self._pending_events = {player_id: [] for player_id in self._players}
         self._turn_log = []
-        self._previous_commentary = []
+        self._previous_commentary = {commentator.rubric.name: [] for commentator in self._commentators}
 
     def _play(self, state: GameState, rng: random.Random) -> GameRecord:
         missions = {player_id: player.mission for player_id, player in state.players.items()}
@@ -252,26 +254,38 @@ class GameRunner:
     def _commentate(self, state: GameState, turn_number: int) -> None:
         turn_log = self._turn_log
         self._turn_log = []
-        if self._commentator is None or not turn_log:
+        if not self._commentators or not turn_log:
             return
+        for commentator in self._commentators:
+            self._commentate_with(commentator=commentator, state=state, turn_number=turn_number, turn_log=turn_log)
+
+    def _commentate_with(
+        self, commentator: Commentator, state: GameState, turn_number: int, turn_log: list[str]
+    ) -> None:
+        rubric_name = commentator.rubric.name
         if self._trace is not None:
-            self._trace.set_context(turn=turn_number, kind="commentary")
-        commentary = self._commentator.comment_on_turn(
-            state=state, turn_number=turn_number, turn_log=turn_log, previous_commentary=self._previous_commentary
+            self._trace.set_context(turn=turn_number, kind=f"commentary:{rubric_name}")
+        commentary = commentator.comment_on_turn(
+            state=state,
+            turn_number=turn_number,
+            turn_log=turn_log,
+            previous_commentary=self._previous_commentary.get(rubric_name, []),
         )
         if commentary is None:
             return
-        self._previous_commentary = (self._previous_commentary + [commentary.text])[-_PREVIOUS_COMMENTARY_KEPT:]
+        kept = (self._previous_commentary.get(rubric_name, []) + [commentary.text])[-_PREVIOUS_COMMENTARY_KEPT:]
+        self._previous_commentary[rubric_name] = kept
         if self._journal is not None:
             self._journal.write_commentary(
                 turn_number=turn_number,
+                rubric=rubric_name,
                 text=commentary.text,
                 tags=[{"player": tag.player, "behavior": tag.behavior, "note": tag.note} for tag in commentary.tags],
             )
         if self._verbose:
-            print(f"[commentary] {commentary.text}")
+            print(f"[commentary:{rubric_name}] {commentary.text}")
             for tag in commentary.tags:
-                print(f"[commentary]   {tag.behavior} — {tag.player}: {tag.note}")
+                print(f"[commentary:{rubric_name}]   {tag.behavior} — {tag.player}: {tag.note}")
 
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
         recent_events = tuple(self._pending_events[player_id])

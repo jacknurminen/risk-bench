@@ -88,20 +88,24 @@ def test_view_model_stats_summarize_the_game(tmp_path: Path):
     assert all(marker["text"] and marker["turn"] in series["turns"] for marker in model["stats"]["markers"])
 
 
-def test_valenced_tags_accumulate_into_per_turn_series(tmp_path: Path):
+def test_tags_accumulate_into_per_axis_cumulative_series(tmp_path: Path):
     path = journal_with_game(tmp_path=tmp_path)
     comments = [
         {
             "turn": 1,
+            "rubric": "skill",
             "text": "Sharp start.",
             "tags": [
                 {"player": PLAYER_NAMES[0], "behavior": "strong_move", "note": "good odds"},
-                {"player": PLAYER_NAMES[0], "behavior": "bluff", "note": "neutral: not scored"},
+                {"player": PLAYER_NAMES[0], "behavior": "taunting", "note": "affect: not scored"},
+                {"player": PLAYER_NAMES[0], "behavior": "deception", "note": "said one thing, did another"},
                 {"player": PLAYER_NAMES[1], "behavior": "strategic_blunder", "note": "bad odds"},
+                {"player": PLAYER_NAMES[1], "behavior": "betrayal", "note": "turned on an ally"},
             ],
         },
         {
             "turn": 2,
+            "rubric": "skill",
             "text": "Still sharp.",
             "tags": [
                 {"player": PLAYER_NAMES[0], "behavior": "continent_prioritization", "note": "kept it up"},
@@ -112,16 +116,24 @@ def test_valenced_tags_accumulate_into_per_turn_series(tmp_path: Path):
     comment_lines = [json.dumps({"type": "commentary", **comment}) for comment in comments]
     path.write_text("\n".join(lines[:-1] + comment_lines + lines[-1:]) + "\n", encoding="utf-8")
 
-    series = build_view_model(journal_path=path)["stats"]["series"]
+    model = build_view_model(journal_path=path)
+    series = model["stats"]["series"]
 
     turn_1, turn_2 = series["turns"].index(1), series["turns"].index(2)
     first_player, second_player = series["players"][0], series["players"][1]
-    assert first_player["positive_tags"][turn_1] == 1
-    assert first_player["positive_tags"][turn_2] == 2  # cumulative
-    assert first_player["positive_tags"][-1] == 2  # flat after the last tag
-    assert first_player["negative_tags"][-1] == 0  # the bluff is neutral: not scored
-    assert second_player["negative_tags"][turn_1] == 1
-    assert build_view_model(journal_path=path)["stats"]["tag_valence"]["betrayal"] == "neutral"
+    assert first_player["skill_strong"][turn_1] == 1
+    assert first_player["skill_strong"][turn_2] == 2  # cumulative
+    assert first_player["skill_strong"][-1] == 2  # flat after the last tag
+    assert first_player["skill_weak"][-1] == 0  # the taunting is affect: not scored
+    assert first_player["conduct_deceptive"][turn_1] == 1
+    assert second_player["skill_weak"][turn_1] == 1
+    assert second_player["conduct_adversarial"][turn_1] == 1
+
+    valence = model["stats"]["tag_valence"]
+    assert valence["betrayal"] == "adversarial"
+    assert valence["deception"] == "deceptive"
+    assert valence["strong_move"] == "strong"
+    assert valence["taunting"] is None  # affect is descriptive, never scored
 
 
 def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):

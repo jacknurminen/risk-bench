@@ -72,8 +72,11 @@ const METRICS = [
   ["territories", "territories", v => Math.round(v)],
   ["income per turn", "income", v => Math.round(v)],
   ["cards in hand", "cards", v => Math.round(v)],
-  ["positive behaviors, cumulative", "positive_tags", v => Math.round(v)],
-  ["negative behaviors, cumulative", "negative_tags", v => Math.round(v)],
+  ["skill: strong play, cumulative", "skill_strong", v => Math.round(v)],
+  ["skill: weak play, cumulative", "skill_weak", v => Math.round(v)],
+  ["conduct: cooperative, cumulative", "conduct_cooperative", v => Math.round(v)],
+  ["conduct: adversarial, cumulative", "conduct_adversarial", v => Math.round(v)],
+  ["conduct: deception, cumulative", "conduct_deceptive", v => Math.round(v)],
 ];
 
 function render(data) {

@@ -1,6 +1,6 @@
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.game.actions import (
@@ -21,7 +21,7 @@ from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
 from risk_bench.players.rendering import narrate_event
-from risk_bench.runner.commentary import BEHAVIOR_VALENCE
+from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.journal import read_journal
 
 
@@ -98,6 +98,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 commentary.append(
                     {
                         "turn": int(record["turn"]),
+                        "rubric": record.get("rubric", ""),  # pre-axis journals had a single unlabelled commentator
                         "text": record["text"],
                         "tags": record["tags"],
                         "step": len(steps) - 1,
@@ -162,6 +163,21 @@ def _step(
     }
 
 
+# the scored cumulative series, as (series key, the tag valence it counts); skill and conduct
+# are charted on separate axes, and descriptive 'affect' tags are deliberately not scored
+SCORED_SERIES: Final[tuple[tuple[str, str], ...]] = (
+    ("skill_strong", "strong"),
+    ("skill_weak", "weak"),
+    ("conduct_cooperative", "cooperative"),
+    ("conduct_adversarial", "adversarial"),
+    ("conduct_deceptive", "deceptive"),
+)
+
+_VALENCE_BY_BEHAVIOR: Final[dict[str, str | None]] = {
+    behavior: axis_and_valence(behavior)[1] for behavior in BEHAVIORS
+}
+
+
 def _build_stats(
     steps: list[dict[str, Any]],
     player_names: list[PlayerId],
@@ -184,7 +200,7 @@ def _build_stats(
     return {
         "series": _end_of_turn_series(steps=steps, player_names=player_names, commentary=commentary),
         "markers": markers,
-        "tag_valence": BEHAVIOR_VALENCE,
+        "tag_valence": _VALENCE_BY_BEHAVIOR,
         "per_player": [
             {**combat_totals[name], **message_counts[name], "tags": behavior_tag_counts[name]} for name in player_names
         ],
@@ -213,8 +229,10 @@ def _end_of_turn_series(
                 "territories": [step["players"][seat]["territories"] for step in sampled_steps],
                 "income": [step["players"][seat]["income"] for step in sampled_steps],
                 "cards": [step["players"][seat]["cards"] for step in sampled_steps],
-                "positive_tags": _cumulative(increments=tag_increments[name], turns=turns, valence="positive"),
-                "negative_tags": _cumulative(increments=tag_increments[name], turns=turns, valence="negative"),
+                **{
+                    series_key: _cumulative(increments=tag_increments[name], turns=turns, valence=valence)
+                    for series_key, valence in SCORED_SERIES
+                },
             }
             for seat, name in enumerate(player_names)
         ],
@@ -227,12 +245,12 @@ def _valenced_tag_increments(
     increments: dict[PlayerId, dict[int, dict[str, int]]] = {name: {} for name in player_names}
     for comment in commentary:
         for tag in comment["tags"]:
-            valence = BEHAVIOR_VALENCE.get(tag["behavior"])
+            valence = _VALENCE_BY_BEHAVIOR.get(tag["behavior"])
             player_increments = increments.get(tag["player"])
-            if player_increments is None or valence not in ("positive", "negative"):
-                continue  # invented player names and neutral (descriptive) tags are not scored
-            turn_counts = player_increments.setdefault(int(comment["turn"]), {"positive": 0, "negative": 0})
-            turn_counts[valence] += 1
+            if player_increments is None or valence is None:
+                continue  # invented player names and descriptive (affect) tags are not scored
+            turn_counts = player_increments.setdefault(int(comment["turn"]), {})
+            turn_counts[valence] = turn_counts.get(valence, 0) + 1
     return increments
 
 

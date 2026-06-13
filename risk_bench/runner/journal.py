@@ -109,15 +109,18 @@ class JournalWriter:
         """
         self._write_line(record={"type": "thought", "player": player_id, "text": text})
 
-    def write_commentary(self, turn_number: int, text: str, tags: list[dict[str, str]]) -> None:
-        """Record the commentator's take on a completed turn; observational only.
+    def write_commentary(self, turn_number: int, rubric: str, text: str, tags: list[dict[str, str]]) -> None:
+        """Record one commentator's take on a completed turn; observational only.
 
         Args:
             turn_number: The turn the commentary covers.
+            rubric: The rubric this commentary was produced under (e.g. 'skill', 'conduct').
             text: The commentary prose.
             tags: Structured behavior tags as {player, behavior, note} dicts.
         """
-        self._write_line(record={"type": "commentary", "turn": turn_number, "text": text, "tags": tags})
+        self._write_line(
+            record={"type": "commentary", "turn": turn_number, "rubric": rubric, "text": text, "tags": tags}
+        )
 
     def write_result(self, winner: PlayerId | None, turn_count: int) -> None:
         """Record the game outcome; marks the journal as finished.

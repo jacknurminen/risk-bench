@@ -4,7 +4,17 @@ from pathlib import Path
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.game.engine import setup_game
 from risk_bench.game.state import GameState
-from risk_bench.runner.commentary import BEHAVIOR_VALENCE, BEHAVIORS, BehaviorTag, Commentator
+from risk_bench.runner.commentary import (
+    BEHAVIOR_AXIS,
+    BEHAVIORS,
+    CONDUCT_RUBRIC,
+    CONDUCT_VALENCE,
+    SKILL_RUBRIC,
+    SKILL_VALENCE,
+    BehaviorTag,
+    Commentator,
+    axis_and_valence,
+)
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal
 from tests.runner.test_game_runner import whisperers
@@ -33,9 +43,42 @@ def commentate_response(commentary: str, tags: list[dict[str, str]]) -> Response
     return Response(text=None, tool_calls=(call,))
 
 
-def test_every_behavior_has_exactly_one_valence():
-    assert set(BEHAVIOR_VALENCE) == set(BEHAVIORS)
-    assert set(BEHAVIOR_VALENCE.values()) == {"positive", "negative", "neutral"}
+def test_every_behavior_sits_on_exactly_one_axis_with_a_consistent_valence():
+    assert set(BEHAVIOR_AXIS) == set(BEHAVIORS)
+    assert set(BEHAVIOR_AXIS.values()) == {"skill", "conduct", "affect"}
+    # the two rubrics partition the whole vocabulary, with no overlap
+    assert set(SKILL_RUBRIC.behaviors) | set(CONDUCT_RUBRIC.behaviors) == set(BEHAVIORS)
+    assert not set(SKILL_RUBRIC.behaviors) & set(CONDUCT_RUBRIC.behaviors)
+    for behavior in BEHAVIORS:
+        axis, valence = axis_and_valence(behavior)
+        if axis == "skill":
+            assert valence in {"strong", "weak"}
+            assert SKILL_VALENCE[behavior] == valence
+        elif axis == "conduct":
+            assert valence in {"cooperative", "adversarial", "deceptive"}
+            assert CONDUCT_VALENCE[behavior] == valence
+        else:
+            assert valence is None  # affect is descriptive, never scored
+
+
+def test_a_commentator_ignores_tags_outside_its_rubric():
+    response = commentate_response(
+        commentary="alice blundered while bob schemed.",
+        tags=[
+            {"player": "alice", "behavior": "strategic_blunder", "note": "a skill tag, in scope"},
+            {"player": "bob", "behavior": "deception", "note": "a conduct tag, out of scope here"},
+        ],
+    )
+    commentator = Commentator(agent=StubAgent(response=response), rubric=SKILL_RUBRIC)
+
+    commentary = commentator.comment_on_turn(
+        state=game_state(), turn_number=2, turn_log=["alice attacked"], previous_commentary=[]
+    )
+
+    assert commentary is not None
+    assert commentary.tags == (
+        BehaviorTag(player="alice", behavior="strategic_blunder", note="a skill tag, in scope"),
+    )
 
 
 def test_a_commentate_call_becomes_commentary_with_validated_tags():
@@ -47,7 +90,7 @@ def test_a_commentate_call_becomes_commentary_with_validated_tags():
             {"player": "bob", "behavior": "interpretive_dance", "note": "unknown behavior is dropped"},
         ],
     )
-    commentator = Commentator(agent=StubAgent(response=response))
+    commentator = Commentator(agent=StubAgent(response=response), rubric=CONDUCT_RUBRIC)
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=4, turn_log=["alice attacked bob"], previous_commentary=[]
@@ -63,7 +106,7 @@ def test_a_commentate_call_becomes_commentary_with_validated_tags():
 def test_the_commentator_sees_missions_thoughts_and_prior_commentary():
     agent = StubAgent(response=commentate_response(commentary="Quiet turn.", tags=[]))
 
-    Commentator(agent=agent).comment_on_turn(
+    Commentator(agent=agent, rubric=CONDUCT_RUBRIC).comment_on_turn(
         state=game_state(),
         turn_number=2,
         turn_log=["bob (thinks): I will betray alice next turn"],
@@ -78,7 +121,9 @@ def test_the_commentator_sees_missions_thoughts_and_prior_commentary():
 
 
 def test_plain_text_without_a_tool_call_still_becomes_commentary():
-    commentator = Commentator(agent=StubAgent(response=Response(text="A bold opening from carla.", tool_calls=())))
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text="A bold opening from carla.", tool_calls=())), rubric=SKILL_RUBRIC
+    )
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["carla attacked"], previous_commentary=[]
@@ -95,7 +140,7 @@ def test_a_tool_call_leaked_as_text_is_salvaged_not_shown_raw():
         '<parameter name="tags">[{"player": "alice", "behavior": "strong_move", "note": "good odds"}]'
         "</parameter></invoke>"
     )
-    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())))
+    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), rubric=SKILL_RUBRIC)
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[]
@@ -114,7 +159,7 @@ def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
         '<parameter name="tags">[{"player": "bob", "behavior": "deception", "note": "said one thing"}, '
         '{"player": "alice", "behavior": "theory_of_mind", "note": "saw it coming and publicly wond'
     )  # cut off mid-JSON, as max-token truncation leaves it
-    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())))
+    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), rubric=CONDUCT_RUBRIC)
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["bob spoke"], previous_commentary=[]
@@ -128,7 +173,8 @@ def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
 
 def test_leaked_markup_without_salvageable_commentary_is_discarded():
     commentator = Commentator(
-        agent=StubAgent(response=Response(text='<parameter name="tags">[]</parameter>', tool_calls=()))
+        agent=StubAgent(response=Response(text='<parameter name="tags">[]</parameter>', tool_calls=())),
+        rubric=SKILL_RUBRIC,
     )
 
     assert (
@@ -137,7 +183,7 @@ def test_leaked_markup_without_salvageable_commentary_is_discarded():
 
 
 def test_an_unusable_response_yields_no_commentary():
-    commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=())))
+    commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=())), rubric=SKILL_RUBRIC)
 
     assert (
         commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
@@ -152,7 +198,7 @@ class FailingAgent:
 
 
 def test_a_provider_failure_yields_no_commentary_instead_of_crashing():
-    commentator = Commentator(agent=FailingAgent())
+    commentator = Commentator(agent=FailingAgent(), rubric=SKILL_RUBRIC)
 
     assert (
         commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
@@ -178,7 +224,8 @@ def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
                 commentary="The whispering continues.",
                 tags=[{"player": "alice", "behavior": "threat", "note": "always whispering"}],
             )
-        )
+        ),
+        rubric=CONDUCT_RUBRIC,
     )
     GameRunner(
         players=whisperers(seed=7),
@@ -186,7 +233,7 @@ def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
         max_turns=3,
         allow_private_messages=True,
         max_negotiation_rounds=3,
-        commentator=commentator,
+        commentators=(commentator,),
         journal=journal,
         trace=None,
         verbose=False,
@@ -196,5 +243,6 @@ def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
     commentaries = [record for record in read_journal(path=path) if record["type"] == "commentary"]
     assert len(commentaries) >= 3  # one per completed turn, plus the game-end comment
     assert all(record["text"] == "The whispering continues." for record in commentaries)
+    assert all(record["rubric"] == "conduct" for record in commentaries)
     assert commentaries[0]["tags"] == [{"player": "alice", "behavior": "threat", "note": "always whispering"}]
     assert [record["turn"] for record in commentaries] == sorted(record["turn"] for record in commentaries)

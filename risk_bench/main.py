@@ -30,8 +30,11 @@ def game(
     seed: Annotated[int, typer.Option(help="Random seed; the whole game is reproducible from it.")] = 0,
     resume: Annotated[Path | None, typer.Option(help="Resume a crashed game from its journal file.")] = None,
     commentator: Annotated[
-        str | None,
-        typer.Option(help="Model spec for an omniscient commentator that comments after each turn."),
+        list[str] | None,
+        typer.Option(
+            help="Commentator model spec, repeatable as 'rubric=spec' (rubrics: skill, conduct); "
+            "a bare spec runs every rubric on that model."
+        ),
     ] = None,
     journal: Annotated[Path | None, typer.Option(help="Journal file path; defaults to a timestamped name.")] = None,
     max_turns: Annotated[int | None, typer.Option(help="Turn limit override; defaults to settings.")] = None,
@@ -40,9 +43,10 @@ def game(
     """Run a single game between the given players (or resume a crashed one) and print the outcome."""
     settings = load_settings()
     try:
+        commentator_specs = specs.parse_commentator_specs(values=commentator or [])
         if resume is not None:
             record = launch.resume_game(
-                journal_file=resume, settings=settings, commentator_spec=commentator, verbose=verbose
+                journal_file=resume, settings=settings, commentator_specs=commentator_specs, verbose=verbose
             )
             journal_path = resume
         elif models:
@@ -50,7 +54,7 @@ def game(
                 models=models,
                 seed=seed,
                 settings=settings,
-                commentator_spec=commentator,
+                commentator_specs=commentator_specs,
                 journal_path=journal,
                 max_turns=max_turns,
                 verbose=verbose,

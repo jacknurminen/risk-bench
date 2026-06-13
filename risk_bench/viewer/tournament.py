@@ -13,7 +13,17 @@ from typing import Any
 
 from risk_bench.viewer.snapshots import build_view_model
 
-CHART_METRICS = ("army_share", "territories", "income", "cards", "positive_tags", "negative_tags")
+CHART_METRICS = (
+    "army_share",
+    "territories",
+    "income",
+    "cards",
+    "skill_strong",
+    "skill_weak",
+    "conduct_cooperative",
+    "conduct_adversarial",
+    "conduct_deceptive",
+)
 
 
 def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:

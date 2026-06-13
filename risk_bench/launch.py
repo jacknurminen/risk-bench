@@ -15,7 +15,7 @@ def run_new_game(
     models: list[str],
     seed: int,
     settings: Settings,
-    commentator_spec: str | None,
+    commentator_specs: dict[str, str],
     journal_path: Path | None,
     max_turns: int | None,
     verbose: bool,
@@ -26,7 +26,7 @@ def run_new_game(
         models: Player specs in seating order ('random', 'provider:tier', 'provider:model').
         seed: The game seed; the whole game is reproducible from it.
         settings: Provides API keys, agent limits, and game defaults.
-        commentator_spec: Model spec for the omniscient commentator, or None for none.
+        commentator_specs: Maps each commentator rubric to its model spec; empty for none.
         journal_path: Where to write the journal; None derives a timestamped path.
         max_turns: Turn limit; None uses the settings default.
         verbose: Whether to print events and chat to stdout as they happen.
@@ -42,7 +42,7 @@ def run_new_game(
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}" / "game.jsonl"
     trace = _trace_writer(
-        journal_path=journal_path, player_specs=player_specs, commentator_spec=commentator_spec, append=False
+        journal_path=journal_path, player_specs=player_specs, commentator_specs=commentator_specs, append=False
     )
     players = {
         name: specs.player_factory(spec=spec, settings=settings, trace=trace)(name, random.Random(f"{seed}:{name}"))
@@ -66,7 +66,7 @@ def run_new_game(
         max_turns=turn_limit,
         allow_private_messages=settings.allow_private_messages,
         max_negotiation_rounds=settings.max_negotiation_rounds,
-        commentator=specs.build_commentator(spec=commentator_spec, settings=settings, trace=trace),
+        commentators=specs.build_commentators(rubric_specs=commentator_specs, settings=settings, trace=trace),
         journal=journal,
         trace=trace,
         verbose=verbose,
@@ -79,13 +79,15 @@ def run_new_game(
             trace.close()
 
 
-def resume_game(journal_file: Path, settings: Settings, commentator_spec: str | None, verbose: bool) -> GameRecord:
+def resume_game(
+    journal_file: Path, settings: Settings, commentator_specs: dict[str, str], verbose: bool
+) -> GameRecord:
     """Continue a paused or crashed game from its journal until completion.
 
     Args:
         journal_file: The journal of the unfinished game.
         settings: Provides API keys and agent limits.
-        commentator_spec: Model spec for the commentator, or None for none.
+        commentator_specs: Maps each commentator rubric to its model spec; empty for none.
         verbose: Whether to print events and chat to stdout as they happen.
 
     Returns:
@@ -99,7 +101,7 @@ def resume_game(journal_file: Path, settings: Settings, commentator_spec: str | 
         raise ValueError(f"{journal_file} records a finished game; nothing to resume.")
     header = restored.header
     trace = _trace_writer(
-        journal_path=journal_file, player_specs=header.player_specs, commentator_spec=commentator_spec, append=True
+        journal_path=journal_file, player_specs=header.player_specs, commentator_specs=commentator_specs, append=True
     )
     players = {
         name: specs.player_factory(spec=spec, settings=settings, trace=trace)(
@@ -114,7 +116,7 @@ def resume_game(journal_file: Path, settings: Settings, commentator_spec: str | 
         max_turns=header.max_turns,
         allow_private_messages=header.allow_private_messages,
         max_negotiation_rounds=header.max_negotiation_rounds,
-        commentator=specs.build_commentator(spec=commentator_spec, settings=settings, trace=trace),
+        commentators=specs.build_commentators(rubric_specs=commentator_specs, settings=settings, trace=trace),
         journal=journal,
         trace=trace,
         verbose=verbose,
@@ -128,9 +130,9 @@ def resume_game(journal_file: Path, settings: Settings, commentator_spec: str | 
 
 
 def _trace_writer(
-    journal_path: Path, player_specs: dict[str, str], commentator_spec: str | None, append: bool
+    journal_path: Path, player_specs: dict[str, str], commentator_specs: dict[str, str], append: bool
 ) -> TraceWriter | None:
-    involves_an_api = commentator_spec is not None or any(spec != "random" for spec in player_specs.values())
+    involves_an_api = bool(commentator_specs) or any(spec != "random" for spec in player_specs.values())
     if not involves_an_api:
         return None
     return TraceWriter(path=trace_path_for_journal(journal_path=journal_path), append=append)

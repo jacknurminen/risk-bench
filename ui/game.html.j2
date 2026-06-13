@@ -28,6 +28,8 @@
                border:1px solid #d4dae2; border-radius:3px; padding:0 5px; margin:2px 3px 0 0; }
   .comm .tag.positive, #statsTable .tag.positive { color:#2e6b34; background:#e6efe4; border-color:#cfdfce; }
   .comm .tag.negative, #statsTable .tag.negative { color:#a33f3b; background:#f7e9e7; border-color:#e8d3d0; }
+  .comm .tag.deceptive, #statsTable .tag.deceptive { color:#8a5a1f; background:#f6eede; border-color:#e6d6b8; }
+  .comm .rubric { font-size:9px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
   h3 { margin:2px 0 8px; font:600 11px var(--sans); text-transform:uppercase; letter-spacing:.1em;
        color:var(--dim); border-bottom:1px solid var(--line); padding-bottom:4px; }
   #board svg { flex:1; min-height:0; width:100%; height:100%; background:#ccdae3; border-radius:4px;
@@ -367,7 +369,8 @@ function appendCommentary(fromIndex) {
       .map(tag => `<span class="tag${valenceClass(tag.behavior)}" title="${escapeHtml(tag.note)}">` +
         `${tag.behavior}: ${colorizeNames(tag.player)}</span>`)
       .join("");
-    div.innerHTML = `<div class="meta">turn ${comment.turn}</div><div>${richText(comment.text)}</div>` +
+    const rubric = comment.rubric ? ` <span class="rubric">${comment.rubric}</span>` : "";
+    div.innerHTML = `<div class="meta">turn ${comment.turn}${rubric}</div><div>${richText(comment.text)}</div>` +
       (tags ? `<div>${tags}</div>` : "");
     div.onclick = () => show(comment.step);
     container.appendChild(div);
@@ -428,9 +431,15 @@ function renderStats() {
   charts.appendChild(buildChart("cards in hand", seriesByPlayer.map(s => s.cards), v => Math.round(v)));
   if (GAME.commentary.length) {
     charts.appendChild(
-      buildChart("positive behaviors, cumulative", seriesByPlayer.map(s => s.positive_tags), v => Math.round(v)));
+      buildChart("skill: strong play, cumulative", seriesByPlayer.map(s => s.skill_strong), v => Math.round(v)));
     charts.appendChild(
-      buildChart("negative behaviors, cumulative", seriesByPlayer.map(s => s.negative_tags), v => Math.round(v)));
+      buildChart("skill: weak play, cumulative", seriesByPlayer.map(s => s.skill_weak), v => Math.round(v)));
+    charts.appendChild(
+      buildChart("conduct: cooperative, cumulative", seriesByPlayer.map(s => s.conduct_cooperative), v => Math.round(v)));
+    charts.appendChild(
+      buildChart("conduct: adversarial, cumulative", seriesByPlayer.map(s => s.conduct_adversarial), v => Math.round(v)));
+    charts.appendChild(
+      buildChart("conduct: deception, cumulative", seriesByPlayer.map(s => s.conduct_deceptive), v => Math.round(v)));
   }
   renderStatsTable();
 }
@@ -482,10 +491,15 @@ function buildChart(title, valuesBySeat, formatValue) {
   return chart;
 }
 
-// Neutral (descriptive / alignment-relevant) tags keep the default chip style:
-// they are deliberately not scored as good or bad play.
+// Chips are tinted by the behavior's valence: strong play and cooperative conduct read
+// "positive", weak play and adversarial conduct "negative", deception its own colour.
+// Descriptive affect tags (valence null) keep the default chip style.
 const valenceClass = behavior =>
-  ({ positive: " positive", negative: " negative" })[(GAME.stats.tag_valence ?? {})[behavior]] ?? "";
+  ({
+    strong: " positive", cooperative: " positive",
+    weak: " negative", adversarial: " negative",
+    deceptive: " deceptive",
+  })[(GAME.stats.tag_valence ?? {})[behavior]] ?? "";
 
 function usageCells(caller) {
   const usage = (GAME.stats.usage ?? {})[caller];
