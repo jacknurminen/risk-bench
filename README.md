@@ -27,18 +27,31 @@ Each game runs the standard Risk turn structure to completion:
 
 Between turns, a **reaction window** opens the group chat so every surviving agent can negotiate before play continues. The game ends when one agent controls the entire board, and the result feeds the tournament's Elo rankings.
 
-Each agent implements a single interface (`agents/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. If a model returns an invalid move, the engine retries a few times and then falls back to a random legal move, so a single bad response never crashes a game.
+Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. If a model returns an invalid move, the engine retries a few times and then falls back to a random legal move, so a single bad response never crashes a game.
+
+## Behavioural commentary
+
+Beyond the single Elo score, each game can be watched by one or more **commentators** — LLMs that tag what players are doing turn by turn against a fixed vocabulary. Tagging is split across two independent axes so a model can be profiled as, say, *competent but treacherous* rather than collapsed onto one line:
+
+- **Skill** — strong versus weak play (good odds, continent prioritisation, blunders, …).
+- **Conduct** — cooperative, adversarial, or deceptive behaviour (alliances and kept promises versus betrayal, threats, and acted-on deception).
+
+A third class of tags captures **affect** (tilt, taunting, …); these are descriptive and charted as frequency only, never summed into a score. Each axis runs as its own specialised commentator with a focused, criterion-referenced rubric, and the two can run on different model families — which weakens the self-enhancement bias of a model judging its own family. Commentary is stored per turn in the game journal and surfaced as cumulative per-axis charts in the viewer.
 
 ## Project layout
 
 | Area | Path | Responsibility |
 | --- | --- | --- |
-| Game rules | `game/` | Board, state, combat, cards, turn engine, group chat, move validation |
-| Agents | `agents/` | `BaseAgent` interface plus provider implementations (Anthropic, OpenAI, Google, xAI) and a `RandomAgent` baseline |
-| Tournaments | `tournament/` | Multi-game runner and Elo rating |
-| Storage | `storage/` | JSON persistence for agents, games, and the leaderboard |
-| Web | `web/` | FastAPI dashboard for the leaderboard, game replays, and agent profiles |
-| CLI | `main.py` | Entry point for registering agents and running tournaments |
+| Game rules | `risk_bench/game/` | Board, state, combat, cards, turn engine, move validation |
+| Negotiation | `risk_bench/chat/` | Between-turn diplomacy: the group-chat reaction window |
+| Players | `risk_bench/players/` | Player interface (`base.py`), the LLM player, and a `RandomPlayer` baseline |
+| Provider clients | `risk_bench/agents/` | Low-level model clients (Anthropic, OpenAI, Google, xAI) plus call tracing |
+| Game loop | `risk_bench/runner/` | Drives a single game, writes the JSONL journal, and runs the commentators |
+| Tournaments | `risk_bench/tournament/` | Multi-game runner, Elo rating, and report writing |
+| Web API | `risk_bench/api/` | FastAPI app: browse games, watch them live, and launch new ones |
+| Viewer | `risk_bench/viewer/` + `ui/` | Self-contained HTML replays and stats, plus the templates and board map |
+| Wiring | `risk_bench/{config,specs,launch}.py` | Settings, spec parsing, and game launching |
+| CLI | `risk_bench/main.py` | Entry point: the `game`, `tournament`, `view`, and `serve` commands |
 
 ## Getting started
 
@@ -48,23 +61,37 @@ The project uses [`uv`](https://github.com/astral-sh/uv) and requires Python 3.1
 uv sync
 ```
 
-Run a quick game between random agents to check the engine end-to-end:
+Players are given inline as specs — `random`, `provider:tier` (providers `anthropic`/`openai`/`google`, tiers `lo`/`mid`/`hi`), or `provider:model` for an explicit model id. There is no separate registration step.
+
+Run a quick game between random players to check the engine end-to-end:
 
 ```bash
-uv run python main.py tournament quick --players 3
+uv run python -m risk_bench.main game random random random
 ```
 
-Register a model-backed agent and run a tournament:
+Play a model-backed game, optionally with split commentators (a bare `--commentator <spec>` runs every rubric on one model):
 
 ```bash
-uv run python main.py agent add --name "claude" --provider anthropic --model claude-sonnet-4-6
-uv run python main.py tournament run --agents id1,id2,id3 --games 10
+uv run python -m risk_bench.main game anthropic:hi openai:hi google:mid \
+    --commentator skill=anthropic:hi --commentator conduct=google:mid
 ```
 
-Serve the dashboard to browse results and replays:
+Run a tournament and write its JSON report:
 
 ```bash
-uv run python main.py serve --port 8000
+uv run python -m risk_bench.main tournament anthropic:hi openai:hi random --games 10
+```
+
+Render a finished game into a standalone HTML replay:
+
+```bash
+uv run python -m risk_bench.main view data/games/<game-folder>/game.jsonl
+```
+
+Serve the web app to browse games, watch them live, and launch new ones:
+
+```bash
+uv run python -m risk_bench.main serve --port 8420
 ```
 
 Provider API keys are read from the environment (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
