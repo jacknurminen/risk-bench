@@ -36,6 +36,10 @@
   #charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .chart h4 { margin:0 0 4px; font:600 10px var(--sans); text-transform:uppercase; letter-spacing:.08em;
               color:var(--dim); }
+  .tokenLegend { font-size:11px; color:var(--dim); margin:0 0 4px; }
+  .tokenLegend span { font-weight:700; }
+  .tokenControls { display:flex; gap:14px; margin:0 0 10px; font-size:12px; }
+  .tokenControls label { color:var(--dim); }
   .chart svg { width:100%; height:auto; background:#fcfcfb; border:1px solid var(--line); border-radius:4px; }
   .chart text.axis { font:9px var(--sans); fill:var(--dim); }
   .tag { display:inline-block; font-size:10px; color:var(--accent); background:#e8ecf1;
@@ -67,6 +71,18 @@
     <label><input type="checkbox" id="toggleGames" checked> individual games</label>
   </div>
   <div id="charts"></div>
+
+  <h2>API usage per turn</h2>
+  <div class="note">Mean per turn across the games. Each turn shows two bars: input (the prompt sent) on the
+    left, output (the model's response) on the right. Switch between token counts and estimated cost, and
+    between stacking by call type or by model.</div>
+  <div class="tokenControls">
+    <label>measure
+      <select id="tokMeasure"><option value="tokens">tokens</option><option value="cost">cost ($)</option></select></label>
+    <label>breakdown
+      <select id="tokBreakdown"><option value="all">all (by call type)</option><option value="model">by model</option></select></label>
+  </div>
+  <div id="tokenChart"></div>
 
   <h2>Aggregates across all games</h2>
   <div class="panel"><table id="aggregateTable"></table></div>
@@ -102,6 +118,7 @@ function render(data) {
     .map((name, seat) => `<span style="color:${COLORS[seat]}">${name}</span>`).join("");
   renderGamesTable(data);
   drawCharts();
+  renderTokenChart();
   renderAggregateTable(data);
 }
 
@@ -201,6 +218,74 @@ function buildChart(data, title, metric, formatValue, show) {
   const chart = document.createElement("div");
   chart.className = "chart";
   chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
+  return chart;
+}
+
+const TOKEN_COLORS = { negotiation: "#3c6c9e", decision: "#6e8f3a", commentary: "#c97a29", other: "#9a8aa0" };
+const fmtTokens = n =>
+  n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(Math.round(n));
+const callerColor = caller => {
+  const seat = latestData ? latestData.players.indexOf(caller) : -1;
+  return seat >= 0 ? COLORS[seat] : "#8a8f98";  // commentators (and any stray caller) read neutral grey
+};
+
+function renderTokenChart() {
+  if (!latestData) return;
+  const container = el("tokenChart");
+  const usage = latestData.per_turn_usage;
+  container.innerHTML = usage?.turns.length ? "" : '<div class="note">No traced API calls yet.</div>';
+  if (usage?.turns.length) container.appendChild(buildTokenChart(usage));
+}
+for (const id of ["tokMeasure", "tokBreakdown"]) el(id).addEventListener("change", renderTokenChart);
+
+// One stacked bar per turn for input (left) and output (right). The toggles pick the
+// measure (tokens or estimated cost) and the stack dimension (call type, or by model).
+function buildTokenChart(usage) {
+  const measure = el("tokMeasure").value, byModel = el("tokBreakdown").value === "model";
+  const groups = byModel ? usage.callers : usage.categories;
+  const series = byModel ? usage.by_caller : usage.by_category;
+  const [leftKey, rightKey] = measure === "cost" ? ["input_cost", "output_cost"] : ["input_tokens", "output_tokens"];
+  const colorFor = byModel ? callerColor : (group => TOKEN_COLORS[group] ?? "#888");
+  const fmt = measure === "cost" ? (v => "$" + v.toFixed(2)) : fmtTokens;
+  const value = (group, key, i) => series[group]?.[key]?.[i] ?? 0;
+  const W = 1060, H = 250, PAD = { left: 54, right: 12, top: 14, bottom: 22 };
+  const turns = usage.turns;
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  const legend = groups.map(group => `<span style="color:${colorFor(group)}">■</span> ${group}`).join(" &nbsp; ");
+  const stackTotal = (key, i) => groups.reduce((sum, group) => sum + value(group, key, i), 0);
+  let dataMax = 0;
+  turns.forEach((_, i) => dataMax = Math.max(dataMax, stackTotal(leftKey, i), stackTotal(rightKey, i)));
+  dataMax = dataMax || 1;
+  const plotW = W - PAD.left - PAD.right, plotH = H - PAD.top - PAD.bottom;
+  const yAt = v => H - PAD.bottom - (v / dataMax) * plotH;
+  const slot = plotW / turns.length, barW = Math.max(0.8, slot * 0.4);
+  const parts = [];
+  for (const fraction of [0, 0.5, 1]) {
+    const gy = yAt(dataMax * fraction);
+    parts.push(`<line x1="${PAD.left}" y1="${gy}" x2="${W - PAD.right}" y2="${gy}" stroke="#e8e7e3"/>`);
+    parts.push(`<text x="${PAD.left - 4}" y="${gy + 3}" class="axis" text-anchor="end">${fmt(dataMax * fraction)}</text>`);
+  }
+  parts.push(`<text x="${PAD.left}" y="${H - 5}" class="axis">turn ${turns[0]}</text>`);
+  parts.push(`<text x="${W - PAD.right}" y="${H - 5}" class="axis" text-anchor="end">turn ${turns.at(-1)}</text>`);
+  const stack = (key, x, i) => {
+    let base = 0;
+    for (const group of groups) {
+      const v = value(group, key, i);
+      if (v > 0) {
+        const top = yAt(base + v), height = Math.max(0, yAt(base) - top);
+        parts.push(`<rect x="${x.toFixed(2)}" y="${top.toFixed(2)}" width="${barW.toFixed(2)}" height="${height.toFixed(2)}"
+          fill="${colorFor(group)}"><title>turn ${turns[i]} · ${key.startsWith("input") ? "input" : "output"} · ${group}: ${fmt(v)}</title></rect>`);
+      }
+      base += v;
+    }
+  };
+  turns.forEach((_, i) => {
+    const x0 = PAD.left + i * slot;
+    stack(leftKey, x0 + slot * 0.08, i);
+    stack(rightKey, x0 + slot * 0.52, i);
+  });
+  chart.innerHTML = `<div class="tokenLegend">${legend}</div><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
   return chart;
 }
 
