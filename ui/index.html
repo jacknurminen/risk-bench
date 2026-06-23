@@ -48,6 +48,16 @@
   .playerRow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; text-transform: uppercase;
                      letter-spacing:.04em; }
+  .providerPicker { display: flex; gap: 4px; }
+  .providerTile { background: #fff; border: 1px solid #c6c5c0; border-radius: 5px; padding: 3px 6px;
+                  width: 42px; height: 30px; display: flex; align-items: center; justify-content: center;
+                  cursor: pointer; }
+  .providerTile:hover { background: #f0efec; filter: none; }
+  .providerTile img { max-width: 100%; max-height: 18px; display: block; filter: grayscale(1); opacity: .4; }
+  .providerTile.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .providerTile.active img { filter: none; opacity: 1; }
+  .providerTile .fallback { font-size: 11px; color: var(--dim); }
+  .providerTile.active .fallback { color: var(--ink); }
   tr.child td { background: #fbfbfa; }
   tr.child td:first-child { padding-left: 28px; color: var(--dim); }
   .caret { color: var(--dim); font-size: 11px; margin-right: 6px; }
@@ -87,33 +97,73 @@
 </div>
 <script>
 const el = id => document.getElementById(id);
-let specOptions = [];
+
+const PROVIDER_LOGOS = {
+  anthropic: "/assets/claude.png",
+  google: "/assets/google-gemini.png",
+  openai: "/assets/openai.png",
+};
+const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI" };
+const DEFAULT_SIZE = "hi";
+const DEFAULT_EFFORT = "low";
+
+let tiersByProvider = {};
+let providers = [];
+let efforts = [];
 
 async function loadModels() {
   const catalog = await (await fetch("/api/models")).json();
-  specOptions = [catalog.baseline];
-  for (const [provider, tiers] of Object.entries(catalog.tiers_by_provider)) {
-    for (const [tier, modelId] of Object.entries(tiers)) {
-      specOptions.push(`${provider}:${tier}`);
-    }
-  }
+  tiersByProvider = catalog.tiers_by_provider;
+  providers = Object.keys(tiersByProvider);
+  efforts = catalog.efforts;
+  const flatSpecs = providers.flatMap(provider =>
+    Object.keys(tiersByProvider[provider]).map(tier => `${provider}:${tier}`));
   el("commentator").innerHTML = '<option value="">none</option>' +
-    specOptions.filter(spec => spec !== "random")
-      .map(spec => `<option value="${spec}">${spec}</option>`).join("");
+    flatSpecs.map(spec => `<option value="${spec}">${spec}</option>`).join("");
   addPlayerRow(); addPlayerRow(); addPlayerRow();
+}
+
+function providerTile(provider, active) {
+  const label = PROVIDER_LABELS[provider] ?? provider;
+  const logo = PROVIDER_LOGOS[provider];
+  const inner = logo ? `<img src="${logo}" alt="${label}">` : `<span class="fallback">${label}</span>`;
+  return `<button type="button" class="providerTile${active ? " active" : ""}" data-provider="${provider}"
+    title="${label}">${inner}</button>`;
+}
+
+function sizeOptions(provider, selected) {
+  return Object.entries(tiersByProvider[provider]).map(([tier, modelId]) =>
+    `<option value="${tier}"${tier === selected ? " selected" : ""}>${tier} · ${modelId}</option>`).join("");
+}
+
+function effortOptions(selected) {
+  return efforts.map(effort =>
+    `<option value="${effort}"${effort === selected ? " selected" : ""}>${effort} effort</option>`).join("");
 }
 
 function addPlayerRow() {
   const rows = el("playerRows");
   if (rows.children.length >= 6) return;
+  const provider = providers[0];
   const row = document.createElement("div");
   row.className = "playerRow";
   row.innerHTML = `<span class="seat">seat ${rows.children.length + 1}</span>
-    <select class="playerSpec">${specOptions.map(spec => `<option value="${spec}">${spec}</option>`).join("")}</select>
-    <input type="text" class="customSpec" placeholder="or custom provider:model" style="flex:1">
-    <button class="subtle remove">✕</button>`;
+    <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
+    <select class="sizeSelect">${sizeOptions(provider, DEFAULT_SIZE)}</select>
+    <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
+    <button type="button" class="subtle remove">✕</button>`;
+  row.querySelectorAll(".providerTile").forEach(tile =>
+    tile.onclick = () => selectProvider(row, tile.dataset.provider));
   row.querySelector(".remove").onclick = () => { if (rows.children.length > 3) { row.remove(); renumber(); } };
   rows.appendChild(row);
+}
+
+function selectProvider(row, provider) {
+  row.querySelectorAll(".providerTile").forEach(tile =>
+    tile.classList.toggle("active", tile.dataset.provider === provider));
+  const sizeSelect = row.querySelector(".sizeSelect");
+  // tier keys (lo/mid/hi) are shared across providers, so keep the chosen size; only the model label changes
+  sizeSelect.innerHTML = sizeOptions(provider, sizeSelect.value || DEFAULT_SIZE);
 }
 
 function renumber() {
@@ -123,8 +173,12 @@ function renumber() {
 
 async function launch() {
   el("launchError").textContent = "";
-  const players = [...document.querySelectorAll(".playerRow")].map(row =>
-    row.querySelector(".customSpec").value.trim() || row.querySelector(".playerSpec").value);
+  const players = [...document.querySelectorAll(".playerRow")].map(row => {
+    const provider = row.querySelector(".providerTile.active").dataset.provider;
+    const size = row.querySelector(".sizeSelect").value;
+    const effort = row.querySelector(".effortSelect").value;
+    return `${provider}:${size}:${effort}`;
+  });
   const body = {
     players,
     seed: Number(el("seed").value) || 0,

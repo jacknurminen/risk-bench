@@ -7,8 +7,10 @@ from typing import Any, NamedTuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from risk_bench import specs
+from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
@@ -55,6 +57,7 @@ def create_app(games_directory: Path) -> FastAPI:
     app = FastAPI(title="risk-bench")
     manager = GameProcessManager()
     app.add_event_handler("shutdown", manager.shutdown)
+    app.mount("/assets", StaticFiles(directory=UI_DIRECTORY), name="assets")
     # traces can be large and the list is polled; totals are recomputed only when a trace changes
     usage_totals_cache: dict[str, tuple[tuple[float, int], _UsageTotals]] = {}
 
@@ -149,6 +152,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 provider: {tier.name.lower(): tier.value for tier in tier_models}
                 for provider, tier_models in specs.TIER_MODELS_BY_PROVIDER.items()
             },
+            efforts=[effort.value for effort in ReasoningEffort],
             baseline="random",
         )
 

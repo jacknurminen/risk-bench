@@ -64,7 +64,8 @@ class NewGameResponse(BaseModel):
 
 
 class ModelCatalogResponse(BaseModel):
-    """The player specs the setup form can offer."""
+    """The choices the setup form can offer: a model per provider/tier, and the reasoning efforts."""
 
     tiers_by_provider: dict[str, dict[str, str]]
+    efforts: list[str]
     baseline: str

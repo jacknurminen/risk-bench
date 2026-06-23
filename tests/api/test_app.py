@@ -115,6 +115,7 @@ def test_the_model_catalog_offers_tiers_and_the_baseline(tmp_path: Path):
     assert catalog["baseline"] == "random"
     assert catalog["tiers_by_provider"]["anthropic"]["lo"] == "claude-haiku-4-5"
     assert set(catalog["tiers_by_provider"]) == {"anthropic", "google", "openai"}
+    assert catalog["efforts"] == ["low", "medium", "high"]
 
 
 def test_launch_requests_are_validated(tmp_path: Path):
