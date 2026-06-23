@@ -1,14 +1,17 @@
 """Player model-spec resolution, shared by the CLI and the web API.
 
 A spec is 'random', 'provider:tier' (e.g. 'anthropic:hi'), or 'provider:model'
-with an explicit model id. Providers: anthropic, openai, google.
+with an explicit model id, each optionally suffixed with ':<effort>' (low / mid-
+via 'medium' / high) to set that player's reasoning effort, e.g.
+'anthropic:hi:low'. Without the suffix the global default effort applies.
+Providers: anthropic, openai, google.
 """
 
 import random
 from typing import Final
 
 from risk_bench.agents.anthropic import AnthropicAgent
-from risk_bench.agents.base import Agent
+from risk_bench.agents.base import Agent, ReasoningEffort
 from risk_bench.agents.google import GeminiAgent
 from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
 from risk_bench.agents.openai import OpenAIAgent
@@ -40,7 +43,8 @@ def resolve_model(spec: str) -> str:
     Raises:
         ValueError: If the spec is malformed or names an unknown provider.
     """
-    provider, _, model_or_tier = spec.partition(":")
+    model_spec, _ = _split_effort(spec=spec)
+    provider, _, model_or_tier = model_spec.partition(":")
     if not model_or_tier:
         raise ValueError(f"'{spec}' is not 'random' or a provider:tier / provider:model spec.")
     tier_models = TIER_MODELS_BY_PROVIDER.get(provider)
@@ -122,8 +126,10 @@ def build_agent(spec: str, settings: Settings) -> Agent:
     Raises:
         ValueError: If the provider is unknown or its API key is not configured.
     """
-    provider = spec.partition(":")[0]
-    model = resolve_model(spec=spec)
+    model_spec, effort = _split_effort(spec=spec)
+    provider = model_spec.partition(":")[0]
+    model = resolve_model(spec=model_spec)
+    reasoning_effort = effort if effort is not None else settings.agent_reasoning_effort
     api_key = _require_api_key(provider=provider, settings=settings)
     match provider:
         case "anthropic":
@@ -131,21 +137,21 @@ def build_agent(spec: str, settings: Settings) -> Agent:
                 model=model,
                 api_key=api_key,
                 max_tokens=settings.max_agent_tokens,
-                reasoning_effort=settings.agent_reasoning_effort,
+                reasoning_effort=reasoning_effort,
             )
         case "openai":
             return OpenAIAgent(
                 model=model,
                 api_key=api_key,
                 max_tokens=settings.max_agent_tokens,
-                reasoning_effort=settings.agent_reasoning_effort,
+                reasoning_effort=reasoning_effort,
             )
         case "google":
             return GeminiAgent(
                 model=model,
                 api_key=api_key,
                 max_tokens=settings.max_agent_tokens,
-                reasoning_effort=settings.agent_reasoning_effort,
+                reasoning_effort=reasoning_effort,
             )
         case unknown_provider:
             raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
@@ -215,6 +221,20 @@ def parse_commentator_specs(values: list[str]) -> dict[str, str]:
             raise ValueError(f"Commentator rubric '{rubric_name}' has no model spec; use '{rubric_name}=<spec>'.")
         rubric_specs[rubric_name] = spec
     return rubric_specs
+
+
+def _split_effort(spec: str) -> tuple[str, ReasoningEffort | None]:
+    """Split an optional trailing ':<effort>' off a spec, returning (model_spec, effort).
+
+    A segment is treated as effort only when it names a ReasoningEffort
+    (low/medium/high); otherwise the spec is returned untouched, so plain
+    'provider:tier', 'provider:model', and 'random' specs are unaffected (tiers
+    are lo/mid/hi, never the effort words, so there is no ambiguity).
+    """
+    head, _, tail = spec.rpartition(":")
+    if head and tail.upper() in ReasoningEffort.__members__:
+        return head, ReasoningEffort[tail.upper()]
+    return spec, None
 
 
 def _require_api_key(provider: str, settings: Settings) -> str:

@@ -20,7 +20,8 @@ console = Console()
 
 MODELS_HELP = (
     "Players as provider:tier specs like 'anthropic:hi' (providers: anthropic/openai/google, tiers: lo/mid/hi), "
-    "provider:model for an explicit model id, or 'random' for the baseline."
+    "provider:model for an explicit model id, or 'random' for the baseline. Add ':<effort>' (low/medium/high) "
+    "to set a player's reasoning effort, e.g. 'anthropic:hi:low'."
 )
 
 
