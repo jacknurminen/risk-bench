@@ -2,6 +2,8 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from risk_bench.agents.base import ReasoningEffort
+
 
 class Settings(BaseSettings):
     """Application settings, loaded from environment variables and ``.env``."""
@@ -16,6 +18,7 @@ class Settings(BaseSettings):
 
     # agent limits
     max_agent_tokens: int = 4096
+    agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
     max_consecutive_provider_failures: int = 6
 

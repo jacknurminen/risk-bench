@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
 
 Role = Literal["system", "user", "assistant", "tool"]
+
+
+class ReasoningEffort(StrEnum):
+    """Provider-agnostic reasoning effort, mapped to each provider's native control.
+
+    Lower effort spends fewer reasoning (and thus output) tokens at some cost to
+    play quality. Each agent translates this to the knob its API exposes:
+    Anthropic ``output_config.effort``, OpenAI ``reasoning_effort``, and Gemini
+    ``thinking_level``.
+    """
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 @dataclass(frozen=True)

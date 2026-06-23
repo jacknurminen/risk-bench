@@ -127,11 +127,26 @@ def build_agent(spec: str, settings: Settings) -> Agent:
     api_key = _require_api_key(provider=provider, settings=settings)
     match provider:
         case "anthropic":
-            return AnthropicAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
+            return AnthropicAgent(
+                model=model,
+                api_key=api_key,
+                max_tokens=settings.max_agent_tokens,
+                reasoning_effort=settings.agent_reasoning_effort,
+            )
         case "openai":
-            return OpenAIAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
+            return OpenAIAgent(
+                model=model,
+                api_key=api_key,
+                max_tokens=settings.max_agent_tokens,
+                reasoning_effort=settings.agent_reasoning_effort,
+            )
         case "google":
-            return GeminiAgent(model=model, api_key=api_key, max_tokens=settings.max_agent_tokens)
+            return GeminiAgent(
+                model=model,
+                api_key=api_key,
+                max_tokens=settings.max_agent_tokens,
+                reasoning_effort=settings.agent_reasoning_effort,
+            )
         case unknown_provider:
             raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
 

@@ -6,15 +6,16 @@ import json
 import openai
 import openai.types.chat
 
-from risk_bench.agents.base import Message, Response, Tool, ToolCall
+from risk_bench.agents.base import Message, ReasoningEffort, Response, Tool, ToolCall
 
 
 class OpenAIAgent:
     """Provider-agnostic chat model backed by the OpenAI chat completions API."""
 
-    def __init__(self, model: str, api_key: str, max_tokens: int) -> None:
+    def __init__(self, model: str, api_key: str, max_tokens: int, reasoning_effort: ReasoningEffort) -> None:
         self._model = model
         self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
         self._client = openai.OpenAI(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -31,6 +32,7 @@ class OpenAIAgent:
             model=self._model,
             # newer OpenAI models reject 'max_tokens' in favor of 'max_completion_tokens'
             max_completion_tokens=self._max_tokens,
+            reasoning_effort=self._reasoning_effort.value,
             messages=[_to_openai_message(message=message) for message in messages],
             tools=[_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit,
         )

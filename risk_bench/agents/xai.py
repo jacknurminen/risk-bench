@@ -7,15 +7,16 @@ import xai_sdk.chat
 from xai_sdk.proto import chat_pb2
 from xai_sdk.proto.v5 import chat_pb2 as chat_pb2_v5
 
-from risk_bench.agents.base import Message, Response, Tool, ToolCall
+from risk_bench.agents.base import Message, ReasoningEffort, Response, Tool, ToolCall
 
 
 class GrokAgent:
     """Provider-agnostic chat model backed by xAI's official Grok SDK."""
 
-    def __init__(self, model: str, api_key: str, max_tokens: int) -> None:
+    def __init__(self, model: str, api_key: str, max_tokens: int, reasoning_effort: ReasoningEffort) -> None:
         self._model = model
         self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
         self._client = xai_sdk.Client(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -31,6 +32,7 @@ class GrokAgent:
         chat = self._client.chat.create(
             model=self._model,
             max_tokens=self._max_tokens,
+            reasoning_effort=self._reasoning_effort.value,
             messages=[_to_message(message=message) for message in messages],
             tools=[_to_tool(tool=tool) for tool in tools] if tools else None,
         )

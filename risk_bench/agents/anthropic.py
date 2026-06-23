@@ -5,15 +5,18 @@ from typing import Literal
 
 import anthropic
 
-from risk_bench.agents.base import Message, Response, Tool, ToolCall
+from risk_bench.agents.base import Message, ReasoningEffort, Response, Tool, ToolCall
 
 
 class AnthropicAgent:
     """Provider-agnostic chat model backed by the Anthropic Messages API."""
 
-    def __init__(self, model: str, api_key: str, max_tokens: int) -> None:
+    def __init__(self, model: str, api_key: str, max_tokens: int, reasoning_effort: ReasoningEffort) -> None:
         self._model = model
         self._max_tokens = max_tokens
+        self._reasoning_effort = reasoning_effort
+        # The effort parameter is rejected by Haiku-class models; only send it where it is supported.
+        self._supports_effort = "haiku" not in model.lower()
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -34,6 +37,7 @@ class AnthropicAgent:
             messages=conversation,
             system=system_prompt if system_prompt else anthropic.omit,
             tools=[_to_anthropic_tool(tool=tool) for tool in tools] if tools else anthropic.omit,
+            output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
         )
         parsed = _parse_response(content_blocks=response.content)
         return dataclasses.replace(

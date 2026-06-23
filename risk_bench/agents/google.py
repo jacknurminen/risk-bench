@@ -1,19 +1,27 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Final
 
 from google import genai
 from google.genai import types
 
-from risk_bench.agents.base import Message, Response, Tool, ToolCall
+from risk_bench.agents.base import Message, ReasoningEffort, Response, Tool, ToolCall
+
+_THINKING_LEVELS: Final[dict[ReasoningEffort, types.ThinkingLevel]] = {
+    ReasoningEffort.LOW: types.ThinkingLevel.LOW,
+    ReasoningEffort.MEDIUM: types.ThinkingLevel.MEDIUM,
+    ReasoningEffort.HIGH: types.ThinkingLevel.HIGH,
+}
 
 
 class GeminiAgent:
     """Provider-agnostic chat model backed by the Google Gemini API."""
 
-    def __init__(self, model: str, api_key: str, max_tokens: int) -> None:
+    def __init__(self, model: str, api_key: str, max_tokens: int, reasoning_effort: ReasoningEffort) -> None:
         self._model = model
         self._max_tokens = max_tokens
+        self._thinking_level = _THINKING_LEVELS[reasoning_effort]
         self._client = genai.Client(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -34,6 +42,7 @@ class GeminiAgent:
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
                 max_output_tokens=self._max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_level=self._thinking_level),
                 tools=[_to_tool(tool=tool) for tool in tools] if tools else None,
             ),
         )
