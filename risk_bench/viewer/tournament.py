@@ -1,17 +1,70 @@
 """Aggregating a tournament's member games into one cross-game statistics view model.
 
-The sample sizes are small (a handful of games), so the aggregation stays
-assumption-free: per-turn mean with a min-max envelope plus every individual
-game's series for the charts, and exact-ish Wilson score intervals only for
-win rates, where they are legitimate at any sample size.
+The sample sizes are small (a handful of games), so the aggregation leans on the
+nonparametric path. For every per-turn metric the model carries several distinct
+things, kept separate because they answer different questions: the cross-game mean
+line, a 95% bootstrap confidence interval for that mean (how well we know the
+average — needs no normality assumption, in the same spirit as the Wilson win-rate
+intervals), the parametric 95% Student-t interval for the same mean (a closed-form
+alternative offered for side-by-side comparison during exploration), and the raw
+min-max envelope (how far individual games spread, the extremes rather than a
+confidence statement). Every individual game's own series rides along for the
+charts too.
 """
 
 import json
 import math
+import random
 from pathlib import Path
 from typing import Any
 
 from risk_bench.viewer.snapshots import build_view_model
+
+# resamples per per-turn bootstrap interval; 500 gives a visually stable 2.5/97.5
+# band while keeping the whole-page rebuild well under the live poll interval, since
+# this view model is recomputed uncached on every poll of a running tournament
+_BOOTSTRAP_ITERATIONS = 500
+
+# a fixed seed makes the bands identical across re-renders of the same tournament,
+# so a live page does not jitter its confidence bands between polls
+_BOOTSTRAP_SEED = 2026
+
+# two-sided 95% Student-t critical values by degrees of freedom; the table covers the
+# small-sample range where t departs sharply from the normal 1.96 (the regime these
+# few-game tournaments live in), and larger samples fall back to the 1.96 it converges to
+_T_CRITICAL_VALUES_95 = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    6: 2.447,
+    7: 2.365,
+    8: 2.306,
+    9: 2.262,
+    10: 2.228,
+    11: 2.201,
+    12: 2.179,
+    13: 2.160,
+    14: 2.145,
+    15: 2.131,
+    16: 2.120,
+    17: 2.110,
+    18: 2.101,
+    19: 2.093,
+    20: 2.086,
+    21: 2.080,
+    22: 2.074,
+    23: 2.069,
+    24: 2.064,
+    25: 2.060,
+    26: 2.056,
+    27: 2.052,
+    28: 2.048,
+    29: 2.045,
+    30: 2.042,
+}
+_NORMAL_CRITICAL_VALUE_95 = 1.96
 
 CHART_METRICS = (
     "army_share",
@@ -29,9 +82,11 @@ CHART_METRICS = (
 def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
     """Replay a tournament's member games and merge them into one statistics view model.
 
-    Per player and metric the model carries the per-turn cross-game mean, the
-    min-max envelope, and each game's own series; at every turn only the games
-    still running contribute, so finished games never bias late-game averages.
+    Per player and metric the model carries the per-turn cross-game mean, a 95%
+    bootstrap confidence interval for that mean, the parametric Student-t interval
+    for it, the min-max envelope, and each game's own series; at every turn only the
+    games still running contribute, so finished games never bias late-game averages
+    (and both confidence bands widen there as fewer games remain).
 
     Args:
         tournament_directory: The tournament's folder, holding ``tournament.json``
@@ -61,6 +116,7 @@ def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
     player_names = [player["name"] for player in members[0][1]["players"]]
     member_series = [model["stats"]["series"] for _, model in members]
     turns = list(range(max(len(series["turns"]) for series in member_series)))
+    bootstrap_rng = random.Random(_BOOTSTRAP_SEED)
 
     return {
         "id": manifest["id"],
@@ -69,7 +125,9 @@ def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
         "game_count_by_turn": [sum(1 for series in member_series if turn < len(series["turns"])) for turn in turns],
         "metrics": {
             metric: [
-                _merge_metric(member_series=member_series, seat=seat, metric=metric, turns=turns)
+                _merge_metric(
+                    member_series=member_series, seat=seat, metric=metric, turns=turns, bootstrap_rng=bootstrap_rng
+                )
                 for seat in range(len(player_names))
             ]
             for metric in CHART_METRICS
@@ -79,15 +137,61 @@ def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
     }
 
 
-def _merge_metric(member_series: list[dict[str, Any]], seat: int, metric: str, turns: list[int]) -> dict[str, Any]:
+def _merge_metric(
+    member_series: list[dict[str, Any]], seat: int, metric: str, turns: list[int], bootstrap_rng: random.Random
+) -> dict[str, Any]:
     per_game = [series["players"][seat][metric] for series in member_series]
     mean, low, high = [], [], []
+    bootstrap_low, bootstrap_high = [], []
+    t_low, t_high = [], []
     for turn in turns:
         values = [game_values[turn] for game_values in per_game if turn < len(game_values)]
         mean.append(round(sum(values) / len(values), 4))
         low.append(min(values))
         high.append(max(values))
-    return {"mean": mean, "min": low, "max": high, "games": per_game}
+        bootstrap_interval = _bootstrap_mean_interval(values=values, bootstrap_rng=bootstrap_rng)
+        bootstrap_low.append(round(bootstrap_interval[0], 4))
+        bootstrap_high.append(round(bootstrap_interval[1], 4))
+        t_interval = _t_interval(values=values)
+        t_low.append(round(t_interval[0], 4))
+        t_high.append(round(t_interval[1], 4))
+    return {
+        "mean": mean,
+        "min": low,
+        "max": high,
+        "ci_low": bootstrap_low,
+        "ci_high": bootstrap_high,
+        "t_low": t_low,
+        "t_high": t_high,
+        "games": per_game,
+    }
+
+
+def _bootstrap_mean_interval(values: list[float], bootstrap_rng: random.Random) -> tuple[float, float]:
+    sample_size = len(values)
+    if sample_size < 2:
+        return values[0], values[0]
+    # draw every resample's observations in one C-level call, then sum each
+    # consecutive sample_size-sized block — far cheaper than a choices() call per resample
+    draws = bootstrap_rng.choices(values, k=sample_size * _BOOTSTRAP_ITERATIONS)
+    resampled_means = sorted(
+        sum(draws[start : start + sample_size]) / sample_size for start in range(0, len(draws), sample_size)
+    )
+    return (
+        resampled_means[round(0.025 * (_BOOTSTRAP_ITERATIONS - 1))],
+        resampled_means[round(0.975 * (_BOOTSTRAP_ITERATIONS - 1))],
+    )
+
+
+def _t_interval(values: list[float]) -> tuple[float, float]:
+    sample_size = len(values)
+    if sample_size < 2:
+        return values[0], values[0]
+    mean = sum(values) / sample_size
+    variance = sum((value - mean) ** 2 for value in values) / (sample_size - 1)
+    standard_error = math.sqrt(variance) / math.sqrt(sample_size)
+    margin = _T_CRITICAL_VALUES_95.get(sample_size - 1, _NORMAL_CRITICAL_VALUE_95) * standard_error
+    return mean - margin, mean + margin
 
 
 def _game_row(game_id: str, model: dict[str, Any]) -> dict[str, Any]:

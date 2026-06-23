@@ -37,10 +37,21 @@ def test_member_games_merge_into_aligned_envelope_series(tmp_path: Path):
     for metric_series in model["metrics"].values():
         for seat_series in metric_series:
             assert len(seat_series["mean"]) == len(seat_series["min"]) == len(seat_series["max"]) == turn_count
+            assert len(seat_series["ci_low"]) == len(seat_series["ci_high"]) == turn_count
+            assert len(seat_series["t_low"]) == len(seat_series["t_high"]) == turn_count
             assert len(seat_series["games"]) == 3
             for turn_index in range(turn_count):  # 1e-3 absorbs the mean's 4-decimal rounding
                 assert seat_series["min"][turn_index] <= seat_series["mean"][turn_index] + 1e-3
                 assert seat_series["mean"][turn_index] <= seat_series["max"][turn_index] + 1e-3
+                # the bootstrap band for the mean lives inside the min-max envelope: every
+                # resampled mean is itself bounded by the extreme observations
+                assert seat_series["min"][turn_index] <= seat_series["ci_low"][turn_index] + 1e-3
+                assert seat_series["ci_low"][turn_index] <= seat_series["ci_high"][turn_index] + 1e-3
+                assert seat_series["ci_high"][turn_index] <= seat_series["max"][turn_index] + 1e-3
+                # the t-interval is symmetric about the mean but, unlike the bootstrap, is not
+                # bounded by the observed extremes (it can run wider at very small samples)
+                assert seat_series["t_low"][turn_index] <= seat_series["mean"][turn_index] + 1e-3
+                assert seat_series["mean"][turn_index] <= seat_series["t_high"][turn_index] + 1e-3
 
     json.dumps(model)  # must be embeddable in the HTML
 
