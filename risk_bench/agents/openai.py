@@ -16,6 +16,8 @@ class OpenAIAgent:
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
+        # Some models reject reasoning_effort (see _create_chat_completion); flipped off on first refusal.
+        self._reasoning_effort_supported = True
         self._client = openai.OpenAI(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -28,19 +30,41 @@ class OpenAIAgent:
         Returns:
             The assistant's reply, with text and/or tool calls populated.
         """
-        response = self._client.chat.completions.create(
-            model=self._model,
-            # newer OpenAI models reject 'max_tokens' in favor of 'max_completion_tokens'
-            max_completion_tokens=self._max_tokens,
-            reasoning_effort=self._reasoning_effort.value,
-            messages=[_to_openai_message(message=message) for message in messages],
-            tools=[_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit,
-        )
+        converted_messages = [_to_openai_message(message=message) for message in messages]
+        converted_tools = [_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit
+        response = self._create_chat_completion(messages=converted_messages, tools=converted_tools)
         parsed = _parse_response(message=response.choices[0].message)
         usage = response.usage
         if usage is None:
             return parsed
         return dataclasses.replace(parsed, input_tokens=usage.prompt_tokens, output_tokens=usage.completion_tokens)
+
+    def _create_chat_completion(
+        self,
+        messages: list[openai.types.chat.ChatCompletionMessageParam],
+        tools: list[openai.types.chat.ChatCompletionToolParam] | openai.Omit,
+    ) -> openai.types.chat.ChatCompletion:
+        try:
+            return self._client.chat.completions.create(
+                model=self._model,
+                # newer OpenAI models reject 'max_tokens' in favor of 'max_completion_tokens'
+                max_completion_tokens=self._max_tokens,
+                reasoning_effort=self._reasoning_effort.value if self._reasoning_effort_supported else openai.omit,
+                messages=messages,
+                tools=tools,
+            )
+        except openai.BadRequestError as error:
+            if not self._reasoning_effort_supported or not _rejects_reasoning_effort(error=error):
+                raise
+            # The cheap 'mini' tiers reject reasoning_effort when tools are present on chat
+            # completions; drop it for this agent's remaining calls and retry, so those models
+            # still run (just at the provider's default reasoning depth).
+            self._reasoning_effort_supported = False
+            return self._create_chat_completion(messages=messages, tools=tools)
+
+
+def _rejects_reasoning_effort(error: openai.BadRequestError) -> bool:
+    return getattr(error, "param", None) == "reasoning_effort" or "reasoning_effort" in str(error)
 
 
 def _to_openai_message(message: Message) -> openai.types.chat.ChatCompletionMessageParam:
