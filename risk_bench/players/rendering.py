@@ -58,6 +58,9 @@ def render_system_prompt(view: PlayerView) -> str:
         f"and eliminating players refers to plastic armies on a game board, exactly as at a family game "
         f"night.\n\n"
         f"{_RULES_SUMMARY}\n\n"
+        f"{render_board_topology()}\n"
+        f"Each turn you are shown the live board (who owns what, and army counts) separately; "
+        f"combine it with this fixed map to reason about borders.\n\n"
         f"Diplomacy: at the start of every turn there is a negotiation round where players may exchange "
         f"messages. The round runs in passes: as long as someone said something, everyone gets another "
         f"chance to reply (up to a limit), so proposals can be answered and agreed within the same turn. "
@@ -173,7 +176,8 @@ def render_board_text(owner: dict[Territory, PlayerId], armies: dict[Territory, 
         armies: The army count on every territory.
 
     Returns:
-        The board as prompt text; used in player prompts and by the commentator.
+        The board as prompt text; used by the commentator, which sees one
+        self-contained omniscient view per turn rather than a cached prefix.
     """
     lines = []
     for continent in Continent:
@@ -185,8 +189,51 @@ def render_board_text(owner: dict[Territory, PlayerId], armies: dict[Territory, 
     return "Board:\n" + "\n".join(lines)
 
 
+def render_board_topology() -> str:
+    """Serialize the fixed map: continents, their bonuses, and each territory's borders.
+
+    The topology never changes during a game, so it is sent once in the system
+    prompt (and cached there) instead of being re-sent with every decision.
+
+    Returns:
+        The static map as prompt text.
+    """
+    lines = []
+    for continent in Continent:
+        continent_info = BOARD.continent_info(continent)
+        lines.append(f"{continent} (+{continent_info.army_bonus} bonus for owning all of it):")
+        for territory in sorted(continent_info.territories):
+            neighbors = ", ".join(sorted(BOARD.neighbors_of(territory)))
+            lines.append(f"  {territory} borders: {neighbors}")
+    return "The map is fixed for the whole game. Territories by continent, with the bonus and borders:\n" + "\n".join(
+        lines
+    )
+
+
+def render_board_state(owner: dict[Territory, PlayerId], armies: dict[Territory, int]) -> str:
+    """Serialize the live board: who owns each territory and how many armies sit on it.
+
+    Adjacency is omitted because it is fixed and already given by the map in the
+    system prompt; only the changing ownership and army counts are sent each turn.
+
+    Args:
+        owner: The owning player of every territory.
+        armies: The army count on every territory.
+
+    Returns:
+        The current board state as prompt text.
+    """
+    lines = []
+    for continent in Continent:
+        continent_info = BOARD.continent_info(continent)
+        lines.append(f"{continent}:")
+        for territory in sorted(continent_info.territories):
+            lines.append(f"  {territory}: {owner[territory]} with {armies[territory]} armies")
+    return "Current board (owner and armies per territory):\n" + "\n".join(lines)
+
+
 def _render_board(view: PlayerView) -> str:
-    return render_board_text(owner=view.owner, armies=view.armies)
+    return render_board_state(owner=view.owner, armies=view.armies)
 
 
 def _render_hand(view: PlayerView) -> str:

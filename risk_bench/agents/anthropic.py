@@ -30,12 +30,13 @@ class AnthropicAgent:
             The assistant's reply, with text and/or tool calls populated.
         """
         system_prompt, conversation = _split_system(messages=messages)
+        system_blocks = _system_blocks(system_prompt=system_prompt)
 
         response = self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
             messages=conversation,
-            system=system_prompt if system_prompt else anthropic.omit,
+            system=system_blocks if system_blocks else anthropic.omit,
             tools=[_to_anthropic_tool(tool=tool) for tool in tools] if tools else anthropic.omit,
             output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
         )
@@ -50,6 +51,18 @@ def _split_system(messages: list[Message]) -> tuple[str | None, list[anthropic.t
     conversation = [_to_anthropic_message(message=m) for m in messages if m.role != "system"]
     system_prompt = "\n\n".join(system_parts) if system_parts else None
     return system_prompt, conversation
+
+
+def _system_blocks(system_prompt: str | None) -> list[anthropic.types.TextBlockParam]:
+    """Render the system prompt as a cached block so its tokens are billed once per prefix, not per call.
+
+    The system prompt is identical across all of a player's calls in a game, so
+    marking it ``ephemeral`` lets the API serve it from cache on every call after
+    the first (subject to the model's minimum cacheable prefix and cache TTL).
+    """
+    if not system_prompt:
+        return []
+    return [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
 
 
 def _to_anthropic_message(message: Message) -> anthropic.types.MessageParam:

@@ -13,6 +13,7 @@ def test_system_prompt_contains_identity_rules_and_secret_mission():
     assert request.view.own_mission.description in prompt
     assert "Never reveal your mission" in prompt
     assert "Rules summary" in prompt
+    assert "borders:" in prompt  # the fixed map (topology) is part of the cached system prompt
 
 
 def test_system_prompt_tells_players_to_use_exact_ids_in_messages():
@@ -37,7 +38,7 @@ def test_decision_prompt_shows_board_players_and_phase_instruction():
     prompt = render_decision_prompt(request=request)
 
     assert "alaska: alice with 4 armies" in prompt
-    assert "borders:" in prompt
+    assert "borders:" not in prompt  # adjacency lives in the system prompt now, not in every decision
     assert "Players:" in prompt
     assert "income 3/turn" in prompt  # alice: two territories, the floor of 3
     assert "income 32/turn" in prompt  # bob: 40 territories // 3 + every continent bonus except North America
