@@ -8,7 +8,6 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
@@ -47,8 +46,13 @@ ALL_ACTIONS: list[Action] = [
             TerritoryCard(design=CardDesign.WILD, territory=None),
         )
     ),
-    Attack(from_territory=Territory.EGYPT, to_territory=Territory.MIDDLE_EAST, attacker_dice=3),
-    Occupy(armies_to_move=4),
+    Attack(
+        from_territory=Territory.EGYPT,
+        to_territory=Territory.MIDDLE_EAST,
+        attacker_dice=3,
+        max_attacks=4,
+        armies_to_leave_behind=2,
+    ),
     Fortify(from_territory=Territory.BRAZIL, to_territory=Territory.PERU, count=2),
     EndAttackPhase(),
     SkipFortify(),

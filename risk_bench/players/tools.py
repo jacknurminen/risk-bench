@@ -7,7 +7,6 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
@@ -47,7 +46,6 @@ def tools_for_decision(request: DecisionRequest) -> list[Tool]:
     placements = _actions_of_type(request=request, action_type=PlaceArmies)
     trades = _actions_of_type(request=request, action_type=TradeCards)
     attacks = _actions_of_type(request=request, action_type=Attack)
-    occupations = _actions_of_type(request=request, action_type=Occupy)
     fortifications = _actions_of_type(request=request, action_type=Fortify)
 
     if placements:
@@ -56,8 +54,6 @@ def tools_for_decision(request: DecisionRequest) -> list[Tool]:
         tools.append(_trade_cards_tool(trades=trades))
     if attacks:
         tools.append(_attack_tool(attacks=attacks))
-    if occupations:
-        tools.append(_occupy_tool(occupations=occupations))
     if fortifications:
         tools.append(_fortify_tool(fortifications=fortifications))
     if any(isinstance(action, EndAttackPhase) for action in request.legal_actions):
@@ -82,11 +78,12 @@ def is_message_tool_call(call: ToolCall) -> bool:
 def parse_tool_call(call: ToolCall, request: DecisionRequest) -> list[Action]:
     """Convert a model tool call back into game actions, checking full legality.
 
-    Every constraint is verified against ``request.legal_actions``, so the
-    parsed actions are guaranteed to be accepted by the engine when applied
-    in order. Only ``place_armies`` produces more than one action: its
-    placements batch into a sequence so a whole reinforcement split costs a
-    single model response.
+    Every constraint is verified against ``request.legal_actions``. ``place_armies``
+    and ``attack`` produce a sequence of actions from a single call — a whole
+    reinforcement split or a multi-front assault costs one model response. Each
+    parsed action is legal against the current state, but later actions in an
+    attack batch may be invalidated by earlier ones (a depleted source, an
+    already-captured target); the runner skips any that no longer apply.
 
     Args:
         call: The tool call returned by the model.
@@ -105,9 +102,7 @@ def parse_tool_call(call: ToolCall, request: DecisionRequest) -> list[Action]:
         case "trade_cards":
             return [_parse_trade_cards(call=call, request=request)]
         case "attack":
-            return [_parse_attack(call=call, request=request)]
-        case "occupy":
-            return [_parse_occupy(call=call, request=request)]
+            return list(_parse_attack_launches(call=call, request=request))
         case "fortify":
             return [_parse_fortify(call=call, request=request)]
         case "end_attack_phase":
@@ -210,6 +205,10 @@ def _count_property(maximum: int, description: str) -> dict[str, Any]:
     return {"type": "integer", "minimum": 1, "maximum": maximum, "description": description}
 
 
+def _positive_int_property(description: str) -> dict[str, Any]:
+    return {"type": "integer", "minimum": 1, "description": description}
+
+
 def _actions_of_type[ActionT: Action](request: DecisionRequest, action_type: type[ActionT]) -> list[ActionT]:
     return [action for action in request.legal_actions if isinstance(action, action_type)]
 
@@ -268,36 +267,43 @@ def _attack_tool(attacks: list[Attack]) -> Tool:
     pair_descriptions = "; ".join(
         f"{attack.from_territory} -> {attack.to_territory} (up to {attack.attacker_dice} dice)" for attack in attacks
     )
+    launch_item = _object_schema(
+        properties={
+            "from_territory": _territory_property(
+                territories=sorted({attack.from_territory for attack in attacks}),
+                description="Your attacking territory.",
+            ),
+            "to_territory": _territory_property(
+                territories=sorted({attack.to_territory for attack in attacks}),
+                description="The enemy territory to attack.",
+            ),
+            "attacker_dice": _count_property(
+                maximum=max(attack.attacker_dice for attack in attacks),
+                description="How many dice to roll; more dice means more risk and more reward.",
+            ),
+        }
+    )
+    launch_item["properties"]["max_attacks"] = _positive_int_property(
+        description="Optional: how many times to keep rolling against this target, stopping early when you "
+        "capture it or the source can no longer attack. Defaults to 1 (a single roll)."
+    )
+    launch_item["properties"]["armies_to_leave_behind"] = _positive_int_property(
+        description="Optional: if you capture the target, how many armies stay in the source; the rest advance. "
+        "Defaults to 1 (advance all but one)."
+    )
     return Tool(
         name="attack",
-        description=f"Attack an adjacent enemy territory. Valid attacks: {pair_descriptions}.",
+        description="Attack adjacent enemy territories. Provide one or more launches; they resolve in the order "
+        "given, and any launch that is no longer legal by the time it runs (e.g. its source was depleted, or it "
+        f"targets a territory you already captured) is skipped. Valid attacks: {pair_descriptions}.",
         parameters=_object_schema(
             properties={
-                "from_territory": _territory_property(
-                    territories=sorted({attack.from_territory for attack in attacks}),
-                    description="Your attacking territory.",
-                ),
-                "to_territory": _territory_property(
-                    territories=sorted({attack.to_territory for attack in attacks}),
-                    description="The enemy territory to attack.",
-                ),
-                "attacker_dice": _count_property(
-                    maximum=max(attack.attacker_dice for attack in attacks),
-                    description="How many dice to roll; more dice means more risk and more reward.",
-                ),
-            }
-        ),
-    )
-
-
-def _occupy_tool(occupations: list[Occupy]) -> Tool:
-    maximum = occupations[0].armies_to_move
-    return Tool(
-        name="occupy",
-        description="Move armies into the territory you just conquered (at least one must stay behind).",
-        parameters=_object_schema(
-            properties={
-                "armies_to_move": _count_property(maximum=maximum, description="How many armies to move in."),
+                "launches": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "The attacks to attempt this move, resolved in order.",
+                    "items": launch_item,
+                },
             }
         ),
     )
@@ -368,10 +374,24 @@ def _parse_trade_cards(call: ToolCall, request: DecisionRequest) -> TradeCards:
     return trades[set_number - 1]
 
 
-def _parse_attack(call: ToolCall, request: DecisionRequest) -> Attack:
-    from_territory = _parse_territory(value=_required_argument(call=call, key="from_territory"))
-    to_territory = _parse_territory(value=_required_argument(call=call, key="to_territory"))
-    dice = _parse_positive_int(value=_required_argument(call=call, key="attacker_dice"), name="attacker_dice")
+def _parse_attack_launches(call: ToolCall, request: DecisionRequest) -> list[Attack]:
+    raw_launches = _required_argument(call=call, key="launches")
+    if not isinstance(raw_launches, list) or not raw_launches:
+        raise InvalidToolCallError("'launches' must be a non-empty array of attack objects.")
+    return [_parse_attack_launch(raw_launch=raw_launch, request=request) for raw_launch in raw_launches]
+
+
+def _parse_attack_launch(raw_launch: Any, request: DecisionRequest) -> Attack:
+    if not isinstance(raw_launch, dict):
+        raise InvalidToolCallError(
+            "Each launch must be an object with 'from_territory', 'to_territory', and 'attacker_dice'."
+        )
+    for required_key in ("from_territory", "to_territory", "attacker_dice"):
+        if required_key not in raw_launch:
+            raise InvalidToolCallError(f"Each launch must include '{required_key}'.")
+    from_territory = _parse_territory(value=raw_launch["from_territory"])
+    to_territory = _parse_territory(value=raw_launch["to_territory"])
+    dice = _parse_positive_int(value=raw_launch["attacker_dice"], name="attacker_dice")
     template = next(
         (
             attack
@@ -388,15 +408,19 @@ def _parse_attack(call: ToolCall, request: DecisionRequest) -> Attack:
         raise InvalidToolCallError(
             f"You can roll at most {template.attacker_dice} dice from {from_territory}, not {dice}."
         )
-    return Attack(from_territory=from_territory, to_territory=to_territory, attacker_dice=dice)
+    return Attack(
+        from_territory=from_territory,
+        to_territory=to_territory,
+        attacker_dice=dice,
+        max_attacks=_optional_positive_int(raw_launch=raw_launch, key="max_attacks"),
+        armies_to_leave_behind=_optional_positive_int(raw_launch=raw_launch, key="armies_to_leave_behind"),
+    )
 
 
-def _parse_occupy(call: ToolCall, request: DecisionRequest) -> Occupy:
-    armies = _parse_positive_int(value=_required_argument(call=call, key="armies_to_move"), name="armies_to_move")
-    template = _actions_of_type(request=request, action_type=Occupy)[0]
-    if armies > template.armies_to_move:
-        raise InvalidToolCallError(f"You can move at most {template.armies_to_move} armies in, not {armies}.")
-    return Occupy(armies_to_move=armies)
+def _optional_positive_int(raw_launch: dict[str, Any], key: str) -> int:
+    if key not in raw_launch:
+        return 1
+    return _parse_positive_int(value=raw_launch[key], name=key)
 
 
 def _parse_fortify(call: ToolCall, request: DecisionRequest) -> Fortify:

@@ -36,7 +36,6 @@ def make_state(
         phase=Phase.REINFORCE,
         current_player=next(iter(players)),
         armies_to_place=0,
-        pending_occupy=None,
         conquered_territory_this_turn=False,
         turn_number=1,
         winner=None,

@@ -2,7 +2,7 @@ import pytest
 
 from risk_bench.agents.base import ToolCall
 from risk_bench.chat.diplomacy import MessageVisibility
-from risk_bench.game.actions import Attack, EndAttackPhase, Occupy, PlaceArmies, SkipFortify, TradeCards
+from risk_bench.game.actions import Attack, EndAttackPhase, PlaceArmies, SkipFortify, TradeCards
 from risk_bench.game.cards import CardDesign, TerritoryCard
 from risk_bench.game.rules import legal_actions
 from risk_bench.game.types import Phase, PlayerId, Territory
@@ -71,9 +71,13 @@ def test_attack_phase_exposes_attack_and_end_attack_tools():
 
     assert [tool.name for tool in tools] == ["attack", "end_attack_phase", "send_public_message"]
     attack_tool = tools[0]
-    assert attack_tool.parameters["properties"]["from_territory"]["enum"] == ["alaska"]
-    assert set(attack_tool.parameters["properties"]["to_territory"]["enum"]) == {"kamchatka", "northwest_territory"}
-    assert attack_tool.parameters["properties"]["attacker_dice"]["maximum"] == 3
+    launch_item = attack_tool.parameters["properties"]["launches"]["items"]
+    assert launch_item["properties"]["from_territory"]["enum"] == ["alaska"]
+    assert set(launch_item["properties"]["to_territory"]["enum"]) == {"kamchatka", "northwest_territory"}
+    assert launch_item["properties"]["attacker_dice"]["maximum"] == 3
+    # the repeat and garrison knobs are offered but not required
+    assert {"max_attacks", "armies_to_leave_behind"} <= set(launch_item["properties"])
+    assert set(launch_item["required"]) == {"from_territory", "to_territory", "attacker_dice"}
     assert "alaska -> kamchatka (up to 3 dice)" in attack_tool.description
 
 
@@ -90,10 +94,52 @@ def test_reinforce_exposes_trade_and_placement_tools_with_bounds():
 
 def test_parse_round_trips_a_valid_attack():
     actions = parse_tool_call(
-        call=call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=2),
+        call=call("attack", launches=[{"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": 2}]),
         request=attack_request(),
     )
-    assert actions == [Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)]
+    assert actions == [
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.KAMCHATKA,
+            attacker_dice=2,
+            max_attacks=1,
+            armies_to_leave_behind=1,
+        )
+    ]
+
+
+def test_parse_batches_launches_in_order_with_optional_repeat_and_garrison():
+    actions = parse_tool_call(
+        call=call(
+            "attack",
+            launches=[
+                {"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": 3, "max_attacks": 5},
+                {
+                    "from_territory": "alaska",
+                    "to_territory": "northwest_territory",
+                    "attacker_dice": 1,
+                    "armies_to_leave_behind": 4,
+                },
+            ],
+        ),
+        request=attack_request(),
+    )
+    assert actions == [
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.KAMCHATKA,
+            attacker_dice=3,
+            max_attacks=5,
+            armies_to_leave_behind=1,
+        ),
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.NORTHWEST_TERRITORY,
+            attacker_dice=1,
+            max_attacks=1,
+            armies_to_leave_behind=4,
+        ),
+    ]
 
 
 def test_parse_round_trips_placement_trade_and_phase_tools():
@@ -150,11 +196,22 @@ def test_parse_rejects_illegal_or_malformed_calls_with_model_readable_messages()
     request = attack_request()
     rejections = {
         "unknown tool": call("launch_nukes"),
-        "illegal pair": call("attack", from_territory="alaska", to_territory="japan", attacker_dice=1),
-        "own territory": call("attack", from_territory="alaska", to_territory="alberta", attacker_dice=1),
-        "missing argument": call("attack", from_territory="alaska", to_territory="kamchatka"),
-        "bad territory": call("attack", from_territory="narnia", to_territory="kamchatka", attacker_dice=1),
-        "bad count type": call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice="three"),
+        "launches not an array": call("attack", launches="alaska"),
+        "empty launches": call("attack", launches=[]),
+        "malformed launch": call("attack", launches=["alaska"]),
+        "illegal pair": call(
+            "attack", launches=[{"from_territory": "alaska", "to_territory": "japan", "attacker_dice": 1}]
+        ),
+        "own territory": call(
+            "attack", launches=[{"from_territory": "alaska", "to_territory": "alberta", "attacker_dice": 1}]
+        ),
+        "missing argument": call("attack", launches=[{"from_territory": "alaska", "to_territory": "kamchatka"}]),
+        "bad territory": call(
+            "attack", launches=[{"from_territory": "narnia", "to_territory": "kamchatka", "attacker_dice": 1}]
+        ),
+        "bad count type": call(
+            "attack", launches=[{"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": "three"}]
+        ),
         "wrong phase tool": call("skip_fortify"),
     }
     for reason, bad_call in rejections.items():
@@ -172,23 +229,20 @@ def test_parse_rejects_counts_over_the_legal_maximum():
 
 def test_parse_accepts_whole_number_floats():
     actions = parse_tool_call(
-        call=call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=2.0),
+        call=call(
+            "attack", launches=[{"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": 2.0}]
+        ),
         request=attack_request(),
     )
-    assert actions == [Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=2)]
-
-
-def test_occupy_tool_round_trip():
-    request = attack_request()
-    occupy_request = DecisionRequest(view=request.view, legal_actions=[Occupy(armies_to_move=3)])
-
-    tools = tools_for_decision(request=occupy_request)
-    assert [tool.name for tool in tools] == ["occupy", "send_public_message"]
-
-    actions = parse_tool_call(call=call("occupy", armies_to_move=2), request=occupy_request)
-    assert actions == [Occupy(armies_to_move=2)]
-    with pytest.raises(InvalidToolCallError):
-        parse_tool_call(call=call("occupy", armies_to_move=4), request=occupy_request)
+    assert actions == [
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.KAMCHATKA,
+            attacker_dice=2,
+            max_attacks=1,
+            armies_to_leave_behind=1,
+        )
+    ]
 
 
 def test_fortify_tools_round_trip():

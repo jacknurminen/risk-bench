@@ -24,10 +24,9 @@ class PlayerState:
 class GameState:
     """The complete state of a game in progress.
 
-    ``players`` preserves turn order (dict insertion order). ``pending_occupy``
-    holds the (from, to) territory pair after a conquest while the attacker
-    decides how many armies to move in. The query methods are strictly
-    read-only derived values; all mutation goes through ``engine.apply_action``.
+    ``players`` preserves turn order (dict insertion order). The query methods
+    are strictly read-only derived values; all mutation goes through
+    ``engine.apply_action``.
     """
 
     armies: dict[Territory, int]
@@ -37,7 +36,6 @@ class GameState:
     phase: Phase
     current_player: PlayerId
     armies_to_place: int
-    pending_occupy: tuple[Territory, Territory] | None
     conquered_territory_this_turn: bool
     turn_number: int
     winner: PlayerId | None

@@ -27,13 +27,23 @@ def tool_call(name: str, **arguments) -> ToolCall:
 
 VALID_ATTACK_RESPONSE = Response(
     text=None,
-    tool_calls=(tool_call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=3),),
+    tool_calls=(
+        tool_call("attack", launches=[{"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": 3}]),
+    ),
 )
 INVALID_ATTACK_RESPONSE = Response(
     text=None,
-    tool_calls=(tool_call("attack", from_territory="alaska", to_territory="japan", attacker_dice=3),),
+    tool_calls=(
+        tool_call("attack", launches=[{"from_territory": "alaska", "to_territory": "japan", "attacker_dice": 3}]),
+    ),
 )
-EXPECTED_ATTACK = Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=3)
+EXPECTED_ATTACK = Attack(
+    from_territory=Territory.ALASKA,
+    to_territory=Territory.KAMCHATKA,
+    attacker_dice=3,
+    max_attacks=1,
+    armies_to_leave_behind=1,
+)
 
 
 def llm_player(agent: StubAgent) -> LLMPlayer:
@@ -201,7 +211,10 @@ def test_a_message_call_alongside_the_action_becomes_table_talk():
     response = Response(
         text=None,
         tool_calls=(
-            tool_call("attack", from_territory="alaska", to_territory="kamchatka", attacker_dice=3),
+            tool_call(
+                "attack",
+                launches=[{"from_territory": "alaska", "to_territory": "kamchatka", "attacker_dice": 3}],
+            ),
             tool_call("send_public_message", text="This is for Ukraine!"),
         ),
     )

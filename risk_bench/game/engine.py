@@ -8,13 +8,12 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
 )
 from risk_bench.game.cards import create_shuffled_deck, territories_awarding_extra_armies, trade_in_bonus
-from risk_bench.game.combat import max_defender_dice, resolve_battle
+from risk_bench.game.combat import max_attacker_dice, max_defender_dice, resolve_battle
 from risk_bench.game.events import (
     ArmiesPlaced,
     BattleResolved,
@@ -88,7 +87,6 @@ def setup_game(player_ids: list[PlayerId], rng: random.Random) -> GameState:
         phase=Phase.SETUP_PLACEMENT,
         current_player=player_ids[0],
         armies_to_place=0,
-        pending_occupy=None,
         conquered_territory_this_turn=False,
         turn_number=0,
         winner=None,
@@ -100,10 +98,11 @@ def setup_game(player_ids: list[PlayerId], rng: random.Random) -> GameState:
 def apply_action(state: GameState, action: Action, rng: random.Random) -> StepResult:
     """Apply a validated action and advance phase, turn, and win bookkeeping.
 
-    Handles all consequences: battle resolution, conquests and the pending-occupy
-    marker, player eliminations (including card transfer), card draws at turn end,
-    and mission-completion checks after every state change — missions can complete
-    mid-attack-phase on a conquest or elimination.
+    Handles all consequences: battle resolution (a single attack may repeat
+    until the target falls), the conquest's army advance, player eliminations
+    (including card transfer), card draws at turn end, and mission-completion
+    checks after every state change — missions can complete mid-attack-phase on
+    a conquest or elimination.
 
     Args:
         state: The current game state; it is not mutated.
@@ -132,8 +131,6 @@ def apply_action(state: GameState, action: Action, rng: random.Random) -> StepRe
             events += _apply_trade_cards(state=next_state, action=action)
         case Attack():
             events += _apply_attack(state=next_state, action=action, rng=rng)
-        case Occupy():
-            events += _apply_occupy(state=next_state, action=action)
         case Fortify():
             events += _apply_fortify(state=next_state, action=action)
             turn_ended = True
@@ -213,32 +210,48 @@ def _apply_trade_cards(state: GameState, action: TradeCards) -> list[GameEvent]:
 def _apply_attack(state: GameState, action: Attack, rng: random.Random) -> list[GameEvent]:
     attacker = state.current_player
     defender = state.owner[action.to_territory]
-    outcome = resolve_battle(
-        attacker_dice_count=action.attacker_dice,
-        defender_dice_count=max_defender_dice(armies_in_territory=state.armies[action.to_territory]),
-        rng=rng,
-    )
-    state.armies[action.from_territory] -= outcome.attacker_losses
-    state.armies[action.to_territory] -= outcome.defender_losses
-    events: list[GameEvent] = [
-        BattleResolved(
-            attacker=attacker,
-            defender=defender,
-            from_territory=action.from_territory,
-            to_territory=action.to_territory,
-            outcome=outcome,
+    events: list[GameEvent] = []
+    for _ in range(action.max_attacks):
+        dice_count = min(
+            action.attacker_dice, max_attacker_dice(armies_in_territory=state.armies[action.from_territory])
         )
-    ]
-    if state.armies[action.to_territory] > 0:
-        return events
+        if dice_count == 0:
+            break  # the attacking territory is down to its last army and can no longer roll
+        outcome = resolve_battle(
+            attacker_dice_count=dice_count,
+            defender_dice_count=max_defender_dice(armies_in_territory=state.armies[action.to_territory]),
+            rng=rng,
+        )
+        state.armies[action.from_territory] -= outcome.attacker_losses
+        state.armies[action.to_territory] -= outcome.defender_losses
+        events.append(
+            BattleResolved(
+                attacker=attacker,
+                defender=defender,
+                from_territory=action.from_territory,
+                to_territory=action.to_territory,
+                outcome=outcome,
+            )
+        )
+        if state.armies[action.to_territory] <= 0:
+            events += _occupy_conquered_territory(state=state, action=action, attacker=attacker, defender=defender)
+            break
+    return events
 
+
+def _occupy_conquered_territory(
+    state: GameState, action: Attack, attacker: PlayerId, defender: PlayerId
+) -> list[GameEvent]:
+    from_armies = state.armies[action.from_territory]
+    armies_to_leave_behind = max(1, min(action.armies_to_leave_behind, from_armies - 1))
+    armies_to_move = from_armies - armies_to_leave_behind
+    state.armies[action.from_territory] -= armies_to_move
+    state.armies[action.to_territory] += armies_to_move
     state.owner[action.to_territory] = attacker
-    state.pending_occupy = (action.from_territory, action.to_territory)
-    state.phase = Phase.OCCUPY
     state.conquered_territory_this_turn = True
-    events.append(
+    events: list[GameEvent] = [
         TerritoryConquered(player_id=attacker, territory=action.to_territory, from_territory=action.from_territory)
-    )
+    ]
     if not state.territories_owned_by(player_id=defender):
         events += _eliminate_player(state=state, eliminated_player=defender, eliminated_by=attacker)
     return events
@@ -250,16 +263,6 @@ def _eliminate_player(state: GameState, eliminated_player: PlayerId, eliminated_
     state.players[eliminated_by].cards.extend(eliminated_state.cards)
     eliminated_state.cards.clear()
     return [PlayerEliminated(eliminated_player=eliminated_player, eliminated_by=eliminated_by)]
-
-
-def _apply_occupy(state: GameState, action: Occupy) -> list[GameEvent]:
-    assert state.pending_occupy is not None
-    from_territory, to_territory = state.pending_occupy
-    state.armies[from_territory] -= action.armies_to_move
-    state.armies[to_territory] += action.armies_to_move
-    state.pending_occupy = None
-    state.phase = Phase.ATTACK
-    return []
 
 
 def _apply_fortify(state: GameState, action: Fortify) -> list[GameEvent]:

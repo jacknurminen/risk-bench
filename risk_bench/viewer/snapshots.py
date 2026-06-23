@@ -8,7 +8,6 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
@@ -329,10 +328,11 @@ def _describe_action(player_id: PlayerId, action: Action) -> str:
                 "wild" if card.territory is None else f"{card.design}({card.territory})" for card in cards
             )
             return f"{player_id} trades in {labels}"
-        case Attack(from_territory=from_territory, to_territory=to_territory, attacker_dice=dice):
-            return f"{player_id} attacks {to_territory} from {from_territory} with {dice} dice"
-        case Occupy(armies_to_move=armies_to_move):
-            return f"{player_id} moves {armies_to_move} armies into the conquered territory"
+        case Attack(
+            from_territory=from_territory, to_territory=to_territory, attacker_dice=dice, max_attacks=max_attacks
+        ):
+            repeat = f" up to {max_attacks} times" if max_attacks > 1 else ""
+            return f"{player_id} attacks {to_territory} from {from_territory} with {dice} dice{repeat}"
         case Fortify(from_territory=from_territory, to_territory=to_territory, count=count):
             return f"{player_id} fortifies {count} armies from {from_territory} to {to_territory}"
         case EndAttackPhase():

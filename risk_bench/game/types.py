@@ -67,6 +67,5 @@ class Phase(StrEnum):
     SETUP_PLACEMENT = "setup_placement"
     REINFORCE = "reinforce"
     ATTACK = "attack"
-    OCCUPY = "occupy"
     FORTIFY = "fortify"
     GAME_OVER = "game_over"

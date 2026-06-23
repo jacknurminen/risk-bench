@@ -18,7 +18,7 @@ from risk_bench.game.serialization import (
 from risk_bench.game.state import GameState
 from risk_bench.game.types import PlayerId
 
-SCHEMA_VERSION: Final[int] = 1
+SCHEMA_VERSION: Final[int] = 2  # v2 folds the separate occupy action into the attack that conquers
 
 
 @dataclass(frozen=True)

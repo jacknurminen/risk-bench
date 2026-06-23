@@ -26,9 +26,11 @@ fortify (one move between adjacent owned territories, then your turn ends).
 - Reinforcements: territories owned / 3 (minimum 3), plus continent bonuses: North America 5, \
 South America 2, Europe 5, Africa 3, Asia 7, Oceania 2.
 - Combat: the attacker rolls up to 3 dice (always one fewer than the armies in the attacking territory), \
-the defender automatically rolls up to 2. Highest dice are compared pairwise; the defender wins ties.
-- Conquering: you must move at least 1 army into the conquered territory. Conquering at least one \
-territory during your turn earns one territory card at the end of it.
+the defender automatically rolls up to 2. Highest dice are compared pairwise; the defender wins ties. \
+You may launch several attacks in one move and repeat against a single target until it falls.
+- Conquering: when you capture a territory your surviving attackers advance into it; you choose how many \
+stay behind (all but one by default). Conquering at least one territory during your turn earns one \
+territory card at the end of it.
 - Cards: trade sets of three (all the same design or one of each; wilds substitute for any design). \
 Bonuses: 3 infantry = 4 armies, 3 cavalry = 6, 3 artillery = 8, one of each = 10, plus 2 extra armies \
 on each pictured territory you own. Holding 5 or more cards forces a trade.
@@ -259,9 +261,10 @@ def _phase_instruction(view: PlayerView) -> str:
                 f"in one call. Trade cards first if you wish."
             )
         case Phase.ATTACK:
-            return "Attack: strike adjacent enemy territories, or end the attack phase."
-        case Phase.OCCUPY:
-            return "You conquered a territory: choose how many armies move into it."
+            return (
+                "Attack: launch one or more attacks on adjacent enemy territories (you can repeat against a "
+                "target until it falls), or end the attack phase."
+            )
         case Phase.FORTIFY:
             return "Fortify: optionally move armies between two adjacent territories you own; this ends your turn."
         case Phase.GAME_OVER:

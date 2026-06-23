@@ -7,7 +7,6 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
@@ -33,7 +32,6 @@ _ACTION_KINDS: Final[dict[type, str]] = {
     PlaceArmies: "place_armies",
     TradeCards: "trade_cards",
     Attack: "attack",
-    Occupy: "occupy",
     Fortify: "fortify",
     EndAttackPhase: "end_attack_phase",
     SkipFortify: "skip_fortify",
@@ -88,9 +86,9 @@ def action_from_json(data: dict[str, Any]) -> Action:
                 from_territory=Territory(data["from_territory"]),
                 to_territory=Territory(data["to_territory"]),
                 attacker_dice=int(data["attacker_dice"]),
+                max_attacks=int(data["max_attacks"]),
+                armies_to_leave_behind=int(data["armies_to_leave_behind"]),
             )
-        case "occupy":
-            return Occupy(armies_to_move=int(data["armies_to_move"]))
         case "fortify":
             return Fortify(
                 from_territory=Territory(data["from_territory"]),

@@ -2,11 +2,18 @@ import random
 
 import pytest
 
-from risk_bench.game.actions import Attack, Occupy, PlaceArmies, SkipFortify, TradeCards
+from risk_bench.game.actions import Attack, PlaceArmies, SkipFortify, TradeCards
 from risk_bench.game.board import BOARD
 from risk_bench.game.cards import CardDesign, TerritoryCard
 from risk_bench.game.engine import IllegalActionError, apply_action, setup_game
-from risk_bench.game.events import CardDrawn, MissionCompleted, PlayerEliminated, TerritoryConquered, TurnStarted
+from risk_bench.game.events import (
+    BattleResolved,
+    CardDrawn,
+    MissionCompleted,
+    PlayerEliminated,
+    TerritoryConquered,
+    TurnStarted,
+)
 from risk_bench.game.rules import legal_actions, reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
@@ -39,7 +46,13 @@ def alaska_attack_state(alaska_armies: int) -> GameState:
     return state
 
 
-ATTACK_NORTHWEST = Attack(from_territory=Territory.ALASKA, to_territory=Territory.NORTHWEST_TERRITORY, attacker_dice=3)
+ATTACK_NORTHWEST = Attack(
+    from_territory=Territory.ALASKA,
+    to_territory=Territory.NORTHWEST_TERRITORY,
+    attacker_dice=3,
+    max_attacks=1,
+    armies_to_leave_behind=1,
+)
 
 
 def test_setup_deals_all_territories_evenly_with_one_army_each():
@@ -137,25 +150,59 @@ def test_unsuccessful_attack_only_costs_armies():
     assert result.state.phase is Phase.ATTACK
 
 
-def test_conquering_a_territory_requires_an_occupy_move():
+def test_conquering_a_territory_advances_armies_and_stays_in_the_attack_phase():
     state = alaska_attack_state(alaska_armies=4)
 
-    conquered = apply_action(state=state, action=ATTACK_NORTHWEST, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
-    assert conquered.state.phase is Phase.OCCUPY
-    assert conquered.state.owner[Territory.NORTHWEST_TERRITORY] == ALICE
-    assert conquered.state.armies[Territory.NORTHWEST_TERRITORY] == 0
-    assert conquered.state.pending_occupy == (Territory.ALASKA, Territory.NORTHWEST_TERRITORY)
+    result = apply_action(state=state, action=ATTACK_NORTHWEST, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
+
+    assert result.state.owner[Territory.NORTHWEST_TERRITORY] == ALICE
+    # the default leave-behind of 1 advances all but one surviving attacker into the conquered territory
+    assert result.state.armies[Territory.ALASKA] == 1
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 3
+    assert result.state.phase is Phase.ATTACK
     assert (
         TerritoryConquered(player_id=ALICE, territory=Territory.NORTHWEST_TERRITORY, from_territory=Territory.ALASKA)
-        in conquered.events
+        in result.events
     )
-    assert legal_actions(state=conquered.state) == [Occupy(armies_to_move=3)]
 
-    occupied = apply_action(state=conquered.state, action=Occupy(armies_to_move=2), rng=random.Random(0))
-    assert occupied.state.armies[Territory.ALASKA] == 2
-    assert occupied.state.armies[Territory.NORTHWEST_TERRITORY] == 2
-    assert occupied.state.phase is Phase.ATTACK
-    assert occupied.state.pending_occupy is None
+
+def test_armies_to_leave_behind_controls_how_many_advance():
+    state = alaska_attack_state(alaska_armies=4)
+    attack = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.NORTHWEST_TERRITORY,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=3,
+    )
+
+    result = apply_action(state=state, action=attack, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
+
+    assert result.state.armies[Territory.ALASKA] == 3
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 1
+
+
+def test_attack_repeats_until_the_target_falls_or_the_count_runs_out():
+    state = alaska_attack_state(alaska_armies=5)
+    state.armies[Territory.NORTHWEST_TERRITORY] = 2
+    attack = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.NORTHWEST_TERRITORY,
+        attacker_dice=3,
+        max_attacks=3,
+        armies_to_leave_behind=1,
+    )
+    # round one trades a loss each way (defender 2 -> 1, alaska 5 -> 4); round two captures it
+    rolls = [6, 1, 1, 5, 2] + [6, 2, 2, 1]
+
+    result = apply_action(state=state, action=attack, rng=ScriptedRandom(rolls))
+
+    battles = [event for event in result.events if isinstance(event, BattleResolved)]
+    assert len(battles) == 2
+    assert result.state.owner[Territory.NORTHWEST_TERRITORY] == ALICE
+    assert result.state.armies[Territory.ALASKA] == 1
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 3
+    assert result.state.phase is Phase.ATTACK
 
 
 def test_eliminating_a_player_transfers_their_cards():
@@ -190,7 +237,13 @@ def test_completing_a_mission_by_conquest_wins_the_game():
     )
     state.owner[Territory.JAPAN] = CARLA  # keep carla alive so this is a mission win, not last-standing
     state.phase = Phase.ATTACK
-    attack = Attack(from_territory=Territory.NORTH_AFRICA, to_territory=Territory.WESTERN_EUROPE, attacker_dice=3)
+    attack = Attack(
+        from_territory=Territory.NORTH_AFRICA,
+        to_territory=Territory.WESTERN_EUROPE,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=1,
+    )
 
     result = apply_action(state=state, action=attack, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
 
@@ -242,7 +295,13 @@ def test_illegal_actions_are_rejected_with_a_reason():
     with pytest.raises(IllegalActionError, match="not adjacent"):
         apply_action(
             state=state,
-            action=Attack(from_territory=Territory.ALASKA, to_territory=Territory.JAPAN, attacker_dice=3),
+            action=Attack(
+                from_territory=Territory.ALASKA,
+                to_territory=Territory.JAPAN,
+                attacker_dice=3,
+                max_attacks=1,
+                armies_to_leave_behind=1,
+            ),
             rng=random.Random(0),
         )
 
@@ -275,10 +334,7 @@ def _assert_invariants(state: GameState) -> None:
     for territory in Territory:
         owner = state.owner[territory]
         assert state.players[owner].eliminated_by is None, f"{territory} owned by eliminated player"
-        if state.pending_occupy is not None and territory == state.pending_occupy[1]:
-            assert state.armies[territory] == 0
-        else:
-            assert state.armies[territory] >= 1, f"{territory} has {state.armies[territory]} armies"
+        assert state.armies[territory] >= 1, f"{territory} has {state.armies[territory]} armies"
     if state.winner is None:
         living_players = [p for p, player in state.players.items() if player.eliminated_by is None]
         assert len(living_players) >= 2

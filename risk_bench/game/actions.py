@@ -21,18 +21,20 @@ class TradeCards:
 
 @dataclass(frozen=True)
 class Attack:
-    """Roll dice against an adjacent enemy territory."""
+    """Roll dice against an adjacent enemy territory, optionally repeating until it falls.
+
+    ``max_attacks`` is how many times to keep rolling against the target,
+    stopping early on capture or when the source can no longer attack.
+    ``armies_to_leave_behind`` is how many armies stay in the source if the
+    target is captured; the rest advance into it (clamped so at least one army
+    stays and at least one advances).
+    """
 
     from_territory: Territory
     to_territory: Territory
     attacker_dice: int
-
-
-@dataclass(frozen=True)
-class Occupy:
-    """Move armies into a just-conquered territory."""
-
-    armies_to_move: int
+    max_attacks: int
+    armies_to_leave_behind: int
 
 
 @dataclass(frozen=True)
@@ -54,4 +56,4 @@ class SkipFortify:
     """End the turn without fortifying."""
 
 
-type Action = PlaceArmies | TradeCards | Attack | Occupy | Fortify | EndAttackPhase | SkipFortify
+type Action = PlaceArmies | TradeCards | Attack | Fortify | EndAttackPhase | SkipFortify

@@ -42,7 +42,7 @@ def test_decision_prompt_shows_board_players_and_phase_instruction():
     assert "Players:" in prompt
     assert "income 3/turn" in prompt  # alice: two territories, the floor of 3
     assert "income 32/turn" in prompt  # bob: 40 territories // 3 + every continent bonus except North America
-    assert "Attack: strike adjacent enemy territories" in prompt
+    assert "Attack: launch one or more attacks on adjacent enemy territories" in prompt
     assert "Reminder of your secret mission" in prompt
 
 

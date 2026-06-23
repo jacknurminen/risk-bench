@@ -5,7 +5,6 @@ from risk_bench.game.actions import (
     Attack,
     EndAttackPhase,
     Fortify,
-    Occupy,
     PlaceArmies,
     SkipFortify,
     TradeCards,
@@ -38,8 +37,6 @@ def legal_actions(state: GameState) -> list[Action]:
             return _legal_reinforce_actions(state=state)
         case Phase.ATTACK:
             return _legal_attacks(state=state)
-        case Phase.OCCUPY:
-            return _legal_occupations(state=state)
         case Phase.FORTIFY:
             return _legal_fortifications(state=state)
         case Phase.GAME_OVER:
@@ -66,8 +63,6 @@ def validate_action(state: GameState, action: Action) -> str | None:
             return _validate_trade_cards(state=state, action=action)
         case Attack():
             return _validate_attack(state=state, action=action)
-        case Occupy():
-            return _validate_occupy(state=state, action=action)
         case Fortify():
             return _validate_fortify(state=state, action=action)
         case EndAttackPhase():
@@ -131,15 +126,15 @@ def _legal_attacks(state: GameState) -> list[Action]:
         for to_territory in sorted(BOARD.neighbors_of(from_territory)):
             if state.owner[to_territory] != state.current_player:
                 attacks.append(
-                    Attack(from_territory=from_territory, to_territory=to_territory, attacker_dice=dice_limit)
+                    Attack(
+                        from_territory=from_territory,
+                        to_territory=to_territory,
+                        attacker_dice=dice_limit,
+                        max_attacks=1,
+                        armies_to_leave_behind=1,
+                    )
                 )
     return attacks + [EndAttackPhase()]
-
-
-def _legal_occupations(state: GameState) -> list[Action]:
-    assert state.pending_occupy is not None
-    from_territory, _ = state.pending_occupy
-    return [Occupy(armies_to_move=state.armies[from_territory] - 1)]
 
 
 def _legal_fortifications(state: GameState) -> list[Action]:
@@ -204,18 +199,10 @@ def _validate_attack(state: GameState, action: Attack) -> str | None:
         return f"{action.from_territory} needs at least 2 armies to attack."
     if not 1 <= action.attacker_dice <= dice_limit:
         return f"You can roll between 1 and {dice_limit} dice from {action.from_territory}."
-    return None
-
-
-def _validate_occupy(state: GameState, action: Occupy) -> str | None:
-    phase_rejection = _require_phase(state=state, expected=Phase.OCCUPY, action_name="Occupying")
-    if phase_rejection is not None:
-        return phase_rejection
-    assert state.pending_occupy is not None
-    from_territory, _ = state.pending_occupy
-    movable_armies = state.armies[from_territory] - 1
-    if not 1 <= action.armies_to_move <= movable_armies:
-        return f"You must move between 1 and {movable_armies} armies into the conquered territory."
+    if action.max_attacks < 1:
+        return f"max_attacks must be at least 1, not {action.max_attacks}."
+    if action.armies_to_leave_behind < 1:
+        return f"armies_to_leave_behind must be at least 1, not {action.armies_to_leave_behind}."
     return None
 
 

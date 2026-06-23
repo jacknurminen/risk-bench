@@ -104,8 +104,20 @@ def test_attack_phase_offers_attacks_on_adjacent_enemies_only():
     # Alaska (4 armies) can attack its enemy neighbors with up to 3 dice; Alberta has 1 army and cannot attack.
     # Alberta is Alaska's neighbor but owned by Alice, so it is not a target.
     assert actions == [
-        Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=3),
-        Attack(from_territory=Territory.ALASKA, to_territory=Territory.NORTHWEST_TERRITORY, attacker_dice=3),
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.KAMCHATKA,
+            attacker_dice=3,
+            max_attacks=1,
+            armies_to_leave_behind=1,
+        ),
+        Attack(
+            from_territory=Territory.ALASKA,
+            to_territory=Territory.NORTHWEST_TERRITORY,
+            attacker_dice=3,
+            max_attacks=1,
+            armies_to_leave_behind=1,
+        ),
         EndAttackPhase(),
     ]
 
@@ -131,21 +143,39 @@ def test_game_over_has_no_legal_actions():
 def test_validate_rejects_attacking_own_territory():
     state = alaska_corner_state(alaska_armies=4)
     state.phase = Phase.ATTACK
-    action = Attack(from_territory=Territory.ALASKA, to_territory=Territory.ALBERTA, attacker_dice=3)
+    action = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.ALBERTA,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=1,
+    )
     assert validate_action(state=state, action=action) is not None
 
 
 def test_validate_rejects_attacking_non_adjacent_territory():
     state = alaska_corner_state(alaska_armies=4)
     state.phase = Phase.ATTACK
-    action = Attack(from_territory=Territory.ALASKA, to_territory=Territory.JAPAN, attacker_dice=3)
+    action = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.JAPAN,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=1,
+    )
     assert validate_action(state=state, action=action) is not None
 
 
 def test_validate_rejects_attacking_with_too_many_dice():
     state = alaska_corner_state(alaska_armies=3)
     state.phase = Phase.ATTACK
-    action = Attack(from_territory=Territory.ALASKA, to_territory=Territory.KAMCHATKA, attacker_dice=3)
+    action = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.KAMCHATKA,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=1,
+    )
     rejection = validate_action(state=state, action=action)
     assert rejection is not None and "between 1 and 2" in rejection
 

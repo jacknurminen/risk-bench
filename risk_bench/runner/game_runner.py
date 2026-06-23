@@ -6,7 +6,7 @@ from risk_bench.chat.diplomacy import ChatMessage, ChatTranscript, MessageVisibi
 from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached
 from risk_bench.game.missions import Mission
-from risk_bench.game.rules import legal_actions
+from risk_bench.game.rules import legal_actions, validate_action
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
@@ -182,6 +182,13 @@ class GameRunner:
         )
         decision = self._players[acting_player].decide_action(request)
         for action in decision.actions:
+            rejection = validate_action(state=state, action=action)
+            if rejection is not None:
+                # an earlier action in this batch (e.g. an attack that depleted or captured) made
+                # this one illegal; skip it and keep going rather than abort the whole move
+                if self._verbose:
+                    print(f"[skipped] {acting_player}: {rejection}")
+                continue
             result = apply_action(state=state, action=action, rng=rng)
             if self._journal is not None:
                 self._journal.write_action(player_id=acting_player, action=action)
@@ -189,7 +196,7 @@ class GameRunner:
             self._record_events(state=state, events=result.events)
             state = result.state
             if state.phase is Phase.GAME_OVER:
-                break  # a placement can complete an occupy-with-two-armies mission mid-batch
+                break  # an action mid-batch (a winning placement or conquest) can end the game
         self._record_thought(player_id=acting_player, thought=decision.thought)
         if decision.chat_message is not None:
             self._deliver_message(message=decision.chat_message)
