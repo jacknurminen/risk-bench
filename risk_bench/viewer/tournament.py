@@ -18,6 +18,7 @@ import random
 from pathlib import Path
 from typing import Any
 
+from risk_bench.agents.tracing import TOKEN_CATEGORY_ORDER
 from risk_bench.viewer.snapshots import build_view_model
 
 # resamples per per-turn bootstrap interval; 500 gives a visually stable 2.5/97.5
@@ -132,9 +133,65 @@ def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
             ]
             for metric in CHART_METRICS
         },
+        "per_turn_usage": _merge_per_turn_usage(member_models=[model for _, model in members]),
         "games": [_game_row(game_id=game_id, model=model) for game_id, model in members],
         "table": _aggregate_table(player_names=player_names, members=members),
     }
+
+
+def _merge_per_turn_usage(member_models: list[dict[str, Any]]) -> dict[str, Any]:
+    """Average each game's per-turn token and cost series across the tournament.
+
+    Merges both the by-category and by-caller breakdowns. At every turn only the
+    games that reached it contribute, so a group a game happened not to use that
+    turn counts as zero rather than being skipped, and finished games never lift
+    or drop the late-game means by dropping out silently.
+    """
+    per_game = [model["stats"]["per_turn_usage"] for model in member_models]
+    turns = sorted({turn for game in per_game for turn in game["turns"]})
+    categories = [
+        category for category in TOKEN_CATEGORY_ORDER if any(category in game["categories"] for game in per_game)
+    ]
+    callers: list[str] = []
+    for game in per_game:
+        callers.extend(caller for caller in game["callers"] if caller not in callers)
+    turn_positions = [{turn: position for position, turn in enumerate(game["turns"])} for game in per_game]
+    return {
+        "turns": turns,
+        "categories": categories,
+        "callers": callers,
+        "by_category": {
+            category: _mean_usage_series(per_game, turn_positions, "by_category", category, turns)
+            for category in categories
+        },
+        "by_caller": {
+            caller: _mean_usage_series(per_game, turn_positions, "by_caller", caller, turns) for caller in callers
+        },
+    }
+
+
+def _mean_usage_series(
+    per_game: list[dict[str, Any]],
+    turn_positions: list[dict[int, int]],
+    breakdown: str,
+    group: str,
+    turns: list[int],
+) -> dict[str, list[float]]:
+    measures = ("input_tokens", "output_tokens", "input_cost", "output_cost")
+    means: dict[str, list[float]] = {measure: [] for measure in measures}
+    for turn in turns:
+        collected: dict[str, list[float]] = {measure: [] for measure in measures}
+        for game, positions in zip(per_game, turn_positions):
+            position = positions.get(turn)
+            if position is None:
+                continue  # this game never reached this turn
+            series = game[breakdown].get(group)
+            for measure in measures:
+                collected[measure].append(series[measure][position] if series is not None else 0)
+        for measure in measures:
+            values = collected[measure]
+            means[measure].append(round(sum(values) / len(values), 4) if values else 0)
+    return means
 
 
 def _merge_metric(

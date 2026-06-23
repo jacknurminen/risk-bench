@@ -2,7 +2,7 @@ import random
 from pathlib import Path
 from typing import Any, Final
 
-from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
+from risk_bench.agents.tracing import per_turn_usage, trace_path_for_journal, usage_by_caller
 from risk_bench.game.actions import (
     Action,
     Attack,
@@ -44,6 +44,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     if not records or records[0].get("type") != "header":
         raise ValueError(f"{journal_path} is not a game journal (missing header line).")
     header = records[0]
+    trace_path = trace_path_for_journal(journal_path=journal_path)
 
     player_names: list[PlayerId] = list(header["player_specs"])
     rng = random.Random(int(header["seed"]))
@@ -134,7 +135,8 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 combat_totals=combat_totals,
                 markers=markers,
             ),
-            "usage": usage_by_caller(trace_path=trace_path_for_journal(journal_path=journal_path)),
+            "usage": usage_by_caller(trace_path=trace_path),
+            "per_turn_usage": per_turn_usage(trace_path=trace_path),
         },
     }
 
