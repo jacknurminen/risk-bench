@@ -31,6 +31,7 @@ class JournalHeader:
     max_turns: int
     allow_private_messages: bool
     max_negotiation_rounds: int
+    commentators: list[str]  # the commentator panel: one model spec per member, in panel order (empty for none)
 
 
 @dataclass
@@ -71,6 +72,7 @@ class JournalWriter:
                 "max_turns": header.max_turns,
                 "allow_private_messages": header.allow_private_messages,
                 "max_negotiation_rounds": header.max_negotiation_rounds,
+                "commentators": header.commentators,
             }
         )
 
@@ -122,17 +124,31 @@ class JournalWriter:
         """
         self._write_line(record={"type": "note", "player": player_id, "turn": turn_number, "text": text})
 
-    def write_commentary(self, turn_number: int, rubric: str, text: str, tags: list[dict[str, str]]) -> None:
-        """Record one commentator's take on a completed turn; observational only.
+    def write_commentary(
+        self, turn_number: int, commentator: str, commentator_index: int, text: str, tags: list[dict[str, str]]
+    ) -> None:
+        """Record one panel member's take on a completed turn; observational only.
+
+        Every member annotates the same turn over the full vocabulary, and each member's record
+        is kept separately (never merged) so inter-annotator agreement can be read off the panel.
 
         Args:
             turn_number: The turn the commentary covers.
-            rubric: The rubric this commentary was produced under (e.g. 'skill', 'conduct').
+            commentator: The member's model spec (its stable panel identity).
+            commentator_index: The member's position in the panel roster; the key that
+                distinguishes one member's records from another's within a turn.
             text: The commentary prose.
             tags: Structured behavior tags as {player, behavior, note} dicts.
         """
         self._write_line(
-            record={"type": "commentary", "turn": turn_number, "rubric": rubric, "text": text, "tags": tags}
+            record={
+                "type": "commentary",
+                "turn": turn_number,
+                "commentator": commentator,
+                "commentator_index": commentator_index,
+                "text": text,
+                "tags": tags,
+            }
         )
 
     def write_result(self, winner: PlayerId | None, turn_count: int) -> None:
@@ -220,4 +236,6 @@ def _header_from_json(data: dict[str, Any]) -> JournalHeader:
         allow_private_messages=bool(data["allow_private_messages"]),
         # journals written before multi-pass negotiation ran exactly one pass per turn
         max_negotiation_rounds=int(data.get("max_negotiation_rounds", 1)),
+        # journals written before the commentator panel carried no roster line
+        commentators=[str(spec) for spec in data.get("commentators", [])],
     )

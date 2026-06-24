@@ -51,7 +51,7 @@ class NewGameRequest(BaseModel):
 
     players: list[str]
     seed: int = 0
-    commentator: str | None = None
+    commentators: list[str] = Field(default_factory=list)
     max_turns: int | None = None
     parallel_games: int = Field(default=1, ge=1, le=20)
 

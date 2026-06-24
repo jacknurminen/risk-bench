@@ -1,7 +1,9 @@
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Any, Final
 
+from risk_bench import specs
 from risk_bench.agents.tracing import per_turn_usage, trace_path_for_journal, usage_by_caller
 from risk_bench.game.actions import (
     Action,
@@ -105,10 +107,13 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                     }
                 )
             case "commentary":
+                # journals predating the panel carried no member index; they fold into a single member 0
+                index = record.get("commentator_index")
                 commentary.append(
                     {
                         "turn": int(record["turn"]),
-                        "rubric": record.get("rubric", ""),  # pre-axis journals had a single unlabelled commentator
+                        "commentator_index": int(index) if index is not None else 0,
+                        "commentator_spec": record.get("commentator"),
                         "text": record["text"],
                         "tags": record["tags"],
                         "step": len(steps) - 1,
@@ -116,6 +121,14 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 )
             case "result":
                 result = {"winner": record["winner"], "turn_count": int(record["turn_count"])}
+
+    roster = _commentator_roster(
+        header_specs=[str(spec) for spec in header.get("commentators", [])], commentary=commentary
+    )
+    label_by_index = {member["index"]: member["label"] for member in roster}
+    member_indices = [member["index"] for member in roster]
+    for entry in commentary:
+        entry["commentator"] = label_by_index.get(entry["commentator_index"], "commentator")
 
     return {
         "title": journal_path.name,
@@ -135,6 +148,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         "thoughts": thoughts,
         "notes": notes,
         "commentary": commentary,
+        "commentators": roster,
         "result": result,
         "stats": {
             **_build_stats(
@@ -142,6 +156,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 player_names=player_names,
                 messages=messages,
                 commentary=commentary,
+                member_indices=member_indices,
                 combat_totals=combat_totals,
                 markers=markers,
             ),
@@ -190,11 +205,48 @@ _VALENCE_BY_BEHAVIOR: Final[dict[str, str | None]] = {
 }
 
 
+def _commentator_roster(header_specs: list[str], commentary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The panel roster as ordered ``{index, spec, label}`` members.
+
+    The header's spec list is authoritative when present (so members that produced no commentary
+    still appear); otherwise the roster is derived from the indices the records carry, which folds
+    a legacy single-commentator journal into one anonymous member rather than crashing.
+    """
+    if header_specs:
+        members: list[tuple[int, str | None]] = list(enumerate(header_specs))
+    elif commentary:
+        seen: dict[int, str | None] = {}
+        for comment in commentary:
+            seen.setdefault(comment["commentator_index"], comment.get("commentator_spec"))
+        members = sorted(seen.items())
+    else:
+        return []
+    labels = _member_labels(member_specs=[spec for _, spec in members])
+    return [{"index": index, "spec": spec, "label": label} for (index, spec), label in zip(members, labels)]
+
+
+def _member_labels(member_specs: list[str | None]) -> list[str]:
+    resolved = [_resolve_member_label(spec=spec) for spec in member_specs]
+    base_counts = Counter(resolved)
+    # a model id shared by two members (same model, different effort) gets its index appended to stay distinct
+    return [base if base_counts[base] == 1 else f"{base} ·{index}" for index, base in enumerate(resolved)]
+
+
+def _resolve_member_label(spec: str | None) -> str:
+    if not spec:
+        return "commentator"
+    try:
+        return specs.resolve_model(spec=spec)
+    except ValueError:
+        return spec
+
+
 def _build_stats(
     steps: list[dict[str, Any]],
     player_names: list[PlayerId],
     messages: list[dict[str, Any]],
     commentary: list[dict[str, Any]],
+    member_indices: list[int],
     combat_totals: dict[PlayerId, dict[str, int]],
     markers: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -202,25 +254,33 @@ def _build_stats(
     for message in messages:
         message_counts[message["sender"]][f"{message['visibility']}_messages"] += 1
 
-    behavior_tag_counts: dict[PlayerId, dict[str, int]] = {name: {} for name in player_names}
+    # per player: tag counts summed across the whole panel (the tournament aggregates these). The
+    # game viewer's per-member and agreement views are derived in the browser from the raw commentary.
+    tag_counts: dict[PlayerId, dict[str, int]] = {name: {} for name in player_names}
     for comment in commentary:
         for tag in comment["tags"]:
-            counts = behavior_tag_counts.get(tag["player"])
-            if counts is not None:  # the commentator occasionally invents player names; drop those
-                counts[tag["behavior"]] = counts.get(tag["behavior"], 0) + 1
+            counts = tag_counts.get(tag["player"])
+            if counts is None:  # the commentator occasionally invents player names; drop those
+                continue
+            counts[tag["behavior"]] = counts.get(tag["behavior"], 0) + 1
 
     return {
-        "series": _end_of_turn_series(steps=steps, player_names=player_names, commentary=commentary),
+        "series": _end_of_turn_series(
+            steps=steps, player_names=player_names, commentary=commentary, member_indices=member_indices
+        ),
         "markers": markers,
         "tag_valence": _VALENCE_BY_BEHAVIOR,
         "per_player": [
-            {**combat_totals[name], **message_counts[name], "tags": behavior_tag_counts[name]} for name in player_names
+            {**combat_totals[name], **message_counts[name], "tags": tag_counts[name]} for name in player_names
         ],
     }
 
 
 def _end_of_turn_series(
-    steps: list[dict[str, Any]], player_names: list[PlayerId], commentary: list[dict[str, Any]]
+    steps: list[dict[str, Any]],
+    player_names: list[PlayerId],
+    commentary: list[dict[str, Any]],
+    member_indices: list[int],
 ) -> dict[str, Any]:
     last_step_by_turn: dict[int, dict[str, Any]] = {}
     for step in steps:
@@ -228,27 +288,78 @@ def _end_of_turn_series(
     turns = sorted(last_step_by_turn)
     sampled_steps = [last_step_by_turn[turn] for turn in turns]
     army_totals = [sum(player["armies"] for player in step["players"]) for step in sampled_steps]
-    tag_increments = _valenced_tag_increments(commentary=commentary, player_names=player_names)
+    # each member's valenced increments kept apart, so its cumulative trajectory can be charted on its own
+    increments_by_member = {
+        index: _valenced_tag_increments(
+            commentary=[comment for comment in commentary if comment["commentator_index"] == index],
+            player_names=player_names,
+        )
+        for index in member_indices
+    }
     return {
         "turns": turns,
         "players": [
-            {
-                "armies": [step["players"][seat]["armies"] for step in sampled_steps],
-                "army_share": [
-                    round(step["players"][seat]["armies"] / total, 4)
-                    for step, total in zip(sampled_steps, army_totals)
-                ],
-                "territories": [step["players"][seat]["territories"] for step in sampled_steps],
-                "income": [step["players"][seat]["income"] for step in sampled_steps],
-                "cards": [step["players"][seat]["cards"] for step in sampled_steps],
-                **{
-                    series_key: _cumulative(increments=tag_increments[name], turns=turns, valence=valence)
-                    for series_key, valence in SCORED_SERIES
-                },
-            }
+            _player_series(
+                seat=seat,
+                name=name,
+                turns=turns,
+                sampled_steps=sampled_steps,
+                army_totals=army_totals,
+                increments_by_member=increments_by_member,
+                member_indices=member_indices,
+            )
             for seat, name in enumerate(player_names)
         ],
     }
+
+
+def _player_series(
+    seat: int,
+    name: PlayerId,
+    turns: list[int],
+    sampled_steps: list[dict[str, Any]],
+    army_totals: list[int],
+    increments_by_member: dict[int, dict[PlayerId, dict[int, dict[str, int]]]],
+    member_indices: list[int],
+) -> dict[str, Any]:
+    scored_by_commentator = {
+        str(index): {
+            series_key: _cumulative(increments=increments_by_member[index][name], turns=turns, valence=valence)
+            for series_key, valence in SCORED_SERIES
+        }
+        for index in member_indices
+    }
+    consensus = {
+        series_key: _consensus_series(
+            scored_by_commentator=scored_by_commentator, series_key=series_key, length=len(turns)
+        )
+        for series_key, _ in SCORED_SERIES
+    }
+    return {
+        "armies": [step["players"][seat]["armies"] for step in sampled_steps],
+        "army_share": [
+            round(step["players"][seat]["armies"] / total, 4) for step, total in zip(sampled_steps, army_totals)
+        ],
+        "territories": [step["players"][seat]["territories"] for step in sampled_steps],
+        "income": [step["players"][seat]["income"] for step in sampled_steps],
+        "cards": [step["players"][seat]["cards"] for step in sampled_steps],
+        # the flat per-valence keys carry the panel consensus (mean across members), which the
+        # tournament view aggregates; the game viewer's per-member spread bands and agreement filter
+        # are derived client-side from the raw per-member commentary tags, so no per-member series is emitted
+        **consensus,
+    }
+
+
+def _consensus_series(
+    scored_by_commentator: dict[str, dict[str, list[int]]], series_key: str, length: int
+) -> list[float]:
+    members = list(scored_by_commentator)
+    if not members:
+        return [0.0] * length
+    return [
+        round(sum(scored_by_commentator[member][series_key][position] for member in members) / len(members), 4)
+        for position in range(length)
+    ]
 
 
 def _valenced_tag_increments(

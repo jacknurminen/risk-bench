@@ -63,6 +63,96 @@ def test_commentary_records_appear_in_the_view_model(tmp_path: Path):
     assert all(not player_stats["tags"] for player_stats in model["stats"]["per_player"][1:])
 
 
+def _journal_with_panel(tmp_path: Path, commentators: list[str], commentary: list[dict]) -> Path:
+    """A played game whose header carries a commentator panel, with the given commentary records spliced in."""
+    path = journal_with_game(tmp_path=tmp_path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    header = json.loads(lines[0])
+    header["commentators"] = commentators
+    comment_lines = [json.dumps({"type": "commentary", **comment}) for comment in commentary]
+    rewritten = [json.dumps(header)] + lines[1:-1] + comment_lines + lines[-1:]
+    path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    return path
+
+
+def test_the_panel_roster_resolves_member_labels_in_order(tmp_path: Path):
+    path = _journal_with_panel(tmp_path=tmp_path, commentators=["anthropic:hi", "google:hi"], commentary=[])
+
+    roster = build_view_model(journal_path=path)["commentators"]
+
+    assert [member["index"] for member in roster] == [0, 1]
+    assert [member["spec"] for member in roster] == ["anthropic:hi", "google:hi"]
+    assert [member["label"] for member in roster] == ["claude-opus-4-8", "gemini-3.1-pro-preview"]
+
+
+def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
+    # both members flag the strong move; only member 0 flags deception — a split the panel must preserve
+    commentary = [
+        {
+            "turn": 1,
+            "commentator": "anthropic:hi",
+            "commentator_index": 0,
+            "text": "anthropic's read.",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "strong_move", "note": "good odds"},
+                {"player": PLAYER_NAMES[0], "behavior": "deception", "note": "said one thing, did another"},
+            ],
+        },
+        {
+            "turn": 1,
+            "commentator": "google:hi",
+            "commentator_index": 1,
+            "text": "google's read.",
+            "tags": [{"player": PLAYER_NAMES[0], "behavior": "strong_move", "note": "agreed: strong"}],
+        },
+    ]
+    path = _journal_with_panel(tmp_path=tmp_path, commentators=["anthropic:hi", "google:hi"], commentary=commentary)
+
+    model = build_view_model(journal_path=path)
+
+    # each member's records survive separately, labelled by member
+    assert {comment["commentator_index"] for comment in model["commentary"]} == {0, 1}
+    assert {comment["commentator"] for comment in model["commentary"]} == {"claude-opus-4-8", "gemini-3.1-pro-preview"}
+
+    # tags sum across the panel; the per-member and agreement breakdowns are derived in the viewer
+    # from the raw commentary (each entry keeps its commentator_index), not precomputed here
+    first = model["stats"]["per_player"][0]
+    assert first["tags"] == {"strong_move": 2, "deception": 1}
+    assert "tags_by_commentator" not in first
+
+    # the flat per-valence key is the panel consensus (mean across members); the per-member spread
+    # and agreement filter are derived in the viewer from the raw per-member commentary tags
+    series = model["stats"]["series"]
+    turn_1 = series["turns"].index(1)
+    player_series = series["players"][0]
+    assert player_series["skill_strong"][turn_1] == 1.0  # both members: mean(1, 1)
+    assert player_series["conduct_deceptive"][turn_1] == 0.5  # split: mean(1, 0)
+
+
+def test_legacy_single_commentator_journal_folds_into_one_anonymous_member(tmp_path: Path):
+    # a journal predating the panel: no header roster, records without a member index
+    commentary = [
+        {
+            "turn": 1,
+            "text": "A cagey opening.",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "turtling", "note": "hoarding"},
+            ],
+        }
+    ]
+    path = journal_with_game(tmp_path=tmp_path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    comment_line = json.dumps({"type": "commentary", **commentary[0]})
+    path.write_text("\n".join(lines[:-1] + [comment_line] + lines[-1:]) + "\n", encoding="utf-8")
+
+    model = build_view_model(journal_path=path)
+
+    assert model["commentators"] == [{"index": 0, "spec": None, "label": "commentator"}]
+    assert model["commentary"][0]["commentator_index"] == 0
+    assert model["commentary"][0]["commentator"] == "commentator"
+    assert model["stats"]["per_player"][0]["tags"] == {"turtling": 1}
+
+
 def test_view_model_stats_summarize_the_game(tmp_path: Path):
     model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
 
@@ -71,7 +161,8 @@ def test_view_model_stats_summarize_the_game(tmp_path: Path):
     assert series["turns"] == sorted({step["turn"] for step in model["steps"]})  # one sample per played turn
     assert series["turns"][-1] == model["steps"][-1]["turn"]
     for player_series in series["players"]:
-        assert all(len(values) == turn_count for values in player_series.values())
+        per_turn_arrays = [values for values in player_series.values() if isinstance(values, list)]
+        assert all(len(values) == turn_count for values in per_turn_arrays)
     for turn_index in range(turn_count):
         total_share = sum(player_series["army_share"][turn_index] for player_series in series["players"])
         assert abs(total_share - 1.0) < 1e-3
@@ -228,6 +319,7 @@ def test_a_header_only_journal_builds_a_startable_view_model(tmp_path: Path):
             max_turns=100,
             allow_private_messages=False,
             max_negotiation_rounds=3,
+            commentators=[],
         )
     )
     journal.close()

@@ -31,7 +31,7 @@ class GameProcessManager:
         game_id: str,
         players: list[str],
         seed: int,
-        commentator_specs: dict[str, str],
+        commentators: list[str],
         max_turns: int | None,
         journal_path: Path,
         log_path: Path,
@@ -42,24 +42,24 @@ class GameProcessManager:
             game_id: The game's identity within the manager.
             players: Player specs in seating order.
             seed: The game seed.
-            commentator_specs: Maps each commentator rubric to its model spec; empty for none.
+            commentators: The commentator panel as one model spec per member; empty for none.
             max_turns: Turn limit, or None for the settings default.
             journal_path: Where the worker writes the journal.
             log_path: Where the worker's output goes.
         """
-        arguments = (str(log_path), players, seed, commentator_specs, max_turns, str(journal_path))
+        arguments = (str(log_path), players, seed, commentators, max_turns, str(journal_path))
         self._start(game_id=game_id, target=_run_new_game_in_worker, arguments=arguments)
 
-    def resume_game(self, game_id: str, journal_path: Path, commentator_specs: dict[str, str], log_path: Path) -> None:
+    def resume_game(self, game_id: str, journal_path: Path, commentators: list[str], log_path: Path) -> None:
         """Continue a paused game in a new worker process.
 
         Args:
             game_id: The game's identity within the manager.
             journal_path: The unfinished journal to resume from.
-            commentator_specs: Maps each commentator rubric to its model spec; empty for none.
+            commentators: The commentator panel as one model spec per member; empty for none.
             log_path: Where the worker's output is appended.
         """
-        arguments = (str(log_path), str(journal_path), commentator_specs)
+        arguments = (str(log_path), str(journal_path), commentators)
         self._start(game_id=game_id, target=_resume_game_in_worker, arguments=arguments)
 
     def is_running(self, game_id: str) -> bool:
@@ -114,7 +114,7 @@ def _run_new_game_in_worker(
     log_path: str,
     players: list[str],
     seed: int,
-    commentator_specs: dict[str, str],
+    commentators: list[str],
     max_turns: int | None,
     journal_path: str,
 ) -> None:
@@ -124,7 +124,7 @@ def _run_new_game_in_worker(
             models=players,
             seed=seed,
             settings=load_settings(),
-            commentator_specs=commentator_specs,
+            commentators=commentators,
             journal_path=Path(journal_path),
             max_turns=max_turns,
             verbose=False,
@@ -133,13 +133,13 @@ def _run_new_game_in_worker(
         print(f"[paused] {error}")
 
 
-def _resume_game_in_worker(log_path: str, journal_path: str, commentator_specs: dict[str, str]) -> None:
+def _resume_game_in_worker(log_path: str, journal_path: str, commentators: list[str]) -> None:
     _redirect_output(log_path=log_path, append=True)
     try:
         launch.resume_game(
             journal_file=Path(journal_path),
             settings=load_settings(),
-            commentator_specs=commentator_specs,
+            commentators=commentators,
             verbose=False,
         )
     except ProviderUnavailableError as error:

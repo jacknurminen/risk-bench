@@ -33,8 +33,8 @@ def game(
     commentator: Annotated[
         list[str] | None,
         typer.Option(
-            help="Commentator model spec, repeatable as 'rubric=spec' (rubrics: skill, conduct); "
-            "a bare spec runs every rubric on that model."
+            help="Commentator panel member as a model spec (provider:size:effort), repeatable to add "
+            "more members; every member annotates the same game and all their tags are kept."
         ),
     ] = None,
     journal: Annotated[Path | None, typer.Option(help="Journal file path; defaults to a timestamped name.")] = None,
@@ -44,10 +44,10 @@ def game(
     """Run a single game between the given players (or resume a crashed one) and print the outcome."""
     settings = load_settings()
     try:
-        commentator_specs = specs.parse_commentator_specs(values=commentator or [])
+        commentators = commentator or []
         if resume is not None:
             record = launch.resume_game(
-                journal_file=resume, settings=settings, commentator_specs=commentator_specs, verbose=verbose
+                journal_file=resume, settings=settings, commentators=commentators, verbose=verbose
             )
             journal_path = resume
         elif models:
@@ -55,7 +55,7 @@ def game(
                 models=models,
                 seed=seed,
                 settings=settings,
-                commentator_specs=commentator_specs,
+                commentators=commentators,
                 journal_path=journal,
                 max_turns=max_turns,
                 verbose=verbose,

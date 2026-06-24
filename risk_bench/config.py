@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
     max_consecutive_provider_failures: int = 6
+    # how many commentator-panel members may call their providers at once per commentary point
+    max_concurrent_commentators: int = 4
 
     # game and tournament defaults
     max_turns: int = 150

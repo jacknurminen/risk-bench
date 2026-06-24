@@ -1,4 +1,6 @@
 import random
+import sys
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from risk_bench.agents.tracing import TraceWriter
@@ -12,7 +14,7 @@ from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
 from risk_bench.players.rendering import narrate_event
 from risk_bench.players.view import build_player_view
-from risk_bench.runner.commentary import Commentator
+from risk_bench.runner.commentary import Commentary, Commentator
 from risk_bench.runner.journal import JournalWriter, RestoredGame
 
 _PREVIOUS_COMMENTARY_KEPT = 5
@@ -53,11 +55,15 @@ class GameRunner:
     message are appended to it as they happen, so a crashed game can be
     restored with ``journal.restore_game`` and continued via ``resume``.
 
-    Each commentator, when any are given, is invoked after each player's completed
-    turn (and once more when the game ends) with the omniscient state and a log of
-    the turn; its commentary is journaled and printed but never shown to the
-    players, and its failures never affect the game. Multiple commentators each
-    apply their own rubric (e.g. skill and conduct) to the same turn.
+    The commentator panel, when any members are given, is invoked after each
+    player's completed turn (and once more when the game ends) with the omniscient
+    state and a log of the turn. Every member annotates the same turn over the full
+    behaviour vocabulary in one pass; members run concurrently (their calls touch no
+    game state) but their records are written in panel order, so the journal is
+    stable regardless of which member's provider answered first. Each member's
+    commentary is journaled and printed but never shown to the players, a member's
+    failure yields no record for it that turn without affecting the others, and the
+    panel never affects the game.
     """
 
     def __init__(
@@ -68,6 +74,7 @@ class GameRunner:
         allow_private_messages: bool,
         max_negotiation_rounds: int,
         commentators: tuple[Commentator, ...],
+        max_concurrent_commentators: int,
         journal: JournalWriter | None,
         trace: TraceWriter | None,
         verbose: bool,
@@ -78,6 +85,7 @@ class GameRunner:
         self._allow_private_messages = allow_private_messages
         self._max_negotiation_rounds = max_negotiation_rounds
         self._commentators = commentators
+        self._max_concurrent_commentators = max_concurrent_commentators
         self._journal = journal
         self._trace = trace
         self._verbose = verbose
@@ -93,8 +101,8 @@ class GameRunner:
         # each player's latest notes — its only memory of earlier turns, fed back into its prompts
         self._notes: dict[PlayerId, str | None] = {}
         self._turn_log: list[str] = []
-        # recent commentary kept per rubric, so each commentator only sees its own continuity
-        self._previous_commentary: dict[str, list[str]] = {}
+        # recent commentary kept per panel member (by index), so each only sees its own continuity
+        self._previous_commentary: list[list[str]] = []
 
     def run(self) -> GameRecord:
         """Play the game from setup to completion.
@@ -146,7 +154,8 @@ class GameRunner:
             self._messages_by_turn.setdefault(message.turn_number, []).append(message)
         self._notes = {player_id: None for player_id in self._players}
         self._turn_log = []
-        self._previous_commentary = {commentator.rubric.name: [] for commentator in self._commentators}
+        # each member keeps its own recent commentary, so its continuity stays independent of the panel
+        self._previous_commentary: list[list[str]] = [[] for _ in self._commentators]
 
     def _play(self, state: GameState, rng: random.Random) -> GameRecord:
         missions = {player_id: player.mission for player_id, player in state.players.items()}
@@ -284,37 +293,64 @@ class GameRunner:
         self._turn_log = []
         if not self._commentators or not turn_log:
             return
-        for commentator in self._commentators:
-            self._commentate_with(commentator=commentator, state=state, turn_number=turn_number, turn_log=turn_log)
-
-    def _commentate_with(
-        self, commentator: Commentator, state: GameState, turn_number: int, turn_log: list[str]
-    ) -> None:
-        rubric_name = commentator.rubric.name
+        # the whole panel shares one turn and the generic 'commentary' kind; each member's
+        # caller distinguishes its trace records, so the context is set once before the fan-out
         if self._trace is not None:
-            self._trace.set_context(turn=turn_number, kind=f"commentary:{rubric_name}")
-        commentary = commentator.comment_on_turn(
-            state=state,
-            turn_number=turn_number,
-            turn_log=turn_log,
-            previous_commentary=self._previous_commentary.get(rubric_name, []),
-            notes=self._notes,
-        )
-        if commentary is None:
-            return
-        kept = (self._previous_commentary.get(rubric_name, []) + [commentary.text])[-_PREVIOUS_COMMENTARY_KEPT:]
-        self._previous_commentary[rubric_name] = kept
+            self._trace.set_context(turn=turn_number, kind="commentary")
+        for index, commentary in self._gather_commentary(state=state, turn_number=turn_number, turn_log=turn_log):
+            self._record_commentary(index=index, commentary=commentary, turn_number=turn_number)
+
+    def _gather_commentary(
+        self, state: GameState, turn_number: int, turn_log: list[str]
+    ) -> list[tuple[int, Commentary]]:
+        max_workers = min(self._max_concurrent_commentators, len(self._commentators))
+        gathered: list[tuple[int, Commentary]] = []
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(
+                    commentator.comment_on_turn,
+                    state=state,
+                    turn_number=turn_number,
+                    turn_log=turn_log,
+                    # snapshots, read before the fan-out, so concurrent members never share mutable state
+                    previous_commentary=list(self._previous_commentary[index]),
+                    notes=dict(self._notes),
+                ): index
+                for index, commentator in enumerate(self._commentators)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                commentary = self._commentary_result(future=future, index=index)
+                if commentary is not None:
+                    gathered.append((index, commentary))
+        # write in panel order so the journal and every replay are stable regardless of completion order
+        gathered.sort(key=lambda item: item[0])
+        return gathered
+
+    def _commentary_result(self, future: Future[Commentary | None], index: int) -> Commentary | None:
+        try:
+            return future.result()
+        except Exception as error:  # noqa: BLE001 - one member must never abort the panel
+            print(f"[commentator[{index}]-error] {error}", file=sys.stderr)
+            return None
+
+    def _record_commentary(self, index: int, commentary: Commentary, turn_number: int) -> None:
+        commentator = self._commentators[index]
+        kept = (self._previous_commentary[index] + [commentary.text])[-_PREVIOUS_COMMENTARY_KEPT:]
+        self._previous_commentary[index] = kept
         if self._journal is not None:
             self._journal.write_commentary(
                 turn_number=turn_number,
-                rubric=rubric_name,
+                commentator=commentator.spec,
+                commentator_index=index,
                 text=commentary.text,
                 tags=[{"player": tag.player, "behavior": tag.behavior, "note": tag.note} for tag in commentary.tags],
             )
         if self._verbose:
-            print(f"[commentary:{rubric_name}] {commentary.text}")
+            label = f"commentator[{index}] {commentator.spec}"
+            print(f"[{label}] {commentary.text}")
             for tag in commentary.tags:
-                print(f"[commentary:{rubric_name}]   {tag.behavior} — {tag.player}: {tag.note}")
+                print(f"[{label}]   {tag.behavior} — {tag.player}: {tag.note}")
 
     def _run_noting(self, state: GameState, finished_turn: int) -> None:
         if finished_turn < 1:

@@ -124,6 +124,7 @@ class TournamentRunner:
             allow_private_messages=self._allow_private_messages,
             max_negotiation_rounds=self._max_negotiation_rounds,
             commentators=(),  # tournaments run uncommentated; commentary is a single-game spectator feature
+            max_concurrent_commentators=1,
             journal=journal,
             trace=None,
             verbose=self._verbose,
@@ -148,6 +149,7 @@ class TournamentRunner:
                 max_turns=self._max_turns,
                 allow_private_messages=self._allow_private_messages,
                 max_negotiation_rounds=self._max_negotiation_rounds,
+                commentators=[],  # tournaments run uncommentated
             )
         )
         return journal

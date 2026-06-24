@@ -29,7 +29,30 @@
   .comm .tag.positive, #statsTable .tag.positive { color:#2e6b34; background:#e6efe4; border-color:#cfdfce; }
   .comm .tag.negative, #statsTable .tag.negative { color:#a33f3b; background:#f7e9e7; border-color:#e8d3d0; }
   .comm .tag.deceptive, #statsTable .tag.deceptive { color:#8a5a1f; background:#f6eede; border-color:#e6d6b8; }
-  .comm .rubric { font-size:9px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  .commTurn { margin-bottom:10px; }
+  .commTurn.future { opacity:.35; }
+  .commTurnHead { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em;
+                  margin-bottom:3px; }
+  .agree { display:inline-block; font-size:10px; border-radius:3px; padding:0 5px; margin:2px 3px 0 0;
+           border:1px solid #d4dae2; background:#eef1f4; }
+  .agree.split { border-style:dashed; }
+  .agree.unanimous { font-weight:600; }
+  .agree .frac { color:var(--dim); font-weight:400; }
+  .agree.positive { color:#2e6b34; background:#e6efe4; border-color:#cfdfce; }
+  .agree.negative { color:#a33f3b; background:#f7e9e7; border-color:#e8d3d0; }
+  .agree.deceptive { color:#8a5a1f; background:#f6eede; border-color:#e6d6b8; }
+  .commMember { font-size:10px; font-weight:600; }
+  .memberToggles { font-size:11px; color:var(--dim); margin:2px 0 8px; display:flex; flex-wrap:wrap;
+                   gap:4px 14px; align-items:center; }
+  .memberToggles label { cursor:pointer; }
+  .memberToggles .swatch { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:3px;
+                           vertical-align:-1px; }
+  #agreementFilter { font-size:11px; color:var(--dim); margin:2px 0 8px; display:flex; flex-wrap:wrap;
+                     gap:6px; align-items:center; }
+  #agreementFilter button { font-size:11px; padding:1px 9px; border-radius:10px; border:1px solid #c6c5c0;
+                            background:#fff; color:var(--dim); cursor:pointer; }
+  #agreementFilter button:hover { background:#f0efec; }
+  #agreementFilter button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
   h3 { margin:2px 0 8px; font:600 11px var(--sans); text-transform:uppercase; letter-spacing:.1em;
        color:var(--dim); border-bottom:1px solid var(--line); padding-bottom:4px; }
   #board svg { flex:1; min-height:0; width:100%; height:100%; background:#ccdae3; border-radius:4px;
@@ -89,6 +112,8 @@
   #statsLegend span { margin-right:12px; font-weight:600; }
   #statsLegend .markerKey { color:var(--dim); font-weight:400; float:right; }
   #charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px; }
+  #valenceCharts { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  #commentaryStats { margin-top:14px; }
   .tokenLegend { font-size:11px; color:var(--dim); margin:0 0 4px; }
   .tokenLegend span { font-weight:700; }
   #tokenSection { margin-top:14px; }
@@ -107,6 +132,7 @@
   #statsTable td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
   #statsTable .tag { display:inline-block; font-size:10px; color:var(--accent); background:#e8ecf1;
                      border:1px solid #d4dae2; border-radius:3px; padding:0 5px; margin:1px 3px 1px 0; }
+  .tag .frac { color:var(--dim); font-weight:400; }
   #usageNote { color:var(--dim); font-size:11px; margin-top:6px; }
   #statsTabs { margin-left:auto; margin-right:12px; }
   .tab { padding:3px 12px; font-size:12px; border-radius:0; }
@@ -166,7 +192,7 @@
     <h3>🎙️ Commentary</h3>
     <div id="commentaryFeed">
       <span id="noCommentary" style="color:var(--dim)">No commentary in this journal.
-        Run the game with --commentator &lt;model spec&gt; to get one.</span>
+        Add one or more commentators when launching a game to get a panel.</span>
     </div>
   </div>
 </div>
@@ -180,6 +206,11 @@
     <div id="overviewSheet">
       <div id="statsLegend"></div>
       <div id="charts"></div>
+      <div id="commentaryStats">
+        <div id="memberToggles"></div>
+        <div id="agreementFilter"></div>
+        <div id="valenceCharts"></div>
+      </div>
       <div id="tokenSection">
         <h4 class="tokenHeading">per turn — input (left bar) / output (right bar), stacked</h4>
         <div class="tokenControls">
@@ -190,6 +221,7 @@
         </div>
         <div id="tokenChart"></div>
       </div>
+      <div id="tagFilterNote" style="color:var(--dim);font-size:11px;margin:14px 0 2px"></div>
       <table id="statsTable"></table>
       <div id="usageNote">Costs are estimated from list prices per token; unknown models show no cost.</div>
     </div>
@@ -214,10 +246,20 @@ const LIVE = {{ live_json }};
 const POLL_URL = {{ poll_url_json }};
 const TRACE_URL = {{ trace_url_json }};
 const COLORS = ["#a33f3b","#3c6c9e","#6e8f3a","#6b5288","#c97a29","#2f8a9e"];
+// commentator-panel members get their own palette, kept distinct from the player colors above
+const MEMBER_COLORS = ["#7a6a55","#4a7a6e","#8a6f9e","#9e6a4a","#5a7a3c","#3c6a8a","#9a8a3c","#6a6a6a"];
 GAME.notes ??= [];  // tolerate view models predating private notes
+GAME.commentators ??= [];  // tolerate view models predating the commentator panel
 const steps = GAME.steps;
 let index = 0;
 let timer = null;
+
+const memberColor = commentatorIndex => MEMBER_COLORS[commentatorIndex % MEMBER_COLORS.length];
+const panelSize = () => GAME.commentators.length;
+// the members currently included in the chart consensus; all of them until the viewer toggles some off
+let visibleMembers = new Set(GAME.commentators.map(member => member.index));
+// which per-instance agreement levels (k of the full panel) the charts count; all of them by default
+let selectedAgreement = new Set(GAME.commentators.map((_, level) => level + 1));
 
 const el = id => document.getElementById(id);
 const pretty = name => name.replaceAll("_", " ");
@@ -404,27 +446,72 @@ function upsertLogEntry(i) {
     `<div>${i === 0 ? "Game start: territories dealt" : richText(step.action)}</div>${events}${thoughts}`;
 }
 
-function appendCommentary(fromIndex) {
+// The commentary feed is grouped by turn. Within a turn every panel member keeps its own block
+// (members are never merged), and a per-turn consensus row shows, for each (player, behavior),
+// how many members agreed — unanimous vs split rendered distinctly. The whole feed is rebuilt on
+// each update because a later member's record can change a turn's agreement after the fact.
+function renderCommentary() {
   const container = el("commentaryFeed");
-  if (GAME.commentary.length > fromIndex) el("noCommentary")?.remove();
-  for (let i = fromIndex; i < GAME.commentary.length; i++) {
-    const comment = GAME.commentary[i];
-    const div = document.createElement("div");
-    div.className = "comm";
-    div.id = "c-" + i;
+  if (!GAME.commentary.length) {
+    container.innerHTML = '<span id="noCommentary" style="color:var(--dim)">No commentary in this journal.' +
+      ' Add one or more commentators when launching a game to get a panel.</span>';
+    return;
+  }
+  const byTurn = new Map();
+  GAME.commentary.forEach(comment => {
+    if (!byTurn.has(comment.turn)) byTurn.set(comment.turn, []);
+    byTurn.get(comment.turn).push(comment);
+  });
+  const turns = [...byTurn.keys()].sort((a, b) => a - b);
+  container.innerHTML = turns.map(turn => commentaryTurnBlock(turn, byTurn.get(turn))).join("");
+  syncCommentaryFuture();
+  if (LIVE) el("commentaryPanel").scrollTop = el("commentaryPanel").scrollHeight;
+}
+
+function commentaryTurnBlock(turn, comments) {
+  const minStep = Math.min(...comments.map(comment => comment.step));
+  const members = [...comments].sort((a, b) => a.commentator_index - b.commentator_index);
+  const blocks = members.map(comment => {
+    const label = panelSize() > 1
+      ? `<span class="commMember" style="color:${memberColor(comment.commentator_index)}">${comment.commentator}</span> `
+      : "";
     const tags = comment.tags
       .map(tag => `<span class="tag${valenceClass(tag.behavior)}" title="${escapeHtml(tag.note)}">` +
         `${tag.behavior}: ${colorizeNames(tag.player)}</span>`)
       .join("");
-    const rubric = comment.rubric ? ` <span class="rubric">${comment.rubric}</span>` : "";
-    div.innerHTML = `<div class="meta">turn ${comment.turn}${rubric}</div><div>${richText(comment.text)}</div>` +
-      (tags ? `<div>${tags}</div>` : "");
-    div.onclick = () => show(comment.step);
-    container.appendChild(div);
-  }
-  if (LIVE && GAME.commentary.length > fromIndex) {
-    el("commentaryPanel").scrollTop = el("commentaryPanel").scrollHeight;
-  }
+    return `<div class="comm" data-step="${comment.step}" onclick="show(${comment.step})">` +
+      `<div class="meta">${label}</div><div>${richText(comment.text)}</div>` + (tags ? `<div>${tags}</div>` : "") +
+      `</div>`;
+  }).join("");
+  return `<div class="commTurn" data-minstep="${minStep}"><div class="commTurnHead">turn ${turn}` +
+    `${consensusRow(comments)}</div>${blocks}</div>`;
+}
+
+// One chip per (player, behavior) tagged this turn, annotated with how many of the panel's members
+// flagged it. Only shown for a real panel (more than one member), where agreement is meaningful.
+function consensusRow(comments) {
+  if (panelSize() < 2) return "";
+  const byKey = new Map();
+  comments.forEach(comment => comment.tags.forEach(tag => {
+    const key = `${tag.player} ${tag.behavior}`;
+    (byKey.get(key) ?? byKey.set(key, new Set()).get(key)).add(comment.commentator_index);
+  }));
+  if (!byKey.size) return "";
+  const chips = [...byKey.entries()].map(([key, members]) => {
+    const [player, behavior] = key.split(" ");
+    const unanimous = members.size === panelSize();
+    const klass = `agree${valenceClass(behavior)} ${unanimous ? "unanimous" : "split"}`;
+    return `<span class="${klass}" title="${members.size} of ${panelSize()} members flagged this">` +
+      `${behavior}: ${colorizeNames(player)} <span class="frac">${members.size}/${panelSize()}</span></span>`;
+  }).join("");
+  return ` ${chips}`;
+}
+
+function syncCommentaryFuture() {
+  document.querySelectorAll("#commentaryFeed .commTurn").forEach(group =>
+    group.classList.toggle("future", Number(group.dataset.minstep) > index));
+  document.querySelectorAll("#commentaryFeed .comm").forEach(block =>
+    block.classList.toggle("future", Number(block.dataset.step) > index));
 }
 
 function appendLog(fromIndex) {
@@ -451,7 +538,7 @@ function show(newIndex) {
   });
   updateContinentLegend(step);
   GAME.messages.forEach((message, i) => el("m-" + i).classList.toggle("future", message.step > index));
-  GAME.commentary.forEach((comment, i) => el("c-" + i).classList.toggle("future", comment.step > index));
+  syncCommentaryFuture();
   document.querySelectorAll(".entry.current").forEach(entry => entry.classList.remove("current"));
   const entry = el("e-" + index);
   entry.classList.add("current");
@@ -465,6 +552,14 @@ function show(newIndex) {
 // from the replay, so the page never re-derives game rules) plus a per-player table.
 const MARKER_GLYPHS = { elimination: "✕", continent: "◆", trade: "▲" };
 
+const VALENCE_CHARTS = [
+  ["strong", "skill: strong play, cumulative"],
+  ["weak", "skill: weak play, cumulative"],
+  ["cooperative", "conduct: cooperative, cumulative"],
+  ["adversarial", "conduct: adversarial, cumulative"],
+  ["deceptive", "conduct: deception, cumulative"],
+];
+
 function renderStats() {
   el("statsLegend").innerHTML = GAME.players
     .map((player, seat) => `<span style="color:${COLORS[seat]}">${player.name}</span>`).join("")
@@ -476,32 +571,108 @@ function renderStats() {
   charts.appendChild(buildChart("territories", seriesByPlayer.map(s => s.territories), v => Math.round(v)));
   charts.appendChild(buildChart("income per turn", seriesByPlayer.map(s => s.income), v => Math.round(v)));
   charts.appendChild(buildChart("cards in hand", seriesByPlayer.map(s => s.cards), v => Math.round(v)));
-  if (GAME.commentary.length) {
-    charts.appendChild(
-      buildChart("skill: strong play, cumulative", seriesByPlayer.map(s => s.skill_strong), v => Math.round(v)));
-    charts.appendChild(
-      buildChart("skill: weak play, cumulative", seriesByPlayer.map(s => s.skill_weak), v => Math.round(v)));
-    charts.appendChild(
-      buildChart("conduct: cooperative, cumulative", seriesByPlayer.map(s => s.conduct_cooperative), v => Math.round(v)));
-    charts.appendChild(
-      buildChart("conduct: adversarial, cumulative", seriesByPlayer.map(s => s.conduct_adversarial), v => Math.round(v)));
-    charts.appendChild(
-      buildChart("conduct: deception, cumulative", seriesByPlayer.map(s => s.conduct_deceptive), v => Math.round(v)));
-  }
+  renderMemberToggles();
+  renderAgreementFilter();
+  renderValenceCharts();
   renderTokenChart();
   renderStatsTable();
 }
 
-function buildChart(title, valuesBySeat, formatValue) {
+// The cumulative-valence charts are per-member: each player's line is the mean across the chosen
+// members and the band is their spread, so no annotator's trajectory is hidden. The checkboxes pick
+// which members feed the consensus (all by default); they only appear for a real panel.
+function renderMemberToggles() {
+  const container = el("memberToggles");
+  if (panelSize() < 2) { container.innerHTML = ""; return; }
+  container.innerHTML = '<span>commentator panel — line is the mean, band is the spread:</span>' +
+    GAME.commentators.map(member =>
+      `<label><input type="checkbox" data-member="${member.index}" ${visibleMembers.has(member.index) ? "checked" : ""}>` +
+      `<span class="swatch" style="background:${memberColor(member.index)}"></span>${escapeHtml(member.label)}</label>`
+    ).join("");
+  container.querySelectorAll("input[data-member]").forEach(box => box.onchange = () => {
+    const member = Number(box.dataset.member);
+    if (box.checked) visibleMembers.add(member); else visibleMembers.delete(member);
+    renderValenceCharts();
+  });
+}
+
+// The agreement filter counts a tag only when the chosen number of members flagged that exact
+// (turn, player, behavior) — measured over the FULL panel, independent of the member checkboxes.
+// One chip per level (k/m), all on by default; deselecting 1/m drops solo tags, keeping only 3/3
+// leaves the unanimous consensus (its band collapses), keeping only 2/3 isolates the splits.
+function renderAgreementFilter() {
+  const container = el("agreementFilter");
+  const members = panelSize();
+  if (members < 2) { container.innerHTML = ""; return; }
+  const chips = Array.from({ length: members }, (_, i) => i + 1).map(level =>
+    `<button data-level="${level}" class="${selectedAgreement.has(level) ? "on" : ""}">${level}/${members}</button>`
+  ).join("");
+  container.innerHTML = '<span>agreement filter — count a tag only when this many members flagged it:</span>' + chips;
+  container.querySelectorAll("button[data-level]").forEach(button => button.onclick = () => {
+    const level = Number(button.dataset.level);
+    if (selectedAgreement.has(level)) selectedAgreement.delete(level); else selectedAgreement.add(level);
+    button.classList.toggle("on");
+    renderValenceCharts();
+    renderStatsTable();  // the agreement filter drives the behavior-tags column too
+  });
+}
+
+function renderValenceCharts() {
+  const container = el("valenceCharts");
+  if (!GAME.commentary.length) { container.innerHTML = ""; return; }
+  const members = GAME.commentators.map(member => member.index).filter(member => visibleMembers.has(member));
+  const agreement = tagInstanceAgreement();
+  container.innerHTML = "";
+  for (const [valence, title] of VALENCE_CHARTS) {
+    container.appendChild(buildBandChart(title, members, filteredCumulatives(members, valence, agreement)));
+  }
+}
+
+// How many distinct members flagged each (turn, player, behavior) — the per-instance agreement,
+// over the whole panel. Built from the raw per-member tags the journal kept separately.
+function tagInstanceAgreement() {
+  const agreement = new Map();
+  GAME.commentary.forEach(comment => comment.tags.forEach(tag => {
+    const key = `${comment.turn}|${tag.player}|${tag.behavior}`;
+    (agreement.get(key) ?? agreement.set(key, new Set()).get(key)).add(comment.commentator_index);
+  }));
+  return agreement;
+}
+
+// Per seat, per visible member, the cumulative count of that member's tags of this valence — counting
+// a tag only when its panel agreement is among the selected levels. With every level on this equals
+// the precomputed per-member series; the filter just makes some tags ineligible to count.
+function filteredCumulatives(members, valence, agreement) {
+  const turns = GAME.stats.series.turns;
+  const turnPosition = new Map(turns.map((turn, position) => [turn, position]));
+  const valenceOf = GAME.stats.tag_valence ?? {};
+  const counts = GAME.players.map(() => members.map(() => turns.map(() => 0)));
+  GAME.commentary.forEach(comment => {
+    const memberPosition = members.indexOf(comment.commentator_index);
+    const position = turnPosition.get(comment.turn);
+    if (memberPosition < 0 || position === undefined) return;  // a hidden member, or a turn off the axis
+    comment.tags.forEach(tag => {
+      if (valenceOf[tag.behavior] !== valence) return;
+      const seat = GAME.players.findIndex(player => player.name === tag.player);
+      if (seat < 0) return;  // the commentator occasionally invents player names; drop those
+      const agreed = agreement.get(`${comment.turn}|${tag.player}|${tag.behavior}`)?.size ?? 0;
+      if (selectedAgreement.has(agreed)) counts[seat][memberPosition][position] += 1;
+    });
+  });
+  return counts.map(perSeat => perSeat.map(perMember => {
+    let running = 0;
+    return perMember.map(increment => (running += increment));
+  }));
+}
+
+// Shared scaffolding for the hand-rolled SVG line charts: gridlines, axis labels, and the event
+// markers. buildChart draws one plain line per player; buildBandChart adds the per-member spread band.
+function chartFrame(yMax, formatValue) {
   const W = 470, H = 230, PAD = { left: 38, right: 12, top: 26, bottom: 18 };
   const turns = GAME.stats.series.turns;
-  // integer-valued charts round the axis up to an even maximum so the midpoint label is exact
-  const dataMax = Math.max(...valuesBySeat.flat()) || 1;
-  const yMax = valuesBySeat.flat().every(Number.isInteger) ? Math.max(2, Math.ceil(dataMax / 2) * 2) : dataMax;
   const xAt = i => PAD.left + (turns.length < 2 ? 0 : i * (W - PAD.left - PAD.right) / (turns.length - 1));
   const yAt = v => H - PAD.bottom - (v / yMax) * (H - PAD.top - PAD.bottom);
   const parts = [];
-
   for (const fraction of [0, 0.5, 1]) {
     const gy = yAt(yMax * fraction);
     parts.push(`<line x1="${PAD.left}" y1="${gy}" x2="${W - PAD.right}" y2="${gy}" stroke="#e8e7e3"/>`);
@@ -509,7 +680,6 @@ function buildChart(title, valuesBySeat, formatValue) {
   }
   parts.push(`<text x="${PAD.left}" y="${H - 4}" class="axis">turn ${turns[0]}</text>`);
   parts.push(`<text x="${W - PAD.right}" y="${H - 4}" class="axis" text-anchor="end">turn ${turns.at(-1)}</text>`);
-
   const markersByTurn = {};
   for (const marker of GAME.stats.markers) (markersByTurn[marker.turn] ??= []).push(marker);
   for (const [turn, markers] of Object.entries(markersByTurn)) {
@@ -525,18 +695,62 @@ function buildChart(title, valuesBySeat, formatValue) {
         <title>turn ${turn}: ${escapeHtml(marker.text)}</title></text>`);
     });
   }
+  return { W, H, turns, xAt, yAt, parts };
+}
 
+function chartElement(title, W, H, parts) {
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
+  return chart;
+}
+
+function buildChart(title, valuesBySeat, formatValue) {
+  // integer-valued charts round the axis up to an even maximum so the midpoint label is exact
+  const dataMax = Math.max(...valuesBySeat.flat()) || 1;
+  const yMax = valuesBySeat.flat().every(Number.isInteger) ? Math.max(2, Math.ceil(dataMax / 2) * 2) : dataMax;
+  const { W, H, turns, xAt, yAt, parts } = chartFrame(yMax, formatValue);
   valuesBySeat.forEach((values, seat) => {
     const points = values.map((value, i) => `${xAt(i)},${yAt(value)}`).join(" ");
     parts.push(`<polyline points="${points}" fill="none" stroke="${COLORS[seat]}" stroke-width="1.6"/>`);
     if (turns.length <= 40) values.forEach((value, i) =>
       parts.push(`<circle cx="${xAt(i)}" cy="${yAt(value)}" r="2" fill="${COLORS[seat]}"/>`));
   });
+  return chartElement(title, W, H, parts);
+}
 
-  const chart = document.createElement("div");
-  chart.className = "chart";
-  chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
-  return chart;
+// One cumulative-valence chart per metric: each player's line is the mean across the visible panel
+// members, with a shaded band spanning their min–max so annotator disagreement shows rather than
+// collapsing. With a single member (or one selected) the band has zero width and it reads as a line.
+// cumulatives[seat][memberPosition] is each member's filtered cumulative series, aligned to turns.
+function buildBandChart(title, members, cumulatives) {
+  const turns = GAME.stats.series.turns;
+  const bands = cumulatives.map(perMember =>
+    turns.map((_, t) => {
+      const values = perMember.map(memberValues => memberValues[t] ?? 0);
+      if (!values.length) return { mean: 0, lo: 0, hi: 0 };
+      return {
+        mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+        lo: Math.min(...values), hi: Math.max(...values),
+      };
+    })
+  );
+  const dataMax = Math.max(1, ...bands.flat().map(point => point.hi));
+  const yMax = Math.max(2, Math.ceil(dataMax / 2) * 2);
+  const { W, H, xAt, yAt, parts } = chartFrame(yMax, v => Math.round(v));
+  const showBand = members.length > 1;
+  bands.forEach((band, seat) => {
+    if (showBand) {
+      const upper = band.map((point, i) => `${xAt(i)},${yAt(point.hi)}`);
+      const lower = band.map((point, i) => `${xAt(i)},${yAt(point.lo)}`).reverse();
+      parts.push(`<polygon points="${upper.concat(lower).join(" ")}" fill="${COLORS[seat]}" fill-opacity="0.12"/>`);
+    }
+    const points = band.map((point, i) => `${xAt(i)},${yAt(point.mean)}`).join(" ");
+    parts.push(`<polyline points="${points}" fill="none" stroke="${COLORS[seat]}" stroke-width="1.6"/>`);
+    if (turns.length <= 40) band.forEach((point, i) =>
+      parts.push(`<circle cx="${xAt(i)}" cy="${yAt(point.mean)}" r="2" fill="${COLORS[seat]}"/>`));
+  });
+  return chartElement(title, W, H, parts);
 }
 
 const TOKEN_COLORS = { negotiation: "#3c6c9e", decision: "#6e8f3a", commentary: "#c97a29", other: "#9a8aa0" };
@@ -626,23 +840,71 @@ function usageCells(caller) {
     <td>${cost}</td>`;
 }
 
+// Per seat, the behavior-tag counts for the table, honoring the same agreement filter as the charts:
+// a tag occurrence counts only when its (turn, player, behavior) instance reached a selected agreement
+// level over the FULL panel. With every level on this equals the unfiltered totals. Member toggles do
+// not apply here — the table is a whole-panel aggregate, so the agreement chips are its only filter.
+function filteredTableTags() {
+  const perInstance = GAME.players.map(() => ({}));  // seat -> "behavior\0turn" -> { members:Set, occ }
+  GAME.commentary.forEach(comment => comment.tags.forEach(tag => {
+    const seat = GAME.players.findIndex(player => player.name === tag.player);
+    if (seat < 0) return;  // the commentator occasionally invents player names; drop those
+    const key = tag.behavior + " " + comment.turn;
+    const instance = perInstance[seat][key] ?? (perInstance[seat][key] = { members: new Set(), occ: 0 });
+    instance.members.add(comment.commentator_index);
+    instance.occ += 1;
+  }));
+  return GAME.players.map((_, seat) => {
+    const tags = {};
+    for (const [key, instance] of Object.entries(perInstance[seat])) {
+      if (!selectedAgreement.has(instance.members.size)) continue;
+      const behavior = key.split(" ")[0];
+      const entry = tags[behavior] ?? (tags[behavior] = { count: 0, byLevel: {} });
+      entry.count += instance.occ;
+      entry.byLevel[instance.members.size] = (entry.byLevel[instance.members.size] ?? 0) + 1;
+    }
+    return tags;
+  });
+}
+
+function tagChips(tags) {
+  const members = panelSize();
+  return Object.entries(tags).sort((a, b) => b[1].count - a[1].count).map(([behavior, info]) => {
+    const breakdown = members > 1
+      ? " · agreement " + Object.keys(info.byLevel).map(Number).sort((a, b) => b - a)
+          .map(level => `${level}/${members}×${info.byLevel[level]}`).join(", ")
+      : "";
+    const title = `${info.count} tag${info.count === 1 ? "" : "s"}${breakdown}`;
+    return `<span class="tag${valenceClass(behavior)}" title="${escapeHtml(title)}">` +
+      `${behavior}${info.count > 1 ? ` ×${info.count}` : ""}</span>`;
+  }).join("");
+}
+
+function tagFilterNote() {
+  const members = panelSize();
+  if (members < 2) return "";
+  const levels = [...selectedAgreement].sort((a, b) => a - b);
+  if (!levels.length) return "Behaviour tags: no agreement level is selected above, so nothing counts.";
+  if (levels.length === members) return "Behaviour tags count every annotation — use the agreement chips above to filter by panel consensus.";
+  return `Behaviour tags count only annotations at ${levels.map(level => `${level}/${members}`).join(", ")} panel agreement (set above).`;
+}
+
 function renderStatsTable() {
+  const tagsBySeat = filteredTableTags();
+  el("tagFilterNote").textContent = tagFilterNote();
   const rows = GAME.players.map((player, seat) => {
     const stats = GAME.stats.per_player[seat];
-    const tags = Object.entries(stats.tags).sort((a, b) => b[1] - a[1])
-      .map(([behavior, count]) =>
-        `<span class="tag${valenceClass(behavior)}">${behavior}${count > 1 ? ` ×${count}` : ""}</span>`).join("");
     return `<tr><td style="color:${COLORS[seat]};font-weight:700">${player.name}</td>
       <td>${stats.attacks}</td><td>${stats.conquests}</td>
       <td>${stats.armies_destroyed} / ${stats.armies_lost}</td>
       <td>${stats.public_messages} 📢 &nbsp;${stats.private_messages} 🔒</td>
       ${usageCells(player.name)}
-      <td>${tags || "—"}</td></tr>`;
+      <td>${tagChips(tagsBySeat[seat]) || "—"}</td></tr>`;
   });
-  if ((GAME.stats.usage ?? {}).commentator) {
-    rows.push(`<tr><td style="color:var(--dim);font-weight:700">🎙️ commentator</td>
-      <td>—</td><td>—</td><td>—</td><td>—</td>${usageCells("commentator")}<td>—</td></tr>`);
-  }
+  GAME.commentators.forEach(member => {
+    rows.push(`<tr><td style="color:${memberColor(member.index)};font-weight:700">🎙️ ${escapeHtml(member.label)}</td>
+      <td>—</td><td>—</td><td>—</td><td>—</td>${usageCells(`commentator[${member.index}]`)}<td>—</td></tr>`);
+  });
   el("statsTable").innerHTML = `<thead><tr><th>player</th><th>attacks</th><th>conquests</th>
     <th>armies destroyed / lost</th><th>messages</th>
     <th>api calls</th><th>tokens in / out</th><th>est. cost</th>
@@ -788,25 +1050,26 @@ async function refreshFromJournal() {
   lastFingerprint = fingerprint;
 
   const wasFollowingLatest = index === steps.length - 1;
-  const knownSteps = steps.length, knownMessages = GAME.messages.length, knownCommentary = GAME.commentary.length;
+  const knownSteps = steps.length, knownMessages = GAME.messages.length;
   steps.splice(0, steps.length, ...updated.steps);
   GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
   GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
   GAME.notes.splice(0, GAME.notes.length, ...updated.notes);
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
+  GAME.commentators = updated.commentators ?? GAME.commentators;
   GAME.result = updated.result;
   GAME.stats = updated.stats;
   if (!el("statsModal").hidden) renderStats();
   appendLog(Math.max(0, knownSteps - 1));
   appendChat(knownMessages);
-  appendCommentary(knownCommentary);
+  renderCommentary();  // rebuilt wholesale: a later member's record can change a turn's agreement
   updateResultBanner();
   el("slider").max = steps.length - 1;
   show(wasFollowingLatest ? steps.length - 1 : index);
 }
 
 buildBoard(); buildContinentLegend(); buildPlayers();
-appendChat(0); appendLog(0); appendCommentary(0);
+appendChat(0); appendLog(0); renderCommentary();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
 </script>

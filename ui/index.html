@@ -48,6 +48,8 @@
   .playerRow { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
   .playerRow .seat { color: var(--dim); width: 48px; font-size: 12px; text-transform: uppercase;
                      letter-spacing:.04em; }
+  .sectionLabel { color: var(--dim); font-size: 12px; margin: 16px 0 8px; }
+  .sectionLabel .hint { font-size: 11px; }
   .providerPicker { display: flex; gap: 4px; }
   .providerTile { background: #fff; border: 1px solid #c6c5c0; border-radius: 5px; padding: 3px 6px;
                   width: 42px; height: 30px; display: flex; align-items: center; justify-content: center;
@@ -75,8 +77,14 @@
     <div class="row">
       <button class="subtle" id="addPlayer">+ add player</button>
     </div>
+    <div class="sectionLabel">Commentator panel
+      <span class="hint">— each member annotates the whole game over the full vocabulary; every member's tags are
+        kept so you can read inter-annotator agreement. Leave empty for no commentary.</span></div>
+    <div id="commentatorRows"></div>
     <div class="row">
-      <label>commentator <select id="commentator"></select></label>
+      <button class="subtle" id="addCommentator">+ add commentator</button>
+    </div>
+    <div class="row">
       <label>seed <input type="number" id="seed" value="0" style="width:90px"></label>
       <label>max turns <input type="number" id="maxTurns" placeholder="default" style="width:90px"></label>
       <label title="above 1 launches a tournament: the same setup replicated on consecutive seeds">
@@ -116,10 +124,6 @@ async function loadModels() {
   tiersByProvider = catalog.tiers_by_provider;
   providers = Object.keys(tiersByProvider);
   efforts = catalog.efforts;
-  const flatSpecs = providers.flatMap(provider =>
-    Object.keys(tiersByProvider[provider]).map(tier => `${provider}:${tier}`));
-  el("commentator").innerHTML = '<option value="">none</option>' +
-    flatSpecs.map(spec => `<option value="${spec}">${spec}</option>`).join("");
   addPlayerRow(); addPlayerRow(); addPlayerRow();
 }
 
@@ -171,18 +175,36 @@ function renumber() {
     .forEach((seat, i) => seat.textContent = `seat ${i + 1}`);
 }
 
+// A commentator-panel row reuses the player row's provider/size/effort controls; a member
+// is just another provider:size:effort spec. The panel may hold any number (0 = no commentary).
+function addCommentatorRow() {
+  const provider = providers[0];
+  const row = document.createElement("div");
+  row.className = "playerRow commentatorRow";
+  row.innerHTML = `<span class="seat">🎙️</span>
+    <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
+    <select class="sizeSelect">${sizeOptions(provider, DEFAULT_SIZE)}</select>
+    <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
+    <button type="button" class="subtle remove">✕</button>`;
+  row.querySelectorAll(".providerTile").forEach(tile =>
+    tile.onclick = () => selectProvider(row, tile.dataset.provider));
+  row.querySelector(".remove").onclick = () => row.remove();
+  el("commentatorRows").appendChild(row);
+}
+
+const specFromRow = row => {
+  const provider = row.querySelector(".providerTile.active").dataset.provider;
+  return `${provider}:${row.querySelector(".sizeSelect").value}:${row.querySelector(".effortSelect").value}`;
+};
+
 async function launch() {
   el("launchError").textContent = "";
-  const players = [...document.querySelectorAll(".playerRow")].map(row => {
-    const provider = row.querySelector(".providerTile.active").dataset.provider;
-    const size = row.querySelector(".sizeSelect").value;
-    const effort = row.querySelector(".effortSelect").value;
-    return `${provider}:${size}:${effort}`;
-  });
+  const players = [...document.querySelectorAll("#playerRows .playerRow")].map(specFromRow);
+  const commentators = [...document.querySelectorAll("#commentatorRows .commentatorRow")].map(specFromRow);
   const body = {
     players,
     seed: Number(el("seed").value) || 0,
-    commentator: el("commentator").value || null,
+    commentators,
     max_turns: el("maxTurns").value ? Number(el("maxTurns").value) : null,
     parallel_games: Number(el("parallelGames").value) || 1,
   };
@@ -313,6 +335,7 @@ async function loadGames() {
 }
 
 el("addPlayer").onclick = addPlayerRow;
+el("addCommentator").onclick = addCommentatorRow;
 el("launch").onclick = launch;
 loadModels(); loadGames();
 setInterval(loadGames, 5000);

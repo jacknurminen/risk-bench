@@ -361,7 +361,7 @@ def _start_game_worker(game_directory: Path, manager: GameProcessManager, reques
         game_id=game_directory.name,
         players=request.players,
         seed=seed,
-        commentator_specs=_commentator_specs(spec=request.commentator),
+        commentators=request.commentators,
         max_turns=request.max_turns,
         journal_path=game_directory / "game.jsonl",
         log_path=game_directory / "worker.log",
@@ -380,22 +380,21 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
     manager.resume_game(
         game_id=game_id,
         journal_path=journal_path,
-        commentator_specs=_commentator_specs(spec=_launched_commentator(game_directory=game_directory)),
+        commentators=_launched_commentators(game_directory=game_directory),
         log_path=game_directory / "worker.log",
     )
 
 
-def _commentator_specs(spec: str | None) -> dict[str, str]:
-    # the web UI offers a single commentator model; run every rubric on it
-    return specs.parse_commentator_specs(values=[spec] if spec else [])
-
-
-def _launched_commentator(game_directory: Path) -> str | None:
+def _launched_commentators(game_directory: Path) -> list[str]:
     launch_path = game_directory / "launch.json"
     if not launch_path.is_file():
-        return None
-    commentator = json.loads(launch_path.read_text(encoding="utf-8")).get("commentator")
-    return str(commentator) if commentator is not None else None
+        return []
+    launch_record = json.loads(launch_path.read_text(encoding="utf-8"))
+    if launch_record.get("commentators") is not None:
+        return [str(spec) for spec in launch_record["commentators"]]
+    # launches predating the panel carried a single 'commentator' spec
+    legacy = launch_record.get("commentator")
+    return [str(legacy)] if legacy else []
 
 
 def _validate_launch_request(request: NewGameRequest) -> None:
@@ -407,9 +406,8 @@ def _validate_launch_request(request: NewGameRequest) -> None:
         for spec in request.players:
             if spec != "random":
                 specs.build_agent(spec=spec, settings=settings)
-        specs.build_commentators(
-            rubric_specs=_commentator_specs(spec=request.commentator), settings=settings, trace=None
-        )
+        # mirror player validation: build every panel member up front so a bad spec fails fast
+        specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

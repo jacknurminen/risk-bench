@@ -8,6 +8,7 @@ read back into the game — deleting a trace loses nothing about the game itself
 """
 
 import json
+import threading
 import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -128,6 +129,9 @@ class TraceWriter:
         self.kind = "unknown"
         self._sequence = _existing_record_count(path=path) if append and path.exists() else 0
         self._file = path.open("a" if append else "w", encoding="utf-8")
+        # the commentator panel traces its members concurrently, so the sequence
+        # counter and the append must be serialised across threads
+        self._lock = threading.Lock()
 
     def set_context(self, turn: int, kind: str) -> None:
         """Set the game context stamped onto subsequent records.
@@ -160,12 +164,15 @@ class TraceWriter:
             error: The exception description when the call raised, else None.
             latency_ms: Wall-clock duration of the call in milliseconds.
         """
-        self._sequence += 1
+        with self._lock:
+            self._sequence += 1
+            sequence = self._sequence
+            turn, kind = self.turn, self.kind
         record = {
-            "seq": self._sequence,
+            "seq": sequence,
             "time": datetime.now(tz=UTC).isoformat(),
-            "turn": self.turn,
-            "kind": self.kind,
+            "turn": turn,
+            "kind": kind,
             "caller": caller,
             "model": model,
             "messages": [_message_to_json(message=message) for message in messages],
@@ -179,8 +186,10 @@ class TraceWriter:
             "output_tokens": response.output_tokens if response is not None else None,
             "latency_ms": latency_ms,
         }
-        self._file.write(json.dumps(record) + "\n")
-        self._file.flush()
+        line = json.dumps(record) + "\n"
+        with self._lock:
+            self._file.write(line)
+            self._file.flush()
 
     def close(self) -> None:
         """Close the underlying file."""

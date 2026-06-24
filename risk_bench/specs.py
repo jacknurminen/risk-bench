@@ -21,7 +21,7 @@ from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
-from risk_bench.runner.commentary import RUBRICS, Commentator
+from risk_bench.runner.commentary import Commentator
 from risk_bench.tournament.runner import PlayerFactory
 
 TIER_MODELS_BY_PROVIDER: Final[dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]]] = {
@@ -158,69 +158,36 @@ def build_agent(spec: str, settings: Settings) -> Agent:
 
 
 def build_commentators(
-    rubric_specs: dict[str, str], settings: Settings, trace: TraceWriter | None
+    commentator_specs: list[str], settings: Settings, trace: TraceWriter | None
 ) -> tuple[Commentator, ...]:
-    """Build one commentator per rubric from a rubric→model-spec mapping.
+    """Build the commentator panel: one independent annotator per member spec.
+
+    Every member runs the same single full-vocabulary pass, so members are directly comparable
+    for the inter-annotator agreement signal. They are built in panel order and each is tagged
+    with its index, so its trace and journal records stay distinguishable from the others'.
 
     Args:
-        rubric_specs: Maps each rubric name (e.g. 'skill', 'conduct') to the model spec that
-            should run it; empty for an uncommentated game.
+        commentator_specs: One model spec per panel member, in panel order; empty for no commentary.
         settings: Provides API keys and the token limit.
-        trace: Records the commentators' API calls when given; None disables tracing.
+        trace: Records the panel's API calls when given; None disables tracing.
 
     Returns:
-        One commentator per requested rubric, in the canonical rubric order.
+        One commentator per member spec, in panel order.
 
     Raises:
-        ValueError: If a rubric name is unknown, or a spec is invalid or its API key is missing.
+        ValueError: If a spec is invalid or its API key is missing.
     """
-    unknown = set(rubric_specs) - set(RUBRICS)
-    if unknown:
-        raise ValueError(f"Unknown commentator rubric(s) {sorted(unknown)}; choose from {sorted(RUBRICS)}.")
     return tuple(
-        _build_commentator(rubric_name=name, spec=rubric_specs[name], settings=settings, trace=trace)
-        for name in RUBRICS
-        if name in rubric_specs
+        _build_commentator(index=index, spec=spec, settings=settings, trace=trace)
+        for index, spec in enumerate(commentator_specs)
     )
 
 
-def _build_commentator(rubric_name: str, spec: str, settings: Settings, trace: TraceWriter | None) -> Commentator:
+def _build_commentator(index: int, spec: str, settings: Settings, trace: TraceWriter | None) -> Commentator:
     agent = build_agent(spec=spec, settings=settings)
     if trace is not None:
-        agent = TracingAgent(
-            agent=agent, model=resolve_model(spec=spec), caller=f"commentator:{rubric_name}", writer=trace
-        )
-    return Commentator(agent=agent, rubric=RUBRICS[rubric_name])
-
-
-def parse_commentator_specs(values: list[str]) -> dict[str, str]:
-    """Parse CLI '--commentator' values into a rubric→model-spec mapping.
-
-    Each value is either 'rubric=spec' (assigns one rubric) or a bare 'spec' (assigns every
-    rubric to that one model). Later values override earlier ones for the same rubric.
-
-    Args:
-        values: Raw '--commentator' option values, possibly empty.
-
-    Returns:
-        A rubric→spec mapping; empty when no values were given.
-
-    Raises:
-        ValueError: If a value names an unknown rubric or is malformed.
-    """
-    rubric_specs: dict[str, str] = {}
-    for value in values:
-        if "=" not in value:
-            rubric_specs = {name: value for name in RUBRICS}
-            continue
-        rubric_name, _, spec = value.partition("=")
-        rubric_name, spec = rubric_name.strip(), spec.strip()
-        if rubric_name not in RUBRICS:
-            raise ValueError(f"Unknown commentator rubric '{rubric_name}'; choose from {sorted(RUBRICS)}.")
-        if not spec:
-            raise ValueError(f"Commentator rubric '{rubric_name}' has no model spec; use '{rubric_name}=<spec>'.")
-        rubric_specs[rubric_name] = spec
-    return rubric_specs
+        agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller=f"commentator[{index}]", writer=trace)
+    return Commentator(agent=agent, spec=spec)
 
 
 def _split_effort(spec: str) -> tuple[str, ReasoningEffort | None]:

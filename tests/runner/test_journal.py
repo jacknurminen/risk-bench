@@ -30,6 +30,7 @@ def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -
         allow_private_messages=False,
         max_negotiation_rounds=3,
         commentators=(),
+        max_concurrent_commentators=1,
         journal=journal,
         trace=None,
         verbose=False,
@@ -46,6 +47,7 @@ def write_game_journal(path: Path, seed: int, max_turns: int):
             max_turns=max_turns,
             allow_private_messages=False,
             max_negotiation_rounds=3,
+            commentators=[],
         )
     )
     record = journaled_runner(journal=journal, seed=seed, max_turns=max_turns).run()
@@ -137,6 +139,7 @@ def test_thoughts_are_journaled_but_ignored_by_replay(tmp_path: Path):
             max_turns=3,
             allow_private_messages=True,
             max_negotiation_rounds=3,
+            commentators=[],
         )
     )
     GameRunner(
@@ -146,6 +149,7 @@ def test_thoughts_are_journaled_but_ignored_by_replay(tmp_path: Path):
         allow_private_messages=True,
         max_negotiation_rounds=3,
         commentators=(),
+        max_concurrent_commentators=1,
         journal=journal,
         trace=None,
         verbose=False,
@@ -191,6 +195,7 @@ def test_note_records_are_observational_and_ignored_on_restore(tmp_path: Path):
             max_turns=10,
             allow_private_messages=False,
             max_negotiation_rounds=3,
+            commentators=[],
         )
     )
     journal.write_note(player_id="alice", turn_number=2, text="bob is massing on my border")
