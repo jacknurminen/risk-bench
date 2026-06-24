@@ -16,10 +16,14 @@ import json
 import math
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from risk_bench.agents.tracing import TOKEN_CATEGORY_ORDER
 from risk_bench.viewer.snapshots import build_view_model
+
+# the scored valences a stacked agreement bar is drawn for; affect tags are still counted toward the
+# overall unanimous share but have no cumulative chart, so they get no per-valence breakdown here
+_SCORED_VALENCES: Final[tuple[str, ...]] = ("strong", "weak", "cooperative", "adversarial", "deceptive")
 
 # resamples per per-turn bootstrap interval; 500 gives a visually stable 2.5/97.5
 # band while keeping the whole-page rebuild well under the live poll interval, since
@@ -136,6 +140,62 @@ def build_tournament_view_model(tournament_directory: Path) -> dict[str, Any]:
         "per_turn_usage": _merge_per_turn_usage(member_models=[model for _, model in members]),
         "games": [_game_row(game_id=game_id, model=model) for game_id, model in members],
         "table": _aggregate_table(player_names=player_names, members=members),
+        "agreement": _aggregate_agreement(player_names=player_names, members=members),
+    }
+
+
+def _aggregate_agreement(player_names: list[str], members: list[tuple[str, dict[str, Any]]]) -> dict[str, Any] | None:
+    """Pool every game's per-instance annotator agreement into a cross-game composition per player.
+
+    An instance is a single ``(turn, player, behavior)`` judgement; its agreement level is how many
+    of that game's panel members made it. Per player we count, by behavior valence, how many instances
+    landed at each level (1..panel_size), plus the overall total and the unanimous subset — the raw
+    material for the stacked agreement bars and the per-player unanimous share. Returns None when no
+    member game ran a commentator panel.
+    """
+    commentated = [model for _, model in members if model.get("commentators")]
+    if not commentated:
+        return None
+    panel_size = max(len(model["commentators"]) for model in commentated)
+    by_valence = {name: {valence: [0] * panel_size for valence in _SCORED_VALENCES} for name in player_names}
+    totals = {name: 0 for name in player_names}
+    unanimous = {name: 0 for name in player_names}
+    for model in commentated:
+        game_panel_size = len(model["commentators"])
+        tag_valence = model["stats"]["tag_valence"]
+        instances = _instances_by_player(commentary=model["commentary"])
+        for name in player_names:
+            for behavior, level in instances.get(name, []):
+                totals[name] += 1
+                if level == game_panel_size:
+                    unanimous[name] += 1
+                valence = tag_valence.get(behavior)
+                if valence in by_valence[name] and 1 <= level <= panel_size:
+                    by_valence[name][valence][level - 1] += 1
+    return {
+        "panel_size": panel_size,
+        "games": len(commentated),
+        "levels": list(range(1, panel_size + 1)),
+        "per_player": [
+            {"by_valence": by_valence[name], "total": totals[name], "unanimous": unanimous[name]}
+            for name in player_names
+        ],
+    }
+
+
+def _instances_by_player(commentary: list[dict[str, Any]]) -> dict[str, list[tuple[str, int]]]:
+    # one pass over a game's commentary: each player's (turn, behavior) instances, each paired with the
+    # number of distinct members that flagged it (its agreement level within this game's panel)
+    members_by_instance: dict[str, dict[tuple[int, str], set[int]]] = {}
+    for comment in commentary:
+        for tag in comment["tags"]:
+            instance = (int(comment["turn"]), tag["behavior"])
+            members_by_instance.setdefault(tag["player"], {}).setdefault(instance, set()).add(
+                comment["commentator_index"]
+            )
+    return {
+        player: [(behavior, len(members)) for (_, behavior), members in instances.items()]
+        for player, instances in members_by_instance.items()
     }
 
 

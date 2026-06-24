@@ -72,6 +72,62 @@ def test_aggregates_count_wins_and_sum_per_game_totals(tmp_path: Path):
         assert row["attacks"] >= 0 and row["cost_usd"] is None  # random players: no trace, no cost
 
 
+def _commentated_tournament(tmp_path: Path, seeds: list[int], commentators: list[str], commentary: list[dict]) -> Path:
+    """A tournament whose every member game ran the same panel and the given commentary records."""
+    directory = tournament_directory_with_games(tmp_path=tmp_path, seeds=seeds)
+    manifest = json.loads((directory / "tournament.json").read_text(encoding="utf-8"))
+    for game_id in manifest["game_ids"]:
+        path = directory / game_id / "game.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        header = json.loads(lines[0])
+        header["commentators"] = commentators
+        comment_lines = [json.dumps({"type": "commentary", **comment}) for comment in commentary]
+        path.write_text("\n".join([json.dumps(header)] + lines[1:-1] + comment_lines + lines[-1:]) + "\n")
+    return directory
+
+
+def test_agreement_pools_per_instance_consensus_across_games(tmp_path: Path):
+    # in each game: both members flag deception (unanimous), only member 0 flags betrayal (a split)
+    commentary = [
+        {
+            "turn": 1,
+            "commentator": "anthropic:hi",
+            "commentator_index": 0,
+            "text": "a",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"},
+                {"player": PLAYER_NAMES[0], "behavior": "betrayal", "note": "n"},
+            ],
+        },
+        {
+            "turn": 1,
+            "commentator": "google:hi",
+            "commentator_index": 1,
+            "text": "g",
+            "tags": [{"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"}],
+        },
+    ]
+    directory = _commentated_tournament(
+        tmp_path=tmp_path, seeds=[11, 12], commentators=["anthropic:hi", "google:hi"], commentary=commentary
+    )
+
+    agreement = build_tournament_view_model(tournament_directory=directory)["agreement"]
+
+    assert agreement["panel_size"] == 2 and agreement["games"] == 2 and agreement["levels"] == [1, 2]
+    first = agreement["per_player"][0]
+    # by_valence lists are indexed by level-1; deception is unanimous (level 2) in both games
+    assert first["by_valence"]["deceptive"] == [0, 2]
+    assert first["by_valence"]["adversarial"] == [2, 0]  # betrayal split (level 1) in both games
+    assert (first["total"], first["unanimous"]) == (4, 2)  # 50% unanimous
+    assert all(agreement["per_player"][seat]["total"] == 0 for seat in range(1, len(PLAYER_NAMES)))
+
+
+def test_agreement_is_absent_without_a_panel(tmp_path: Path):
+    directory = tournament_directory_with_games(tmp_path=tmp_path, seeds=[11, 12])
+
+    assert build_tournament_view_model(tournament_directory=directory)["agreement"] is None
+
+
 def test_a_directory_without_a_manifest_is_rejected(tmp_path: Path):
     with pytest.raises(ValueError, match="missing tournament.json"):
         build_tournament_view_model(tournament_directory=tmp_path)

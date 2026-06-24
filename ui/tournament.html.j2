@@ -33,7 +33,9 @@
   .controls { display:flex; flex-wrap:wrap; gap:16px; margin:0 0 14px; font-size:12px; }
   .controls label { display:inline-flex; align-items:center; gap:5px; cursor:pointer; user-select:none; }
   .controls input { accent-color: var(--accent); }
-  #charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  #charts, #agreementCharts { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  #agreementLegend span.swatch { display:inline-block; width:9px; height:9px; border-radius:2px;
+                                 margin-right:3px; vertical-align:-1px; }
   .chart h4 { margin:0 0 4px; font:600 10px var(--sans); text-transform:uppercase; letter-spacing:.08em;
               color:var(--dim); }
   .tokenLegend { font-size:11px; color:var(--dim); margin:0 0 4px; }
@@ -71,6 +73,23 @@
     <label><input type="checkbox" id="toggleGames" checked> individual games</label>
   </div>
   <div id="charts"></div>
+
+  <div id="agreementSection" hidden>
+    <h2>Annotator agreement</h2>
+    <div class="note">How often the commentator panel agreed, pooled across all games. Each bar is one model's
+      tags of that type, split by how many of the panel's members flagged the same (turn, player, behavior):
+      darker = stronger consensus. Unanimous tags are the high-confidence signal; the lighter split segments
+      are the ambiguous cases worth a human read. The unanimous share per model is in the table below.</div>
+    <div class="controls">
+      <label>count
+        <select id="agreementMode">
+          <option value="total">summed across games</option>
+          <option value="pergame">per game</option>
+        </select></label>
+      <span id="agreementLegend"></span>
+    </div>
+    <div id="agreementCharts"></div>
+  </div>
 
   <h2>API usage per turn</h2>
   <div class="note">Mean per turn across the games. Each turn shows two bars: input (the prompt sent) on the
@@ -118,8 +137,84 @@ function render(data) {
     .map((name, seat) => `<span style="color:${COLORS[seat]}">${name}</span>`).join("");
   renderGamesTable(data);
   drawCharts();
+  renderAgreement(data);
   renderTokenChart();
   renderAggregateTable(data);
+}
+
+// One stacked bar per model, split by how many panel members agreed on each tag, pooled across games.
+// Chips suit a single game's per-turn series; a tournament wants the aggregate composition, so agreement
+// is shown rather than filtered. Darker segments = stronger consensus; the lighter ones are the splits.
+const AGREEMENT_VALENCES = [
+  ["strong", "skill: strong play"],
+  ["weak", "skill: weak play"],
+  ["cooperative", "conduct: cooperative"],
+  ["adversarial", "conduct: adversarial"],
+  ["deceptive", "conduct: deception"],
+];
+
+const agreementShade = (level, panelSize) => {
+  const t = panelSize <= 1 ? 1 : (level - 1) / (panelSize - 1);  // 0 at 1/m (light) .. 1 at m/m (dark)
+  return `hsl(212 32% ${Math.round(74 - 46 * t)}%)`;
+};
+
+function renderAgreement(data) {
+  const agreement = data.agreement;
+  const present = agreement && agreement.panel_size >= 2;
+  el("agreementSection").hidden = !present;
+  if (!present) return;
+  el("agreementLegend").innerHTML = agreement.levels.map(level =>
+    `<span class="swatch" style="background:${agreementShade(level, agreement.panel_size)}"></span>${level}/${agreement.panel_size}`
+  ).join(" &nbsp; ");
+  drawAgreementCharts();
+}
+
+function drawAgreementCharts() {
+  if (!latestData?.agreement) return;
+  const mode = el("agreementMode").value;
+  const container = el("agreementCharts");
+  container.innerHTML = "";
+  for (const [valence, title] of AGREEMENT_VALENCES) {
+    container.appendChild(buildAgreementChart(latestData, valence, title, mode));
+  }
+}
+el("agreementMode").addEventListener("change", drawAgreementCharts);
+
+function buildAgreementChart(data, valence, title, mode) {
+  const agreement = data.agreement, m = agreement.panel_size, games = agreement.games;
+  const W = 470, rowH = 26, PAD = { left: 118, right: 12, top: 8, bottom: 20 };
+  const H = PAD.top + data.players.length * rowH + PAD.bottom;
+  const fmt = mode === "pergame" ? (v => v.toFixed(1)) : (v => String(v));
+  const scale = value => mode === "pergame" ? value / games : value;
+  const perPlayer = data.players.map((_, seat) => agreement.per_player[seat].by_valence[valence].map(scale));
+  const xMax = Math.max(1, ...perPlayer.map(levels => levels.reduce((sum, value) => sum + value, 0)));
+  const xAt = value => PAD.left + (value / xMax) * (W - PAD.left - PAD.right);
+  const parts = [];
+  for (const fraction of [0, 0.5, 1]) {
+    const gx = xAt(xMax * fraction);
+    parts.push(`<line x1="${gx}" y1="${PAD.top}" x2="${gx}" y2="${H - PAD.bottom}" stroke="#e8e7e3"/>`);
+    parts.push(`<text x="${gx}" y="${H - 6}" class="axis" text-anchor="middle">${fmt(xMax * fraction)}</text>`);
+  }
+  data.players.forEach((name, seat) => {
+    const y = PAD.top + seat * rowH;
+    const label = name.length > 16 ? name.slice(0, 15) + "…" : name;
+    parts.push(`<text x="${PAD.left - 6}" y="${y + rowH / 2 + 3}" class="axis" text-anchor="end"
+      fill="${COLORS[seat]}">${escapeHtml(label)}<title>${escapeHtml(name)}</title></text>`);
+    let base = 0;
+    perPlayer[seat].forEach((value, levelIndex) => {
+      if (value > 0) {
+        const x0 = xAt(base), width = xAt(base + value) - x0;
+        parts.push(`<rect x="${x0.toFixed(2)}" y="${y + 4}" width="${Math.max(0, width).toFixed(2)}"
+          height="${rowH - 9}" fill="${agreementShade(levelIndex + 1, m)}"><title>${escapeHtml(name)} —
+          ${levelIndex + 1}/${m}: ${fmt(value)}</title></rect>`);
+      }
+      base += value;
+    });
+  });
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
+  return chart;
 }
 
 function drawCharts() {
@@ -290,6 +385,7 @@ function buildTokenChart(usage) {
 }
 
 function renderAggregateTable(data) {
+  const agreement = data.agreement && data.agreement.panel_size >= 2 ? data.agreement : null;
   const rows = data.table.map((row, seat) => {
     const interval = `${Math.round(row.win_rate_low * 100)}–${Math.round(row.win_rate_high * 100)}%`;
     const tags = Object.entries(row.tags).sort((a, b) => b[1] - a[1])
@@ -302,12 +398,23 @@ function renderAggregateTable(data) {
       <td class="num">${row.armies_destroyed} / ${row.armies_lost}</td>
       <td class="num">${row.public_messages} 📢 ${row.private_messages} 🔒</td>
       <td class="num">${row.input_tokens.toLocaleString("en-US")} / ${row.output_tokens.toLocaleString("en-US")}</td>
-      <td class="num">${cost}</td><td>${tags || "—"}</td></tr>`;
+      <td class="num">${cost}</td>${unanimousCell(agreement, seat)}<td>${tags || "—"}</td></tr>`;
   });
+  const unanimousHeader = agreement
+    ? '<th title="share of this model\'s tags on which the whole panel agreed, across all games">% unanimous</th>'
+    : "";
   el("aggregateTable").innerHTML = `<thead><tr><th>player</th><th>wins</th><th>win rate 95% CI</th>
     <th>attacks</th><th>conquests</th><th>destroyed / lost</th><th>messages</th>
-    <th>tokens in / out</th><th>est. cost</th><th>behavior tags</th></tr></thead>
+    <th>tokens in / out</th><th>est. cost</th>${unanimousHeader}<th>behavior tags</th></tr></thead>
     <tbody>${rows.join("")}</tbody>`;
+}
+
+function unanimousCell(agreement, seat) {
+  if (!agreement) return "";
+  const player = agreement.per_player[seat];
+  if (!player.total) return '<td class="num">—</td>';
+  return `<td class="num">${Math.round(100 * player.unanimous / player.total)}%
+    <span style="color:var(--dim)">(${player.unanimous}/${player.total})</span></td>`;
 }
 
 render(DATA);
