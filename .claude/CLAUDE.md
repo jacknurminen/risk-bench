@@ -19,3 +19,10 @@ These rules MUST be followed by all AI coding agents.
 ## Testing
 
 See [Testing Guidelines](../docs/testing.md) for testing philosophy and practices.
+
+## Worktrees
+
+When asked to create or work in a git worktree, use the helper scripts rather than raw `git worktree` — they handle the per-worktree setup (gitignored `.venv` and `data/`) that a bare checkout misses.
+
+- **Create:** `scripts/new-worktree.sh <branch> [base-ref] [--seed-data]` — creates `../risk-bench-<branch>` adjacent to the repo, copies `.env` if present, runs `uv sync`.
+- **Tear down:** `scripts/rm-worktree.sh <branch> [--force] [--delete-branch]`.
