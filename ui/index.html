@@ -98,8 +98,9 @@
   <div class="panel">
     <table>
       <thead><tr><th>started</th><th>players</th><th class="colStatus">status</th><th>winner</th>
-        <th>turn</th><th>tokens in / out</th><th>est. cost</th><th></th></tr></thead>
-      <tbody id="games"><tr><td class="empty" colspan="8">Loading…</td></tr></tbody>
+        <th>turn</th><th>tokens in / out</th><th>est. cost</th>
+        <th title="tokens (in + out) and cost per turn">avg / turn</th><th></th></tr></thead>
+      <tbody id="games"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -254,6 +255,13 @@ const compact = n => n == null ? null
 const tokensCell = (inputTokens, outputTokens) =>
   inputTokens == null ? "—" : `${compact(inputTokens)} / ${compact(outputTokens)}`;
 const costCell = cost => cost == null ? "—" : `$${cost.toFixed(2)}`;
+// Tokens (input + output) and cost divided by the turn count, so games of different
+// lengths compare on a per-turn basis rather than by raw totals.
+const avgPerTurnCell = (inputTokens, outputTokens, cost, turns) => {
+  if (inputTokens == null || !turns) return "—";
+  const tokensPerTurn = compact(Math.round((inputTokens + outputTokens) / turns));
+  return cost == null ? tokensPerTurn : `${tokensPerTurn} · $${(cost / turns).toFixed(3)}`;
+};
 
 function gameRow(game, child) {
   const started = new Date(game.modified_at).toLocaleString();
@@ -274,7 +282,9 @@ function gameRow(game, child) {
     <td>${first}</td><td>${players}</td>
     <td>${status}</td><td>${winner}</td><td class="num">${turn}</td>
     <td class="num">${tokensCell(game.input_tokens, game.output_tokens)}</td>
-    <td class="num">${costCell(game.cost_usd)}</td><td>${control}</td></tr>`;
+    <td class="num">${costCell(game.cost_usd)}</td>
+    <td class="num">${avgPerTurnCell(game.input_tokens, game.output_tokens, game.cost_usd, game.turn_count)}</td>
+    <td>${control}</td></tr>`;
 }
 
 function tournamentRows(tournament, games) {
@@ -304,6 +314,7 @@ function tournamentRows(tournament, games) {
     <td>${status}</td><td>${winners}</td><td></td>
     <td class="num">${tokensCell(inputTokens, outputTokens)}</td>
     <td class="num">${costCell(cost)}</td>
+    <td class="num">${avgPerTurnCell(inputTokens, outputTokens, cost, totalOrNull(games.map(game => game.turn_count)))}</td>
     <td><button class="tiny subtle"
       onclick="event.stopPropagation();location.href='/tournaments/${tournament.id}'">📊 stats</button></td></tr>`;
   return header + (expanded ? games.map(game => gameRow(game, true)).join("") : "");
@@ -313,7 +324,7 @@ async function loadGames() {
   const payload = await (await fetch("/api/games")).json();
   const body = el("games");
   if (!payload.games.length) {
-    body.innerHTML = '<tr><td class="empty" colspan="8">No games yet — start one above.</td></tr>';
+    body.innerHTML = '<tr><td class="empty" colspan="9">No games yet — start one above.</td></tr>';
     return;
   }
   const gamesByTournament = {};
