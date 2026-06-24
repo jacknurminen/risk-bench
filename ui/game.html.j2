@@ -75,11 +75,17 @@
   #log h3 label { text-transform:none; letter-spacing:normal; font-weight:400; cursor:pointer; }
   .banner { padding:4px 8px; border-radius:4px; background:#f0efec; border:1px solid var(--line);
             margin-bottom:8px; }
-  #statsModal { position:fixed; inset:0; background:#1f232955; display:flex; align-items:center;
+  #statsModal, #notesModal { position:fixed; inset:0; background:#1f232955; display:flex; align-items:center;
                 justify-content:center; z-index:10; }
-  #statsModal[hidden] { display:none; }
+  #statsModal[hidden], #notesModal[hidden] { display:none; }
   #statsBox { width:min(1080px, 94vw); max-height:92vh; overflow:auto; padding:16px 20px; }
-  #statsBox h3 { display:flex; justify-content:space-between; align-items:center; }
+  #statsBox h3, #notesBox h3 { display:flex; justify-content:space-between; align-items:center; }
+  #notesBox { width:min(680px, 92vw); max-height:88vh; overflow:auto; padding:16px 20px; }
+  .notesBtn { float:right; font-size:11px; padding:1px 6px; cursor:pointer; }
+  .noteVersion { border-top:1px solid var(--line); padding:8px 0; }
+  .noteVersion:first-child { border-top:none; }
+  .noteVersion .meta { color:var(--dim); font-size:11px; margin-bottom:3px; }
+  .noteText { white-space:pre-wrap; }
   #statsLegend span { margin-right:12px; font-weight:600; }
   #statsLegend .markerKey { color:var(--dim); font-weight:400; float:right; }
   #charts { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:10px; }
@@ -196,12 +202,19 @@
     </div>
   </div>
 </div>
+<div id="notesModal" hidden>
+  <div id="notesBox" class="panel">
+    <h3><span id="notesTitle"></span><button id="notesClose">✕ close</button></h3>
+    <div id="notesBody"></div>
+  </div>
+</div>
 <script>
 const GAME = {{ game_json }};
 const LIVE = {{ live_json }};
 const POLL_URL = {{ poll_url_json }};
 const TRACE_URL = {{ trace_url_json }};
 const COLORS = ["#a33f3b","#3c6c9e","#6e8f3a","#6b5288","#c97a29","#2f8a9e"];
+GAME.notes ??= [];  // tolerate view models predating private notes
 const steps = GAME.steps;
 let index = 0;
 let timer = null;
@@ -321,11 +334,28 @@ function buildPlayers() {
     const card = document.createElement("div");
     card.className = "player";
     card.id = "p-" + seat;
-    card.innerHTML = `<div class="pname" style="color:${COLORS[seat]}">${player.name}</div>
+    card.innerHTML = `<div class="pname" style="color:${COLORS[seat]}">${player.name}` +
+      `<button class="notesBtn" data-seat="${seat}" title="private notes">📝 notes</button></div>
       <div class="mission">${player.mission}</div><div class="stats"></div>`;
     container.appendChild(card);
   });
+  container.querySelectorAll(".notesBtn").forEach(button =>
+    button.onclick = () => openNotes(Number(button.dataset.seat)));
   updateResultBanner();
+}
+
+// Notes modal: each player rewrites its private notes at the end of every turn, and we
+// keep every version, so this shows the whole timeline of how a player's memory drifted.
+function openNotes(seat) {
+  const player = GAME.players[seat];
+  const versions = GAME.notes.filter(note => note.player === player.name);
+  el("notesTitle").innerHTML = `📝 ${colorizeNames(player.name)} — private notes`;
+  el("notesBody").innerHTML = versions.length
+    ? versions.map(note =>
+        `<div class="noteVersion"><div class="meta">end of turn ${note.turn}</div>` +
+        `<div class="noteText">${richText(note.text)}</div></div>`).reverse().join("")
+    : '<div class="empty">This player kept no notes (only LLM players take notes).</div>';
+  el("notesModal").hidden = false;
 }
 
 function updateResultBanner() {
@@ -712,6 +742,8 @@ el("statsButton").onclick = () => {
 };
 el("statsClose").onclick = () => el("statsModal").hidden = true;
 el("statsModal").onclick = event => { if (event.target === el("statsModal")) el("statsModal").hidden = true; };
+el("notesClose").onclick = () => el("notesModal").hidden = true;
+el("notesModal").onclick = event => { if (event.target === el("notesModal")) el("notesModal").hidden = true; };
 
 function stopPlaying() { clearInterval(timer); timer = null; el("play").textContent = "▶ play"; }
 function turnBoundary(direction) {
@@ -735,7 +767,7 @@ el("play").onclick = () => {
   timer = setInterval(() => { if (index >= steps.length - 1) stopPlaying(); else show(index + 1); }, 250);
 };
 document.addEventListener("keydown", event => {
-  if (event.key === "Escape") el("statsModal").hidden = true;
+  if (event.key === "Escape") { el("statsModal").hidden = true; el("notesModal").hidden = true; }
   if (event.key === "ArrowLeft") show(index - 1);
   if (event.key === "ArrowRight") show(index + 1);
 });
@@ -750,7 +782,7 @@ async function refreshFromJournal() {
   // on a separate line), so the fingerprint covers it, not just the counts
   const fingerprint = JSON.stringify([
     updated.steps.length, updated.steps.at(-1),
-    updated.messages.length, updated.thoughts.length, updated.commentary.length, updated.result,
+    updated.messages.length, updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.result,
   ]);
   if (fingerprint === lastFingerprint) return;
   lastFingerprint = fingerprint;
@@ -760,6 +792,7 @@ async function refreshFromJournal() {
   steps.splice(0, steps.length, ...updated.steps);
   GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
   GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
+  GAME.notes.splice(0, GAME.notes.length, ...updated.notes);
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.result = updated.result;
   GAME.stats = updated.stats;

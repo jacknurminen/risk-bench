@@ -52,6 +52,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     steps = [_step(state=state, player_names=player_names, action_text=None, events=[])]
     messages = []
     thoughts = []
+    notes = []
     commentary = []
     result = None
     combat_totals = {
@@ -94,6 +95,15 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 messages.append({**record["message"], "step": len(steps) - 1})
             case "thought":
                 thoughts.append({"player": record["player"], "text": record["text"], "step": len(steps) - 1})
+            case "note":
+                notes.append(
+                    {
+                        "player": record["player"],
+                        "turn": int(record["turn"]),
+                        "text": record["text"],
+                        "step": len(steps) - 1,
+                    }
+                )
             case "commentary":
                 commentary.append(
                     {
@@ -123,6 +133,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         "steps": steps,
         "messages": messages,
         "thoughts": thoughts,
+        "notes": notes,
         "commentary": commentary,
         "result": result,
         "stats": {
