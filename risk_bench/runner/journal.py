@@ -109,6 +109,19 @@ class JournalWriter:
         """
         self._write_line(record={"type": "thought", "player": player_id, "text": text})
 
+    def write_note(self, player_id: PlayerId, turn_number: int, text: str) -> None:
+        """Record a player's rewritten notes after a turn; observational only, never replayed.
+
+        Each version is its own record (the player rewrites in full each turn), so
+        the journal keeps the entire history of how a player's notes evolved.
+
+        Args:
+            player_id: The player whose notes these are.
+            turn_number: The turn that had just ended when the notes were written.
+            text: The notes as the player rewrote them.
+        """
+        self._write_line(record={"type": "note", "player": player_id, "turn": turn_number, "text": text})
+
     def write_commentary(self, turn_number: int, rubric: str, text: str, tags: list[dict[str, str]]) -> None:
         """Record one commentator's take on a completed turn; observational only.
 

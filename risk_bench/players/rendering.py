@@ -80,10 +80,11 @@ def render_system_prompt(view: PlayerView) -> str:
 
 
 def render_decision_prompt(request: DecisionRequest) -> str:
-    """Render a decision point: recent events, chat, board, standings, and the task.
+    """Render a decision point: notes, this turn's events and chat, board, standings, and the task.
 
-    The board is serialized grouped by continent with owners, army counts, and
-    adjacency, so the model never has to recall the map from memory.
+    Only the current turn's events and chat are shown; everything older the player
+    carries in its own notes. The board is serialized grouped by continent with
+    owners and army counts, so the model never has to recall the map from memory.
 
     Args:
         request: The decision point to render.
@@ -94,6 +95,7 @@ def render_decision_prompt(request: DecisionRequest) -> str:
     view = request.view
     sections = [
         f"Turn {view.turn_number}, {view.phase} phase. It is your move.",
+        _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
         _render_players(view=view),
@@ -123,6 +125,7 @@ def render_negotiation_prompt(view: PlayerView) -> str:
     )
     sections = [
         f"Turn {view.turn_number} negotiation round. {speaker_note}",
+        _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
         _render_players(view=view),
@@ -134,22 +137,72 @@ def render_negotiation_prompt(view: PlayerView) -> str:
     return "\n\n".join(section for section in sections if section)
 
 
-_MAX_CHAT_MESSAGES_SHOWN: Final[int] = 40
+def render_noting_prompt(view: PlayerView) -> str:
+    """Render the end-of-turn noting prompt: the turn just played, then a rewrite instruction.
+
+    A dedicated, neutral call: the model rereads the turn that just ended and its
+    own previous notes, then rewrites a fresh, bounded notepad. These notes are
+    the only memory it keeps of earlier turns, so what it records, consolidates,
+    or drops is entirely its own choice.
+
+    Args:
+        view: The noting player's view, carrying the just-ended turn's events and
+            chat plus the player's current notes.
+
+    Returns:
+        The user-turn prompt text inviting a notes rewrite.
+    """
+    sections = [
+        "The turn that just ended is summarised below. Update the private notes you keep for your "
+        "future self before the next turn begins.",
+        _render_events(view=view),
+        _render_chat(view=view),
+        _render_players(view=view),
+        _render_board(view=view),
+        _render_notes_for_update(view=view),
+        _NOTING_INSTRUCTION,
+    ]
+    return "\n\n".join(section for section in sections if section)
+
+
+# soft target the noting prompt suggests, so a long game's notes stay bounded; not enforced
+_NOTES_WORD_BUDGET: Final[int] = 200
+
+_NOTING_INSTRUCTION: Final[str] = (
+    "These notes are your only memory of earlier turns: on your next turn the live board and the "
+    "fixed map are always shown again, so you never need to record who owns what or how many armies "
+    "sit where — only what the board cannot tell you later (intentions, promises, threats, alliances, "
+    "who did what to whom, and your own plans). Rewrite your notes from scratch: keep what still "
+    "matters, drop what has gone stale, and fold in anything you learned this turn. Keep them concise "
+    f"(aim for under about {_NOTES_WORD_BUDGET} words). Reply with the notes themselves as plain text "
+    "and nothing else."
+)
+
+
+def _render_notes(view: PlayerView) -> str:
+    if not view.notes:
+        return ""
+    return f"Your private notes (your memory of earlier turns; only you can see them):\n{view.notes}"
+
+
+def _render_notes_for_update(view: PlayerView) -> str:
+    if not view.notes:
+        return "Your notes so far: (none yet — this is your first set.)"
+    return f"Your notes so far:\n{view.notes}"
 
 
 def _render_events(view: PlayerView) -> str:
     if not view.recent_events:
         return ""
     lines = "\n".join(f"- {narrate_event(event=event)}" for event in view.recent_events)
-    return f"Since your last decision:\n{lines}"
+    return f"This turn so far:\n{lines}"
 
 
 def _render_chat(view: PlayerView) -> str:
     if not view.visible_chat:
         return ""
-    recent_messages = view.visible_chat[-_MAX_CHAT_MESSAGES_SHOWN:]
-    lines = "\n".join(f"- {_format_message(message=message)}" for message in recent_messages)
-    return f"Messages you can see (most recent last):\n{lines}"
+    lines = "\n".join(f"- {_format_message(message=message)}" for message in view.visible_chat)
+    return f"Messages this turn (most recent last):\n{lines}"
 
 
 def _format_message(message: ChatMessage) -> str:

@@ -178,3 +178,25 @@ def test_restore_rejects_files_without_a_header(tmp_path: Path):
 
     with pytest.raises(ValueError, match="missing header"):
         restore_game(path=path)
+
+
+def test_note_records_are_observational_and_ignored_on_restore(tmp_path: Path):
+    path = tmp_path / "game.jsonl"
+    journal = JournalWriter(path=path, append=False)
+    journal.write_header(
+        header=JournalHeader(
+            schema_version=SCHEMA_VERSION,
+            seed=1,
+            player_specs={name: "random" for name in PLAYER_NAMES},
+            max_turns=10,
+            allow_private_messages=False,
+            max_negotiation_rounds=3,
+        )
+    )
+    journal.write_note(player_id="alice", turn_number=2, text="bob is massing on my border")
+    journal.close()
+
+    restored = restore_game(path=path)
+
+    assert restored.header.seed == 1
+    assert not restored.is_finished  # notes never replay into game state

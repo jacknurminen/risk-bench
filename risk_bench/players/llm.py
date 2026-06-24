@@ -5,7 +5,12 @@ from risk_bench.agents.base import Agent, Message, Response, Tool, ToolCall
 from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, PlayerView
-from risk_bench.players.rendering import render_decision_prompt, render_negotiation_prompt, render_system_prompt
+from risk_bench.players.rendering import (
+    render_decision_prompt,
+    render_negotiation_prompt,
+    render_noting_prompt,
+    render_system_prompt,
+)
 from risk_bench.players.tools import (
     InvalidToolCallError,
     is_message_tool_call,
@@ -127,6 +132,29 @@ class LLMPlayer:
         except InvalidToolCallError:
             return NegotiationTurn(messages=(), thought=thought)
         return NegotiationTurn(messages=tuple(message for message in parsed if message is not None), thought=thought)
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        """Ask the model to rewrite its private notes for the turn that just ended.
+
+        A dedicated, tool-free call: the model's plain-text reply becomes its new
+        notepad. On a provider failure (or an empty reply) the existing notes are
+        kept by returning None, so noting never blocks the game.
+
+        Args:
+            view: The noting player's view of the just-ended turn and its current notes.
+
+        Returns:
+            The rewritten notes, or None to keep the existing notes.
+        """
+        conversation = [
+            Message(role="system", content=render_system_prompt(view=view)),
+            Message(role="user", content=render_noting_prompt(view=view)),
+        ]
+        response = self._respond_or_none(conversation=conversation, tools=[])
+        if response is None:
+            return None
+        notes = (response.text or "").strip()
+        return notes or None
 
     def _respond_or_none(self, conversation: list[Message], tools: list[Tool]) -> Response | None:
         try:

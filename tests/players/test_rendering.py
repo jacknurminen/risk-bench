@@ -1,5 +1,12 @@
+from dataclasses import replace
+
 from risk_bench.game.types import Phase
-from risk_bench.players.rendering import render_decision_prompt, render_negotiation_prompt, render_system_prompt
+from risk_bench.players.rendering import (
+    render_decision_prompt,
+    render_negotiation_prompt,
+    render_noting_prompt,
+    render_system_prompt,
+)
 from tests.players.test_tools import attack_request, request_for_phase
 
 
@@ -53,3 +60,29 @@ def test_negotiation_prompt_invites_a_message():
 
     assert "negotiation round" in prompt
     assert "Send a message" in prompt
+
+
+def test_decision_prompt_includes_private_notes_when_present():
+    request = attack_request()
+    with_notes = replace(request, view=replace(request.view, notes="bob betrayed me on turn 3"))
+
+    prompt = render_decision_prompt(request=with_notes)
+
+    assert "bob betrayed me on turn 3" in prompt
+    assert "private notes" in prompt
+
+
+def test_decision_prompt_omits_the_notes_section_when_there_are_none():
+    prompt = render_decision_prompt(request=attack_request())  # the helper builds a view with notes=None
+
+    assert "private notes" not in prompt
+
+
+def test_noting_prompt_shows_the_turn_and_asks_for_a_bounded_rewrite():
+    view = replace(attack_request().view, notes="old memo")
+
+    prompt = render_noting_prompt(view=view)
+
+    assert "old memo" in prompt  # the current notes are shown for revision
+    assert "Rewrite your notes" in prompt
+    assert "under about" in prompt  # the soft size budget is suggested, not enforced

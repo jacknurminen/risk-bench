@@ -12,6 +12,7 @@ def build_player_view(
     visible_chat: tuple[ChatMessage, ...],
     recent_events: tuple[GameEvent, ...],
     private_messages_allowed: bool,
+    notes: str | None,
 ) -> PlayerView:
     """Project the full game state down to what one player may legally know.
 
@@ -23,9 +24,11 @@ def build_player_view(
     Args:
         state: The full game state.
         player_id: The player whose view to build.
-        visible_chat: Chat messages already filtered to this player's visibility.
-        recent_events: Events since this player's previous decision.
+        visible_chat: Chat messages already filtered to this player's visibility
+            and to the turn being shown.
+        recent_events: The current turn's events visible to this player.
         private_messages_allowed: Whether this game permits private messages.
+        notes: The player's own latest notes, their only memory of earlier turns.
 
     Returns:
         The player's view of the game.
@@ -44,6 +47,7 @@ def build_player_view(
         own_cards=tuple(own_player.cards),
         own_mission=own_player.mission,
         armies_to_place=state.armies_to_place if state.current_player == player_id else 0,
+        notes=notes,
         visible_chat=visible_chat,
         recent_events=recent_events,
     )

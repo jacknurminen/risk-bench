@@ -300,7 +300,7 @@ def _iter_trace_records(trace_path: Path) -> Iterator[dict[str, Any]]:
 def _category_for_kind(kind: str) -> str:
     if kind.startswith("commentary"):
         return "commentary"
-    if kind in ("negotiation", "decision"):
+    if kind in ("negotiation", "decision", "noting"):
         return kind
     return "other"
 

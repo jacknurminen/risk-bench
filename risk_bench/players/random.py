@@ -40,3 +40,14 @@ class RandomPlayer:
             An empty negotiation turn.
         """
         return NegotiationTurn(messages=(), thought=None)
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        """Keep no notes; the random baseline has no memory to maintain.
+
+        Args:
+            view: The player's view of the just-ended turn (unused).
+
+        Returns:
+            None, leaving the (always empty) notes unchanged.
+        """
+        return None

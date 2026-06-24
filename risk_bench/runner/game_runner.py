@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from risk_bench.agents.tracing import TraceWriter
 from risk_bench.chat.diplomacy import ChatMessage, ChatTranscript, MessageVisibility
 from risk_bench.game.engine import apply_action, setup_game
-from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached
+from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached, TurnStarted
 from risk_bench.game.missions import Mission
 from risk_bench.game.rules import legal_actions, validate_action
 from risk_bench.game.state import GameState
@@ -84,7 +84,14 @@ class GameRunner:
         # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
         self._all_events: list[GameEvent] = []
-        self._pending_events: dict[PlayerId, list[GameEvent]] = {}
+        # events are scoped to a single turn: prompts show only the current turn's, and the
+        # end-of-turn noting pass reflects on the turn that just finished
+        self._current_turn_events: dict[PlayerId, list[GameEvent]] = {}
+        self._last_turn_events: dict[PlayerId, list[GameEvent]] = {}
+        # delivered messages grouped by the turn they belong to (their own turn_number)
+        self._messages_by_turn: dict[int, list[ChatMessage]] = {}
+        # each player's latest notes — its only memory of earlier turns, fed back into its prompts
+        self._notes: dict[PlayerId, str | None] = {}
         self._turn_log: list[str] = []
         # recent commentary kept per rubric, so each commentator only sees its own continuity
         self._previous_commentary: dict[str, list[str]] = {}
@@ -131,7 +138,13 @@ class GameRunner:
     def _reset_progress(self, transcript: ChatTranscript) -> None:
         self._transcript = transcript
         self._all_events = []
-        self._pending_events = {player_id: [] for player_id in self._players}
+        self._current_turn_events = {player_id: [] for player_id in self._players}
+        self._last_turn_events = {player_id: [] for player_id in self._players}
+        # group any restored messages by turn so a resumed turn's negotiation is shown again
+        self._messages_by_turn = {}
+        for message in transcript.full_transcript():
+            self._messages_by_turn.setdefault(message.turn_number, []).append(message)
+        self._notes = {player_id: None for player_id in self._players}
         self._turn_log = []
         self._previous_commentary = {commentator.rubric.name: [] for commentator in self._commentators}
 
@@ -151,6 +164,7 @@ class GameRunner:
             state = self._decide_and_apply(state=state, rng=rng)
             if state.turn_number != commented_turn and state.phase is not Phase.GAME_OVER:
                 self._commentate(state=state, turn_number=commented_turn)
+                self._run_noting(state=state, finished_turn=commented_turn)
                 commented_turn = state.turn_number
 
         outcome = f"The game ended: {state.winner} won." if state.winner else "The game ended in a draw."
@@ -205,13 +219,18 @@ class GameRunner:
     def _record_events(self, state: GameState, events: tuple[GameEvent, ...]) -> None:
         self._all_events.extend(events)
         for event in events:
+            # a new turn beginning closes the previous one: stash its events for that turn's
+            # noting pass, then start the new turn's buffer fresh (the TurnStarted lands in it)
+            if isinstance(event, TurnStarted):
+                self._last_turn_events = self._current_turn_events
+                self._current_turn_events = {player_id: [] for player_id in self._players}
             self._turn_log.append(narrate_event(event=event))
             if self._verbose:
                 print(event)
             for player_id in self._players:
                 if _is_hidden_setup_placement(state=state, event=event, observer=player_id):
                     continue
-                self._pending_events[player_id].append(event)
+                self._current_turn_events[player_id].append(event)
 
     def _run_negotiation_round(self, state: GameState) -> None:
         living_others = [
@@ -252,6 +271,7 @@ class GameRunner:
         channel = f"privately to {message.recipient}" if message.recipient else "to everyone"
         self._turn_log.append(f"{message.sender} ({channel}): {message.text}")
         self._transcript.add(message=message)
+        self._messages_by_turn.setdefault(message.turn_number, []).append(message)
         if self._journal is not None:
             self._journal.write_message(message=message)
         if self._verbose:
@@ -294,15 +314,49 @@ class GameRunner:
             for tag in commentary.tags:
                 print(f"[commentary:{rubric_name}]   {tag.behavior} — {tag.player}: {tag.note}")
 
+    def _run_noting(self, state: GameState, finished_turn: int) -> None:
+        if finished_turn < 1:
+            return  # turn 0 is blind setup placement: no negotiation and nothing to remember
+        for player_id, player in self._players.items():
+            if state.players[player_id].eliminated_by is not None:
+                continue
+            if self._trace is not None:
+                self._trace.set_context(turn=finished_turn, kind="noting")
+            view = self._noting_view(state=state, player_id=player_id, finished_turn=finished_turn)
+            notes = player.update_notes(view)
+            if notes is None:
+                continue
+            self._notes[player_id] = notes
+            if self._journal is not None:
+                self._journal.write_note(player_id=player_id, turn_number=finished_turn, text=notes)
+            if self._verbose:
+                print(f"[notes] {player_id} (turn {finished_turn}): {notes}")
+
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
-        recent_events = tuple(self._pending_events[player_id])
-        self._pending_events[player_id] = []
         return build_player_view(
             state=state,
             player_id=player_id,
-            visible_chat=tuple(self._transcript.visible_to(player_id=player_id)),
-            recent_events=recent_events,
+            visible_chat=self._visible_turn_messages(player_id=player_id, turn_number=state.turn_number),
+            recent_events=tuple(self._current_turn_events[player_id]),
             private_messages_allowed=self._allow_private_messages,
+            notes=self._notes[player_id],
+        )
+
+    def _noting_view(self, state: GameState, player_id: PlayerId, finished_turn: int) -> PlayerView:
+        return build_player_view(
+            state=state,
+            player_id=player_id,
+            visible_chat=self._visible_turn_messages(player_id=player_id, turn_number=finished_turn),
+            recent_events=tuple(self._last_turn_events[player_id]),
+            private_messages_allowed=self._allow_private_messages,
+            notes=self._notes[player_id],
+        )
+
+    def _visible_turn_messages(self, player_id: PlayerId, turn_number: int) -> tuple[ChatMessage, ...]:
+        return tuple(
+            message
+            for message in self._messages_by_turn.get(turn_number, [])
+            if message.visibility is MessageVisibility.PUBLIC or player_id in (message.sender, message.recipient)
         )
 
 

@@ -51,7 +51,9 @@ class PlayerView:
     own_cards: tuple[TerritoryCard, ...]
     own_mission: Mission
     armies_to_place: int
-    # history
+    # private memory: the player's own latest notes, the only carry-over from earlier turns
+    notes: str | None
+    # history, scoped to the current turn — everything older lives only in ``notes``
     visible_chat: tuple[ChatMessage, ...]
     recent_events: tuple[GameEvent, ...]
 
@@ -128,5 +130,20 @@ class Player(Protocol):
 
         Returns:
             The negotiation turn; empty messages mean silence.
+        """
+        ...
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        """Rewrite the player's private notes after a turn ends.
+
+        Notes are the only memory a player keeps of earlier turns; later prompts
+        show just the current turn plus these notes. Non-LLM players no-op.
+
+        Args:
+            view: The player's view of the just-ended turn, carrying that turn's
+                events and chat and the player's current notes.
+
+        Returns:
+            The rewritten notes, or None to leave the existing notes unchanged.
         """
         ...

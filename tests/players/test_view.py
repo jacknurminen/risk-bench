@@ -26,7 +26,7 @@ def test_view_hides_other_players_cards_and_missions_but_shows_counts():
     state.players[BOB].cards = [state.deck.draw(), state.deck.draw()]
 
     view = build_player_view(
-        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True, notes=None
     )
 
     assert view.own_mission == PLACEHOLDER_MISSION
@@ -41,7 +41,7 @@ def test_view_shows_the_public_board():
     state = two_player_state()
 
     view = build_player_view(
-        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True, notes=None
     )
 
     assert view.armies[Territory.JAPAN] == 7
@@ -54,10 +54,10 @@ def test_setup_placement_masks_other_players_armies_to_the_dealt_baseline():
     state.phase = Phase.SETUP_PLACEMENT
 
     alice_view = build_player_view(
-        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True, notes=None
     )
     bob_view = build_player_view(
-        state=state, player_id=BOB, visible_chat=(), recent_events=(), private_messages_allowed=True
+        state=state, player_id=BOB, visible_chat=(), recent_events=(), private_messages_allowed=True, notes=None
     )
 
     assert alice_view.armies[Territory.ALASKA] == 5  # own placements stay visible
@@ -72,7 +72,7 @@ def test_view_exposes_each_players_current_income():
     state = two_player_state()
 
     view = build_player_view(
-        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+        state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True, notes=None
     )
 
     alice_info = next(info for info in view.players if info.player_id == ALICE)
@@ -87,13 +87,23 @@ def test_armies_to_place_is_only_shown_to_the_current_player():
 
     assert (
         build_player_view(
-            state=state, player_id=ALICE, visible_chat=(), recent_events=(), private_messages_allowed=True
+            state=state,
+            player_id=ALICE,
+            visible_chat=(),
+            recent_events=(),
+            private_messages_allowed=True,
+            notes=None,
         ).armies_to_place
         == 7
     )
     assert (
         build_player_view(
-            state=state, player_id=BOB, visible_chat=(), recent_events=(), private_messages_allowed=True
+            state=state,
+            player_id=BOB,
+            visible_chat=(),
+            recent_events=(),
+            private_messages_allowed=True,
+            notes=None,
         ).armies_to_place
         == 0
     )

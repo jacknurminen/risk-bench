@@ -8,6 +8,7 @@ from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import Decision, DecisionRequest, NegotiationTurn, Player, PlayerView
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.game_runner import GameRecord, GameRunner
+from risk_bench.runner.journal import JournalWriter, read_journal
 
 
 def random_players(player_ids: list[PlayerId], seed: int) -> dict[PlayerId, Player]:
@@ -77,6 +78,9 @@ class ScriptedTalker:
     def decide_action(self, request: DecisionRequest) -> Decision:
         self.seen_views.append(request.view)
         return self._random_player.decide_action(request)
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        return self._random_player.update_notes(view)
 
     def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         self.seen_views.append(view)
@@ -286,3 +290,89 @@ def test_views_expose_whether_private_messages_are_allowed():
     alice = players["alice"]
     assert isinstance(alice, PrivateWhisperer)
     assert all(not view.private_messages_allowed for view in alice.seen_views)
+
+
+class NotingPlayer(ScriptedTalker):
+    """Greets each turn, records the views it notes on and the notes fed back into its prompts."""
+
+    def __init__(self, player_id: PlayerId, rng: random.Random) -> None:
+        super().__init__(player_id=player_id, rng=rng)
+        self.noting_views: list[PlayerView] = []
+        self.notes_in_decision_views: list[str | None] = []
+
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        self.notes_in_decision_views.append(request.view.notes)
+        return super().decide_action(request)
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        self.noting_views.append(view)
+        return f"{self.player_id} memo {len(self.noting_views)}"
+
+
+PLAYER_IDS = ("alice", "bob", "carla")
+
+
+def noting_players(seed: int) -> dict[PlayerId, NotingPlayer]:
+    return {player_id: NotingPlayer(player_id=player_id, rng=random.Random(seed)) for player_id in PLAYER_IDS}
+
+
+def test_each_player_notes_on_the_turn_that_just_ended_and_notes_feed_back():
+    players = noting_players(seed=4)
+    talking_runner(players=dict(players), seed=4, max_turns=6, allow_private_messages=True).run()
+
+    for player in players.values():
+        assert player.noting_views  # every living player notes after each completed turn
+    # a noting pass reflects on the turn that just ended, so it carries that turn's events
+    assert any(view.recent_events for player in players.values() for view in player.noting_views)
+    # the latest notes are injected back into later decision prompts (None only before the first noting)
+    assert any(notes is not None for player in players.values() for notes in player.notes_in_decision_views)
+
+
+def test_live_views_show_only_the_current_turns_chat():
+    players = {player_id: ScriptedTalker(player_id=player_id, rng=random.Random(4)) for player_id in PLAYER_IDS}
+    talking_runner(players=dict(players), seed=4, max_turns=5, allow_private_messages=True).run()
+
+    # every greeting from an earlier turn must reach players through their notes, never the live prompt
+    for player in players.values():
+        for view in player.seen_views:
+            assert all(message.turn_number == view.turn_number for message in view.visible_chat)
+
+
+def test_note_versions_are_journaled_per_turn(tmp_path):
+    players = noting_players(seed=4)
+    journal = JournalWriter(path=tmp_path / "game.jsonl", append=False)
+    GameRunner(
+        players=dict(players),
+        seed=4,
+        max_turns=6,
+        allow_private_messages=True,
+        max_negotiation_rounds=3,
+        commentators=(),
+        journal=journal,
+        trace=None,
+        verbose=False,
+    ).run()
+    journal.close()
+
+    notes = [record for record in read_journal(tmp_path / "game.jsonl") if record["type"] == "note"]
+    assert notes
+    assert all(record["turn"] >= 1 and record["text"] and record["player"] in players for record in notes)
+
+
+def test_random_players_record_no_notes(tmp_path):
+    players = {player_id: RandomPlayer(player_id=player_id, rng=random.Random(4)) for player_id in PLAYER_IDS}
+    journal = JournalWriter(path=tmp_path / "game.jsonl", append=False)
+    GameRunner(
+        players=dict(players),
+        seed=4,
+        max_turns=6,
+        allow_private_messages=False,
+        max_negotiation_rounds=3,
+        commentators=(),
+        journal=journal,
+        trace=None,
+        verbose=False,
+    ).run()
+    journal.close()
+
+    assert not [record for record in read_journal(tmp_path / "game.jsonl") if record["type"] == "note"]
