@@ -17,7 +17,7 @@ from risk_bench.runner.commentary import (
 )
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal
-from tests.runner.test_game_runner import whisperers
+from tests.runner.test_game_runner import noting_players, whisperers
 
 PLAYER_NAMES = ["alice", "bob", "carla"]
 
@@ -72,7 +72,7 @@ def test_a_commentator_ignores_tags_outside_its_rubric():
     commentator = Commentator(agent=StubAgent(response=response), rubric=SKILL_RUBRIC)
 
     commentary = commentator.comment_on_turn(
-        state=game_state(), turn_number=2, turn_log=["alice attacked"], previous_commentary=[]
+        state=game_state(), turn_number=2, turn_log=["alice attacked"], previous_commentary=[], notes={}
     )
 
     assert commentary is not None
@@ -93,7 +93,7 @@ def test_a_commentate_call_becomes_commentary_with_validated_tags():
     commentator = Commentator(agent=StubAgent(response=response), rubric=CONDUCT_RUBRIC)
 
     commentary = commentator.comment_on_turn(
-        state=game_state(), turn_number=4, turn_log=["alice attacked bob"], previous_commentary=[]
+        state=game_state(), turn_number=4, turn_log=["alice attacked bob"], previous_commentary=[], notes={}
     )
 
     assert commentary is not None
@@ -103,7 +103,7 @@ def test_a_commentate_call_becomes_commentary_with_validated_tags():
     )
 
 
-def test_the_commentator_sees_missions_thoughts_and_prior_commentary():
+def test_the_commentator_sees_missions_thoughts_notes_and_prior_commentary():
     agent = StubAgent(response=commentate_response(commentary="Quiet turn.", tags=[]))
 
     Commentator(agent=agent, rubric=CONDUCT_RUBRIC).comment_on_turn(
@@ -111,6 +111,7 @@ def test_the_commentator_sees_missions_thoughts_and_prior_commentary():
         turn_number=2,
         turn_log=["bob (thinks): I will betray alice next turn"],
         previous_commentary=["Turn 1 was uneventful."],
+        notes={"bob": "alice trusts me; strike her northern flank next turn", "alice": ""},
     )
 
     prompt = agent.conversations[0][1].content
@@ -118,6 +119,8 @@ def test_the_commentator_sees_missions_thoughts_and_prior_commentary():
     assert "SECRET MISSION" in prompt
     assert "bob (thinks): I will betray alice next turn" in prompt
     assert "Turn 1 was uneventful." in prompt
+    assert "alice trusts me; strike her northern flank next turn" in prompt  # bob's private notes are shown
+    assert "private end-of-turn notes" in prompt
 
 
 def test_plain_text_without_a_tool_call_still_becomes_commentary():
@@ -126,7 +129,7 @@ def test_plain_text_without_a_tool_call_still_becomes_commentary():
     )
 
     commentary = commentator.comment_on_turn(
-        state=game_state(), turn_number=1, turn_log=["carla attacked"], previous_commentary=[]
+        state=game_state(), turn_number=1, turn_log=["carla attacked"], previous_commentary=[], notes={}
     )
 
     assert commentary is not None
@@ -143,7 +146,7 @@ def test_a_tool_call_leaked_as_text_is_salvaged_not_shown_raw():
     commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), rubric=SKILL_RUBRIC)
 
     commentary = commentator.comment_on_turn(
-        state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[]
+        state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[], notes={}
     )
 
     assert commentary is not None
@@ -162,7 +165,7 @@ def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
     commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), rubric=CONDUCT_RUBRIC)
 
     commentary = commentator.comment_on_turn(
-        state=game_state(), turn_number=1, turn_log=["bob spoke"], previous_commentary=[]
+        state=game_state(), turn_number=1, turn_log=["bob spoke"], previous_commentary=[], notes={}
     )
 
     assert commentary is not None
@@ -178,7 +181,10 @@ def test_leaked_markup_without_salvageable_commentary_is_discarded():
     )
 
     assert (
-        commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
+        commentator.comment_on_turn(
+            state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[], notes={}
+        )
+        is None
     )
 
 
@@ -186,7 +192,10 @@ def test_an_unusable_response_yields_no_commentary():
     commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=())), rubric=SKILL_RUBRIC)
 
     assert (
-        commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
+        commentator.comment_on_turn(
+            state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[], notes={}
+        )
+        is None
     )
 
 
@@ -201,7 +210,10 @@ def test_a_provider_failure_yields_no_commentary_instead_of_crashing():
     commentator = Commentator(agent=FailingAgent(), rubric=SKILL_RUBRIC)
 
     assert (
-        commentator.comment_on_turn(state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[]) is None
+        commentator.comment_on_turn(
+            state=game_state(), turn_number=1, turn_log=["x"], previous_commentary=[], notes={}
+        )
+        is None
     )
 
 
@@ -246,3 +258,24 @@ def test_the_runner_journals_commentary_after_each_turn(tmp_path: Path):
     assert all(record["rubric"] == "conduct" for record in commentaries)
     assert commentaries[0]["tags"] == [{"player": "alice", "behavior": "threat", "note": "always whispering"}]
     assert [record["turn"] for record in commentaries] == sorted(record["turn"] for record in commentaries)
+
+
+def test_the_commentator_receives_players_fresh_notes_during_a_game():
+    agent = StubAgent(response=commentate_response(commentary="ok", tags=[]))
+    commentator = Commentator(agent=agent, rubric=CONDUCT_RUBRIC)
+    GameRunner(
+        players=dict(noting_players(seed=4)),
+        seed=4,
+        max_turns=4,
+        allow_private_messages=True,
+        max_negotiation_rounds=3,
+        commentators=(commentator,),
+        journal=None,
+        trace=None,
+        verbose=False,
+    ).run()
+
+    # NotingPlayer writes notes containing "memo"; noting runs before commentary, so a turn's
+    # fresh notes reach that turn's commentary prompt
+    prompts = [conversation[1].content for conversation in agent.conversations]
+    assert any(prompt is not None and "memo" in prompt for prompt in prompts)

@@ -163,8 +163,9 @@ class GameRunner:
                 self._run_negotiation_round(state=state)
             state = self._decide_and_apply(state=state, rng=rng)
             if state.turn_number != commented_turn and state.phase is not Phase.GAME_OVER:
-                self._commentate(state=state, turn_number=commented_turn)
+                # note before commentating so the turn's fresh notes are available to the commentator
                 self._run_noting(state=state, finished_turn=commented_turn)
+                self._commentate(state=state, turn_number=commented_turn)
                 commented_turn = state.turn_number
 
         outcome = f"The game ended: {state.winner} won." if state.winner else "The game ended in a draw."
@@ -297,6 +298,7 @@ class GameRunner:
             turn_number=turn_number,
             turn_log=turn_log,
             previous_commentary=self._previous_commentary.get(rubric_name, []),
+            notes=self._notes,
         )
         if commentary is None:
             return
