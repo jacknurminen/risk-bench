@@ -40,7 +40,7 @@ class GameProcessManager:
 
         Args:
             game_id: The game's identity within the manager.
-            players: Player specs in seating order.
+            players: Player specs; their order does not fix seating, which is shuffled before play.
             seed: The game seed.
             commentators: The commentator panel as one model spec per member; empty for none.
             max_turns: Turn limit, or None for the settings default.

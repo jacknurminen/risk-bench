@@ -59,7 +59,7 @@ def named_specs(specs: list[str]) -> dict[str, str]:
     """Assign a unique player name to every spec, suffixing duplicates with #2, #3, ...
 
     Args:
-        specs: The player specs in seating order.
+        specs: The player specs, in the order they were given (seating is shuffled later).
 
     Returns:
         Player name (resolved model id or 'random') mapped to its original spec.

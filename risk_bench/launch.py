@@ -23,7 +23,8 @@ def run_new_game(
     """Play a fully journaled game between the given player specs.
 
     Args:
-        models: Player specs in seating order ('random', 'provider:tier', 'provider:model').
+        models: Player specs ('random', 'provider:tier', 'provider:model'); their input order
+            does not fix the seating, which is randomly shuffled (seed-derived) before play.
         seed: The game seed; the whole game is reproducible from it.
         settings: Provides API keys, agent limits, and game defaults.
         commentators: The commentator panel as one model spec per member; empty for none.
@@ -37,7 +38,7 @@ def run_new_game(
     Raises:
         ValueError: If any spec is invalid or a needed API key is missing.
     """
-    player_specs = specs.named_specs(specs=models)
+    player_specs = _seat_in_random_order(player_specs=specs.named_specs(specs=models), seed=seed)
     if journal_path is None:
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}" / "game.jsonl"
@@ -128,6 +129,26 @@ def resume_game(journal_file: Path, settings: Settings, commentators: list[str],
         journal.close()
         if trace is not None:
             trace.close()
+
+
+def _seat_in_random_order(player_specs: dict[str, str], seed: int) -> dict[str, str]:
+    """Return ``player_specs`` reordered into a seed-derived random seat order.
+
+    The dict's order is the turn order the game is set up with, and turn order is a real
+    advantage in Risk. Randomising it here keeps the order the specs were given on the command
+    line from biasing who goes first, while deriving the shuffle from the game seed (and writing
+    the resulting order into the journal header) keeps the whole game reproducible and replayable.
+
+    Args:
+        player_specs: Player name mapped to its spec, in the order the specs were given.
+        seed: The game seed the shuffle is derived from.
+
+    Returns:
+        The same mapping reordered into the randomised seat order.
+    """
+    seats = list(player_specs)
+    random.Random(seed).shuffle(seats)
+    return {name: player_specs[name] for name in seats}
 
 
 def _trace_writer(

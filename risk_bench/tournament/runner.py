@@ -22,9 +22,12 @@ class TournamentRunner:
     Participants are player factories rather than live players, so every game
     gets fresh player instances (per-game invalid-action counts, no state
     leakage) and random baselines mix freely with LLM agents. Matchups cycle
-    through every combination of participants and rotate seat order across
-    games because turn order matters in Risk; per-game seeds are derived from
-    ``base_seed`` so an entire tournament is reproducible.
+    through every combination of participants, and the seat order within each
+    matchup is randomly shuffled per game: turn order is a real advantage in
+    Risk, so leaving it fixed by the participants' input order (or a mere cyclic
+    rotation, which never samples half the orderings) would bias the results.
+    Both the seat shuffle and the per-game seeds are derived from ``base_seed``
+    so an entire tournament is reproducible.
     """
 
     def __init__(
@@ -106,11 +109,12 @@ class TournamentRunner:
 
     def _seatings(self) -> list[tuple[str, ...]]:
         matchups = list(itertools.combinations(sorted(self._participants), self._players_per_game))
+        seat_rng = random.Random(self._base_seed)
         seatings = []
         for game_index in range(self._games):
-            matchup = matchups[game_index % len(matchups)]
-            rotation = (game_index // len(matchups)) % self._players_per_game
-            seatings.append(matchup[rotation:] + matchup[:rotation])
+            seats = list(matchups[game_index % len(matchups)])
+            seat_rng.shuffle(seats)
+            seatings.append(tuple(seats))
         return seatings
 
     def _run_one_game(self, game_index: int, seating: tuple[str, ...]) -> tuple[GameRecord, Path | None]:

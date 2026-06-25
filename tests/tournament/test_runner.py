@@ -46,11 +46,15 @@ def test_tournament_runs_all_games_and_builds_consistent_standings():
     )
 
 
-def test_seat_order_rotates_across_games_of_the_same_matchup():
-    report = run_tournament(games=3, participant_names=["alpha", "beta", "gamma"], players_per_game=3)
+def test_seat_order_is_shuffled_within_a_matchup():
+    report = run_tournament(games=6, participant_names=["alpha", "beta", "gamma"], players_per_game=3)
 
-    first_seats = [result.player_names[0] for result in report.results]
-    assert first_seats == ["alpha", "beta", "gamma"]
+    orderings = {tuple(result.player_names) for result in report.results}
+    # the seats are always the same three players, so the matchup itself never changes...
+    assert all(set(ordering) == {"alpha", "beta", "gamma"} for ordering in orderings)
+    # ...but a real shuffle reaches orderings a mere cyclic rotation of the input never would
+    cyclic_rotations = {("alpha", "beta", "gamma"), ("beta", "gamma", "alpha"), ("gamma", "alpha", "beta")}
+    assert orderings - cyclic_rotations
 
 
 def test_matchups_cycle_through_all_combinations():
