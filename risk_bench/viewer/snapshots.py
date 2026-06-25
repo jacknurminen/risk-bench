@@ -5,15 +5,7 @@ from typing import Any, Final
 
 from risk_bench import specs
 from risk_bench.agents.tracing import per_turn_usage, trace_path_for_journal, usage_by_caller
-from risk_bench.game.actions import (
-    Action,
-    Attack,
-    EndAttackPhase,
-    Fortify,
-    PlaceArmies,
-    SkipFortify,
-    TradeCards,
-)
+from risk_bench.game.actions import Attack
 from risk_bench.game.board import BOARD
 from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import BattleResolved, CardsTraded, GameEvent, PlayerEliminated, TerritoryConquered
@@ -21,7 +13,7 @@ from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
-from risk_bench.players.rendering import narrate_event
+from risk_bench.players.rendering import describe_action, narrate_event
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.journal import read_journal
 
@@ -72,7 +64,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                     _step(
                         state=state,
                         player_names=player_names,
-                        action_text=_describe_action(player_id=acting_player, action=action),
+                        action_text=describe_action(player_id=acting_player, action=action),
                         events=[],
                     )
                 )
@@ -439,25 +431,3 @@ def _accumulate_combat_totals(combat_totals: dict[PlayerId, dict[str, int]], eve
                 combat_totals[defender]["armies_destroyed"] += outcome.attacker_losses
             case TerritoryConquered(player_id=player_id):
                 combat_totals[player_id]["conquests"] += 1
-
-
-def _describe_action(player_id: PlayerId, action: Action) -> str:
-    match action:
-        case PlaceArmies(territory=territory, count=count):
-            return f"{player_id} places {count} armies on {territory}"
-        case TradeCards(cards=cards):
-            labels = ", ".join(
-                "wild" if card.territory is None else f"{card.design}({card.territory})" for card in cards
-            )
-            return f"{player_id} trades in {labels}"
-        case Attack(
-            from_territory=from_territory, to_territory=to_territory, attacker_dice=dice, max_attacks=max_attacks
-        ):
-            repeat = f" up to {max_attacks} times" if max_attacks > 1 else ""
-            return f"{player_id} attacks {to_territory} from {from_territory} with {dice} dice{repeat}"
-        case Fortify(from_territory=from_territory, to_territory=to_territory, count=count):
-            return f"{player_id} fortifies {count} armies from {from_territory} to {to_territory}"
-        case EndAttackPhase():
-            return f"{player_id} ends the attack phase"
-        case SkipFortify():
-            return f"{player_id} ends the turn without fortifying"

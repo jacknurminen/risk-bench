@@ -1,6 +1,15 @@
 from typing import Final
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
+from risk_bench.game.actions import (
+    Action,
+    Attack,
+    EndAttackPhase,
+    Fortify,
+    PlaceArmies,
+    SkipFortify,
+    TradeCards,
+)
 from risk_bench.game.board import BOARD
 from risk_bench.game.events import (
     ArmiesPlaced,
@@ -358,3 +367,37 @@ def narrate_event(event: GameEvent) -> str:
             return f"{player_id} WON the game by completing their mission: {description}"
         case TurnLimitReached(turn_number=turn_number):
             return f"The game hit the turn limit at turn {turn_number} and ends in a draw."
+
+
+def describe_action(player_id: PlayerId, action: Action) -> str:
+    """Render one applied action as a short present-tense sentence.
+
+    Used by the replay viewer and the evaluator's trace index, so a citation and
+    a replay step describe the same move identically.
+
+    Args:
+        player_id: The player who took the action.
+        action: The action to describe.
+
+    Returns:
+        A single-sentence description of the action.
+    """
+    match action:
+        case PlaceArmies(territory=territory, count=count):
+            return f"{player_id} places {count} armies on {territory}"
+        case TradeCards(cards=cards):
+            labels = ", ".join(
+                "wild" if card.territory is None else f"{card.design}({card.territory})" for card in cards
+            )
+            return f"{player_id} trades in {labels}"
+        case Attack(
+            from_territory=from_territory, to_territory=to_territory, attacker_dice=dice, max_attacks=max_attacks
+        ):
+            repeat = f" up to {max_attacks} times" if max_attacks > 1 else ""
+            return f"{player_id} attacks {to_territory} from {from_territory} with {dice} dice{repeat}"
+        case Fortify(from_territory=from_territory, to_territory=to_territory, count=count):
+            return f"{player_id} fortifies {count} armies from {from_territory} to {to_territory}"
+        case EndAttackPhase():
+            return f"{player_id} ends the attack phase"
+        case SkipFortify():
+            return f"{player_id} ends the turn without fortifying"
