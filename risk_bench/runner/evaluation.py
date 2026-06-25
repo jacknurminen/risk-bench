@@ -177,7 +177,6 @@ class Evaluator:
     def __init__(self, agent: Agent, spec: str) -> None:
         self._agent = agent
         self._spec = spec
-        self._player_behaviors = set(BEHAVIORS)
         self._system_prompt = _build_system_prompt()
 
     @property
