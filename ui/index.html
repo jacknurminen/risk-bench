@@ -270,11 +270,15 @@ function gameRow(game, child) {
     : game.running
       ? '<span class="status live">● running</span>'
       : '<span class="status paused">⏸ paused</span>';
-  const control = game.finished ? "" : game.running
+  const runControl = game.finished ? "" : game.running
     ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
     : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
+  const evaluateControl =
+    `<button class="tiny subtle" onclick="event.stopPropagation();location.href='/games/${game.id}/evaluation'">🔬 evaluate</button>`;
+  const control = `${runControl} ${evaluateControl}`;
   const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
-  const mic = game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "";
+  const mic = (game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "")
+    + (game.has_evaluation ? ' <span class="mic" title="evaluated">🔬</span>' : "");
   const first = child ? `seed ${game.seed}` : started;
   const players = child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`;
   const turn = game.turn_count == null ? "—" : game.finished ? game.turn_count : `${game.turn_count}…`;

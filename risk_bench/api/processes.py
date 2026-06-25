@@ -25,6 +25,9 @@ class GameProcessManager:
     def __init__(self) -> None:
         self._context = multiprocessing.get_context("spawn")
         self._processes: dict[str, BaseProcess] = {}
+        # evaluation workers are tracked apart from game workers: a game may be evaluated while
+        # it is itself paused, so the two must not collide on the same game id
+        self._evaluations: dict[str, BaseProcess] = {}
 
     def launch_game(
         self,
@@ -62,6 +65,23 @@ class GameProcessManager:
         arguments = (str(log_path), str(journal_path), commentators)
         self._start(game_id=game_id, target=_resume_game_in_worker, arguments=arguments)
 
+    def evaluate_game(self, game_id: str, journal_path: Path, evaluator_specs: list[str], log_path: Path) -> None:
+        """Run a whole-game evaluator panel over a stored game in its own worker process.
+
+        Off the game's critical path: the game need not be running (a paused or finished
+        journal is the clean case), and the worker writes the ``game.eval.jsonl`` sidecar.
+
+        Args:
+            game_id: The game's identity within the manager.
+            journal_path: The stored journal to evaluate.
+            evaluator_specs: The evaluator panel as one model spec per member.
+            log_path: Where the worker's output goes.
+        """
+        arguments = (str(log_path), str(journal_path), evaluator_specs)
+        process = self._context.Process(target=_run_evaluation_in_worker, args=arguments, daemon=True)
+        process.start()
+        self._evaluations[game_id] = process
+
     def is_running(self, game_id: str) -> bool:
         """Tell whether the game's worker process is currently alive.
 
@@ -77,6 +97,23 @@ class GameProcessManager:
         if process.is_alive():
             return True
         del self._processes[game_id]
+        return False
+
+    def is_evaluating(self, game_id: str) -> bool:
+        """Tell whether an evaluation worker for the game is currently alive.
+
+        Args:
+            game_id: The game to check.
+
+        Returns:
+            True while an evaluation runs; exited workers are reaped on the way.
+        """
+        process = self._evaluations.get(game_id)
+        if process is None:
+            return False
+        if process.is_alive():
+            return True
+        del self._evaluations[game_id]
         return False
 
     def pause_game(self, game_id: str) -> bool:
@@ -144,6 +181,16 @@ def _resume_game_in_worker(log_path: str, journal_path: str, commentators: list[
         )
     except ProviderUnavailableError as error:
         print(f"[paused] {error}")
+
+
+def _run_evaluation_in_worker(log_path: str, journal_path: str, evaluator_specs: list[str]) -> None:
+    _redirect_output(log_path=log_path, append=False)
+    try:
+        launch.run_evaluation(
+            journal_path=Path(journal_path), evaluator_specs=evaluator_specs, settings=load_settings()
+        )
+    except ProviderUnavailableError as error:
+        print(f"[evaluation-aborted] {error}")
 
 
 def _redirect_output(log_path: str, append: bool) -> None:

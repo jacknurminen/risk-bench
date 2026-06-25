@@ -22,6 +22,7 @@ from risk_bench.players.base import Player
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.commentary import Commentator
+from risk_bench.runner.evaluation import Evaluator
 from risk_bench.tournament.runner import PlayerFactory
 
 TIER_MODELS_BY_PROVIDER: Final[dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]]] = {
@@ -188,6 +189,38 @@ def _build_commentator(index: int, spec: str, settings: Settings, trace: TraceWr
     if trace is not None:
         agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller=f"commentator[{index}]", writer=trace)
     return Commentator(agent=agent, spec=spec)
+
+
+def build_evaluators(
+    evaluator_specs: list[str], settings: Settings, trace: TraceWriter | None
+) -> tuple[Evaluator, ...]:
+    """Build the evaluator panel: one independent whole-game annotator per member spec.
+
+    Mirrors ``build_commentators`` — members are built in panel order and each tags its trace
+    records with its index — but every member reads the full game offline rather than per turn.
+
+    Args:
+        evaluator_specs: One model spec per panel member, in panel order; empty for no evaluation.
+        settings: Provides API keys and the token limit.
+        trace: Records the panel's API calls when given; None disables tracing.
+
+    Returns:
+        One evaluator per member spec, in panel order.
+
+    Raises:
+        ValueError: If a spec is invalid or its API key is missing.
+    """
+    return tuple(
+        _build_evaluator(index=index, spec=spec, settings=settings, trace=trace)
+        for index, spec in enumerate(evaluator_specs)
+    )
+
+
+def _build_evaluator(index: int, spec: str, settings: Settings, trace: TraceWriter | None) -> Evaluator:
+    agent = build_agent(spec=spec, settings=settings)
+    if trace is not None:
+        agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller=f"evaluator[{index}]", writer=trace)
+    return Evaluator(agent=agent, spec=spec)
 
 
 def _split_effort(spec: str) -> tuple[str, ReasoningEffort | None]:

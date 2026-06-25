@@ -14,6 +14,7 @@ from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
+    EvaluateRequest,
     GameListResponse,
     GameSummary,
     ModelCatalogResponse,
@@ -23,7 +24,15 @@ from risk_bench.api.schemas import (
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
-from risk_bench.viewer.html import UI_DIRECTORY, render_live_viewer_html, render_tournament_html, render_viewer_html
+from risk_bench.runner.evaluation_store import evaluation_path_for_journal
+from risk_bench.viewer.evaluation import build_evaluation_view_model
+from risk_bench.viewer.html import (
+    UI_DIRECTORY,
+    render_evaluation_html,
+    render_live_viewer_html,
+    render_tournament_html,
+    render_viewer_html,
+)
 from risk_bench.viewer.snapshots import build_view_model
 from risk_bench.viewer.tournament import build_tournament_view_model
 
@@ -73,6 +82,18 @@ def create_app(games_directory: Path) -> FastAPI:
             return HTMLResponse(render_viewer_html(view_model=view_model, trace_url=trace_url))
         return HTMLResponse(
             render_live_viewer_html(view_model=view_model, poll_url=f"/api/games/{game_id}", trace_url=trace_url)
+        )
+
+    @app.get("/games/{game_id}/evaluation", include_in_schema=False)
+    def evaluation_page(game_id: str) -> HTMLResponse:
+        view_model = _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
+        return HTMLResponse(
+            render_evaluation_html(
+                view_model=view_model,
+                game_id=game_id,
+                poll_url=f"/api/games/{game_id}/evaluation",
+                evaluate_url=f"/api/games/{game_id}/evaluate",
+            )
         )
 
     @app.get("/tournaments/{tournament_id}", include_in_schema=False)
@@ -130,6 +151,16 @@ def create_app(games_directory: Path) -> FastAPI:
     def resume_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
         _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
+
+    @app.post("/api/games/{game_id}/evaluate", status_code=202)
+    def evaluate_game(game_id: str, request: EvaluateRequest) -> dict[str, bool]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        _start_evaluation(manager=manager, game_id=game_id, journal_path=journal_path, request=request)
+        return {"running": True}
+
+    @app.get("/api/games/{game_id}/evaluation")
+    def evaluation_view_model(game_id: str) -> dict[str, Any]:
+        return _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
 
     @app.get("/api/games/{game_id}/trace")
     def trace_call_list(game_id: str) -> dict[str, Any]:
@@ -194,6 +225,34 @@ def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
     except IllegalActionError as error:
         # the journal no longer replays: it was corrupted outside the engine's control
         raise HTTPException(status_code=409, detail=f"The journal does not replay cleanly: {error}") from None
+
+
+def _load_evaluation_view_model(games_directory: Path, game_id: str, manager: GameProcessManager) -> dict[str, Any]:
+    path = _journal_path(games_directory=games_directory, game_id=game_id)
+    try:
+        view_model = build_evaluation_view_model(journal_path=path)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
+    view_model["running"] = manager.is_evaluating(game_id=game_id)
+    return view_model
+
+
+def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: Path, request: EvaluateRequest) -> None:
+    if manager.is_evaluating(game_id=game_id):
+        raise HTTPException(status_code=409, detail="An evaluation is already running for this game.")
+    if not request.evaluators:
+        raise HTTPException(status_code=400, detail="Provide at least one evaluator panel member.")
+    # build every member up front so a bad spec or missing key fails fast, before the worker starts
+    try:
+        specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+    manager.evaluate_game(
+        game_id=game_id,
+        journal_path=journal_path,
+        evaluator_specs=request.evaluators,
+        log_path=journal_path.parent / "evaluation.log",
+    )
 
 
 def _read_trace_records(journal_path: Path) -> list[dict[str, Any]]:
@@ -308,6 +367,7 @@ def _summarize_journal(
         seed=int(header["seed"]),
         max_turns=int(header["max_turns"]),
         has_commentary=has_commentary,
+        has_evaluation=evaluation_path_for_journal(journal_path=path).is_file(),
         finished=result is not None,
         running=running,
         winner=result["winner"] if result is not None else None,

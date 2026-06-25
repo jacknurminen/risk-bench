@@ -51,7 +51,7 @@ A third class of tags captures **affect** (tilt, taunting, …); these are descr
 | Web API | `risk_bench/api/` | FastAPI app: browse games, watch them live, and launch new ones |
 | Viewer | `risk_bench/viewer/` + `ui/` | Self-contained HTML replays and stats, plus the templates and board map |
 | Wiring | `risk_bench/{config,specs,launch}.py` | Settings, spec parsing, and game launching |
-| CLI | `risk_bench/main.py` | Entry point: the `game`, `tournament`, `view`, and `serve` commands |
+| CLI | `risk_bench/main.py` | Entry point: the `game`, `tournament`, `evaluate`, `view`, and `serve` commands |
 
 ## Getting started
 
@@ -80,6 +80,15 @@ Run a tournament and write its JSON report:
 
 ```bash
 uv run python -m risk_bench.main tournament anthropic:hi openai:hi random --games 10
+```
+
+Evaluate a stored game with a panel of whole-game **evaluators** — models that read the full trace
+offline (a finished or paused game) and emit cited per-turn tags, cross-turn arcs, and a per-player
+synthesis into a re-runnable `game.eval.jsonl` sidecar:
+
+```bash
+uv run python -m risk_bench.main evaluate data/games/<game-folder>/game.jsonl \
+    --evaluator anthropic:hi --evaluator google:hi
 ```
 
 Render a finished game into a standalone HTML replay:

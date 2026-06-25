@@ -15,6 +15,7 @@ class GameSummary(BaseModel):
     seed: int
     max_turns: int
     has_commentary: bool
+    has_evaluation: bool
     finished: bool
     running: bool
     winner: str | None
@@ -61,6 +62,12 @@ class NewGameResponse(BaseModel):
 
     id: str
     tournament: bool
+
+
+class EvaluateRequest(BaseModel):
+    """A request to run the whole-game evaluator panel over a stored game."""
+
+    evaluators: list[str] = Field(default_factory=list)
 
 
 class ModelCatalogResponse(BaseModel):
