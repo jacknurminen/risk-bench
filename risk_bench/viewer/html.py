@@ -13,6 +13,7 @@ _BOARD_SVG_PATH = UI_DIRECTORY / "board.svg"
 _TEMPLATE = jinja2.Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
 _BOARD_SVG = _BOARD_SVG_PATH.read_text(encoding="utf-8")
 _TOURNAMENT_TEMPLATE = jinja2.Template((UI_DIRECTORY / "tournament.html.j2").read_text(encoding="utf-8"))
+_EVALUATION_TEMPLATE = jinja2.Template((UI_DIRECTORY / "evaluation.html.j2").read_text(encoding="utf-8"))
 
 
 def render_viewer_html(view_model: dict[str, Any], trace_url: str) -> str:
@@ -56,6 +57,26 @@ def render_tournament_html(view_model: dict[str, Any], live: bool, poll_url: str
     """
     return _TOURNAMENT_TEMPLATE.render(
         tournament_json=json.dumps(view_model), live_json=json.dumps(live), poll_url_json=json.dumps(poll_url)
+    )
+
+
+def render_evaluation_html(view_model: dict[str, Any], game_id: str, poll_url: str, evaluate_url: str) -> str:
+    """Render the evaluation page: configure-and-run controls plus the panel's results.
+
+    Args:
+        view_model: The dict produced by ``evaluation.build_evaluation_view_model``.
+        game_id: The game being evaluated, for the back-link and titles.
+        poll_url: The URL the page polls for the updated evaluation view model JSON.
+        evaluate_url: The URL the page POSTs an evaluator panel to, to start a run.
+
+    Returns:
+        A complete HTML document.
+    """
+    return _EVALUATION_TEMPLATE.render(
+        evaluation_json=json.dumps(view_model),
+        game_id_json=json.dumps(game_id),
+        poll_url_json=json.dumps(poll_url),
+        evaluate_url_json=json.dumps(evaluate_url),
     )
 
 

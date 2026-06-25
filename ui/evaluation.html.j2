@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>evaluation</title>
+<style>
+  :root { --bg:#f6f6f4; --panel:#ffffff; --line:#e3e2de; --ink:#1f2329; --dim:#6e747d; --accent:#44546a;
+          --good:#2e6b34; --bad:#a33f3b; --open:#b07d2b;
+          --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+          --mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:13px; line-height:1.5; }
+  a { color:var(--accent); }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); background:var(--panel); display:flex;
+           align-items:baseline; gap:14px; position:sticky; top:0; z-index:10; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .sub { color:var(--dim); font-size:12px; }
+  #status { margin-left:auto; font-size:12px; color:var(--dim); }
+  .wrap { display:grid; grid-template-columns: 1fr 380px; gap:18px; padding:18px 20px; align-items:start; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin-bottom:16px; }
+  .panel h2 { font-size:12px; text-transform:uppercase; letter-spacing:0.04em; color:var(--dim); margin:0 0 10px; font-weight:600; }
+  button { background:var(--accent); color:#fff; border:1px solid var(--accent); border-radius:5px; padding:6px 14px;
+           font-size:13px; cursor:pointer; font-family:var(--sans); }
+  button:hover { filter:brightness(1.12); }
+  button.subtle { background:var(--panel); color:var(--ink); border-color:#c6c5c0; }
+  button:disabled { opacity:0.5; cursor:default; filter:none; }
+  select { font-family:var(--sans); font-size:13px; padding:4px 6px; border:1px solid #c6c5c0; border-radius:5px; background:#fff; }
+  .memberRow { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+  .chip { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; border:1px solid var(--line); background:#eef0f3; }
+  .memberChip { color:#fff; font-weight:600; }
+  .tag { display:inline-block; font-size:11px; padding:1px 7px; border-radius:4px; border:1px solid var(--line);
+         background:#e8ecf1; color:var(--accent); margin:2px 3px 2px 0; }
+  .tag.strong, .tag.cooperative { color:var(--good); background:#e6efe4; border-color:#cfdfce; }
+  .tag.weak, .tag.adversarial { color:var(--bad); background:#f7e9e7; border-color:#e8d3d0; }
+  .tag.deceptive { color:#8a5a1f; background:#f6eede; border-color:#e6d6b8; }
+  .conf { font-size:10px; color:var(--dim); margin-left:4px; }
+  .cite { font-family:var(--mono); font-size:10px; padding:0 5px; border-radius:3px; background:#eceae6; color:var(--accent);
+          cursor:pointer; border:1px solid var(--line); margin-right:3px; }
+  .cite:hover { background:#dfe5ec; }
+  .cite.broken { background:#f7e9e7; color:var(--bad); border-color:#e8d3d0; text-decoration:line-through; }
+  .cite.quotebad { border-style:dashed; }
+  .turnBlock { border-top:1px solid var(--line); padding-top:8px; margin-top:8px; }
+  .turnHead { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
+  .memberBlock { padding:6px 8px; border-left:3px solid; border-radius:0 5px 5px 0; background:#fafafa; margin:5px 0; }
+  .memberBlock .meta { font-size:11px; font-weight:600; margin-bottom:3px; }
+  .note { color:var(--dim); }
+  .agree { font-size:10px; color:var(--dim); margin-left:6px; }
+  .arcRow { display:flex; gap:8px; align-items:center; padding:4px 0; border-bottom:1px solid var(--line); }
+  .arcKind { font-weight:600; min-width:90px; }
+  .out-honoured { color:var(--good); } .out-broken { color:var(--bad); } .out-open, .out-other { color:var(--open); }
+  table.tally { border-collapse:collapse; width:100%; font-size:12px; }
+  table.tally th { text-align:left; color:var(--dim); font-weight:600; font-size:10px; text-transform:uppercase; padding:4px 8px; border-bottom:1px solid var(--line); }
+  table.tally td { padding:4px 8px; border-bottom:1px solid var(--line); }
+  #tracePanel { position:sticky; top:64px; max-height:calc(100vh - 84px); overflow:auto; }
+  .span { font-family:var(--mono); font-size:11px; padding:2px 4px; border-radius:3px; white-space:pre-wrap; }
+  .span .h { color:var(--accent); }
+  .span.thought { color:#5a4a7a; } .span.note { color:#6e5a2a; } .span.message { color:#2a5a6e; }
+  .span.flash { background:#fff3c4; transition: background 0.1s; }
+  .swimlane { display:grid; grid-template-columns: 110px 1fr; gap:6px; align-items:center; margin:3px 0; }
+  .laneName { font-size:12px; font-weight:600; text-align:right; }
+  .laneTrack { position:relative; height:22px; background:#f1f1ee; border-radius:4px; }
+  .arcBar { position:absolute; height:10px; top:6px; border-radius:5px; cursor:pointer; opacity:0.85; }
+  .arcBar:hover { opacity:1; outline:1px solid var(--ink); }
+  .synthCard { border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:10px; }
+  .synthCard h3 { margin:0 0 4px; font-size:14px; }
+  .dim { margin:5px 0; }
+  .dim .dn { font-weight:600; font-size:11px; text-transform:uppercase; color:var(--dim); }
+  .empty { color:var(--dim); font-style:italic; }
+  .barWrap { display:flex; height:14px; border-radius:3px; overflow:hidden; min-width:80px; background:#eee; }
+  .barWrap span { display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>evaluation</h1>
+  <span class="sub" id="gameLink"></span>
+  <span id="status"></span>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel" id="configPanel">
+      <h2>panel &amp; run</h2>
+      <div id="members"></div>
+      <div style="margin:8px 0">
+        <button class="subtle" id="addMember" type="button">+ add evaluator</button>
+      </div>
+      <button id="run" type="button">▶ run evaluation</button>
+      <span id="runHint" class="note" style="margin-left:10px"></span>
+    </div>
+
+    <div class="panel" id="aggregatePanel" style="display:none">
+      <h2>panel aggregate</h2>
+      <div id="aggregate"></div>
+    </div>
+
+    <div class="panel" id="timelinePanel" style="display:none">
+      <h2>arc timeline</h2>
+      <div id="timeline"></div>
+    </div>
+
+    <div class="panel" id="synthPanel" style="display:none">
+      <h2>player profiles</h2>
+      <div id="syntheses"></div>
+    </div>
+
+    <div class="panel" id="tagsPanel" style="display:none">
+      <h2>per-turn tags</h2>
+      <div id="tagStream"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel" id="tracePanel">
+      <h2>trace</h2>
+      <div id="trace"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const EVAL = {{ evaluation_json }};
+const GAME_ID = {{ game_id_json }};
+const POLL_URL = {{ poll_url_json }};
+const EVALUATE_URL = {{ evaluate_url_json }};
+</script>
+<script>
+{% raw %}
+const PLAYER_COLORS = ["#c0504d", "#4f81bd", "#9bbb59", "#8064a2", "#4bacc6", "#f79646"];
+const MEMBER_COLORS = ["#2d6cdf", "#d9534f", "#5cb85c", "#9b59b6", "#e67e22"];
+const el = id => document.getElementById(id);
+const esc = s => (s == null ? "" : String(s)).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+let CATALOG = null;
+
+function playerColor(name) {
+  const seat = (EVAL.players.find(p => p.name === name) || {}).seat ?? 0;
+  return PLAYER_COLORS[seat % PLAYER_COLORS.length];
+}
+function memberColor(index) { return MEMBER_COLORS[index % MEMBER_COLORS.length]; }
+function colorName(name) { return `<span style="color:${playerColor(name)};font-weight:600">${esc(name)}</span>`; }
+function valenceClass(behavior) {
+  const v = (EVAL.tag_valence || {})[behavior];
+  return v ? " " + v : "";
+}
+
+// ---- config & run ----
+async function loadCatalog() {
+  try { CATALOG = await (await fetch("/api/models")).json(); }
+  catch (e) { CATALOG = { tiers_by_provider: { anthropic: { hi: "" }, openai: { hi: "" }, google: { hi: "" } }, efforts: ["low", "medium", "high"] }; }
+  if (!el("members").children.length) addMemberRow();
+}
+function addMemberRow() {
+  const providers = Object.keys(CATALOG.tiers_by_provider);
+  const row = document.createElement("div");
+  row.className = "memberRow";
+  row.innerHTML =
+    `<select class="prov">${providers.map(p => `<option>${p}</option>`).join("")}</select>` +
+    `<select class="size"></select>` +
+    `<select class="effort">${CATALOG.efforts.map(e => `<option>${e}</option>`).join("")}</select>` +
+    `<button class="subtle remove" type="button">✕</button>`;
+  el("members").appendChild(row);
+  const fillSizes = () => {
+    const sizes = Object.keys(CATALOG.tiers_by_provider[row.querySelector(".prov").value] || {});
+    row.querySelector(".size").innerHTML = sizes.map(s => `<option>${s}</option>`).join("");
+  };
+  row.querySelector(".prov").onchange = fillSizes;
+  row.querySelector(".remove").onclick = () => row.remove();
+  fillSizes();
+}
+function memberSpecs() {
+  return [...el("members").querySelectorAll(".memberRow")].map(row =>
+    `${row.querySelector(".prov").value}:${row.querySelector(".size").value}:${row.querySelector(".effort").value}`);
+}
+async function run() {
+  const evaluators = memberSpecs();
+  if (!evaluators.length) { el("runHint").textContent = "add at least one evaluator"; return; }
+  el("run").disabled = true;
+  el("runHint").textContent = "starting…";
+  try {
+    const res = await fetch(EVALUATE_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ evaluators }),
+    });
+    if (!res.ok) { el("runHint").textContent = "error: " + (await res.json()).detail; el("run").disabled = false; return; }
+    el("runHint").textContent = "running — this can take a while";
+    poll();
+  } catch (e) { el("runHint").textContent = "error: " + e; el("run").disabled = false; }
+}
+let pollTimer = null;
+function poll() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const fresh = await (await fetch(POLL_URL)).json();
+      Object.assign(EVAL, fresh);
+      render();
+      if (!EVAL.running) { clearInterval(pollTimer); el("run").disabled = false; if (EVAL.has_evaluation) el("runHint").textContent = "done"; }
+    } catch (e) { /* keep polling */ }
+  }, 2500);
+}
+
+// ---- rendering ----
+function render() {
+  el("gameLink").innerHTML = `game <a href="/games/${encodeURIComponent(GAME_ID)}">${esc(GAME_ID)}</a>`;
+  renderStatus();
+  renderTrace();
+  const show = EVAL.has_evaluation && EVAL.members.some(m => m.tags.length || m.arcs.length || m.syntheses.length);
+  ["aggregatePanel", "timelinePanel", "synthPanel", "tagsPanel"].forEach(p => el(p).style.display = show ? "" : "none");
+  if (!show) return;
+  renderAggregate();
+  renderTimeline();
+  renderSyntheses();
+  renderTagStream();
+}
+
+function renderStatus() {
+  const bits = [];
+  if (EVAL.running) bits.push("⏳ evaluating…");
+  if (EVAL.panel.length) bits.push(EVAL.panel.map((m, i) => `<span class="chip memberChip" style="background:${memberColor(m.index)}">${esc(m.label)}</span>`).join(" "));
+  if (EVAL.coverage) {
+    const integ = EVAL.aggregate.integrity;
+    bits.push(`citations ${integ.total_citations - integ.broken_citations}/${integ.total_citations} resolved`);
+    if (EVAL.coverage.partial) bits.push(`<span class="chip" style="background:#f6eede">partial: covers ${EVAL.coverage.span_count}/${EVAL.journal_span_count} spans</span>`);
+  }
+  el("status").innerHTML = bits.join(" &nbsp; ");
+  el("runHint").textContent = EVAL.has_evaluation && !EVAL.running ? "re-run to overwrite with a new panel" : el("runHint").textContent;
+}
+
+function renderAggregate() {
+  const integ = EVAL.aggregate.integrity;
+  const rows = EVAL.players.map(p => {
+    const t = EVAL.aggregate.arc_resolution[p.name] || { arcs: 0, honoured: 0, broken: 0, open: 0, other: 0 };
+    return `<tr><td>${colorName(p.name)}</td><td>${t.arcs}</td>` +
+      `<td><div class="barWrap" title="honoured ${t.honoured} / broken ${t.broken} / open ${t.open + t.other}">` +
+      barSeg(t.honoured, "var(--good)") + barSeg(t.broken, "var(--bad)") + barSeg(t.open + t.other, "var(--open)") +
+      `</div></td><td class="out-honoured">${t.honoured}</td><td class="out-broken">${t.broken}</td><td class="out-open">${t.open + t.other}</td></tr>`;
+  }).join("");
+  el("aggregate").innerHTML =
+    `<table class="tally"><thead><tr><th>player</th><th>arcs</th><th>resolution</th><th>honoured</th><th>broken</th><th>open</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `<p class="note" style="margin-top:8px">Integrity: ${integ.broken_citations} of ${integ.total_citations} citations did not resolve` +
+    (integ.quotes ? `; ${integ.quote_mismatches} of ${integ.quotes} quotes did not match` : "") + ` (a deterministic check, not a judgment).</p>`;
+}
+function barSeg(n, color) { return n ? `<span style="flex:${n};background:${color}"></span>` : ""; }
+
+function renderTimeline() {
+  const maxTurn = Math.max(1, ...EVAL.spans.map(s => s.turn));
+  const lanes = EVAL.players.map(p => {
+    const arcs = [];
+    EVAL.members.forEach(m => m.arcs.forEach(a => { if (a.subject === p.name) arcs.push(a); }));
+    const bars = arcs.map(a => {
+      const t0 = a.antecedent.turn ?? 0, t1 = a.consequent.turn ?? t0;
+      const left = (Math.min(t0, t1) / maxTurn) * 100, width = Math.max(2, (Math.abs(t1 - t0) / maxTurn) * 100);
+      const color = a.valence === "honoured" ? "var(--good)" : a.valence === "broken" ? "var(--bad)" : "var(--open)";
+      const title = `${a.kind} ${a.outcome}: ${a.note}` + (a.object ? ` (with ${a.object})` : "");
+      return `<div class="arcBar" style="left:${left}%;width:${width}%;background:${color}" title="${esc(title)}" ` +
+        `onclick="jumpTo(${a.consequent.step}, ${a.consequent.span})"></div>`;
+    }).join("");
+    return `<div class="swimlane"><div class="laneName">${colorName(p.name)}</div><div class="laneTrack">${bars}</div></div>`;
+  }).join("");
+  el("timeline").innerHTML = lanes +
+    `<p class="note" style="margin-top:6px">arrows left→right span antecedent→resolution · ` +
+    `<span style="color:var(--good)">honoured</span> · <span style="color:var(--bad)">broken</span> · <span style="color:var(--open)">open</span></p>`;
+}
+
+function renderSyntheses() {
+  // merge all members' syntheses per player; show each member's take
+  const byPlayer = new Map();
+  EVAL.members.forEach(m => m.syntheses.forEach(s => {
+    if (!byPlayer.has(s.player)) byPlayer.set(s.player, []);
+    byPlayer.get(s.player).push({ member: m, synth: s });
+  }));
+  el("syntheses").innerHTML = EVAL.players.map(p => {
+    const takes = byPlayer.get(p.name) || [];
+    if (!takes.length) return "";
+    const body = takes.map(({ member, synth }) => {
+      const dims = synth.profile.map(d =>
+        `<div class="dim"><span class="dn">${esc(d.dimension)}</span> ${esc(d.characterization)} ${citeList(d.evidence)}</div>`).join("");
+      const episodes = synth.key_episodes.length ? `<div class="dim"><span class="dn">key episodes</span> ${citeList(synth.key_episodes)}</div>` : "";
+      const label = EVAL.panel.length > 1 ? `<div class="meta" style="color:${memberColor(member.index)}">${esc(member.label)}</div>` : "";
+      return `${label}<p>${esc(synth.summary)}</p>${dims}${episodes}`;
+    }).join("<hr style='border:none;border-top:1px solid var(--line)'>");
+    return `<div class="synthCard"><h3>${colorName(p.name)}</h3>${body}</div>`;
+  }).join("") || `<div class="empty">no syntheses</div>`;
+}
+
+function renderTagStream() {
+  const byTurn = new Map();
+  EVAL.members.forEach(m => m.tags.forEach(t => {
+    if (!byTurn.has(t.turn)) byTurn.set(t.turn, []);
+    byTurn.get(t.turn).push({ member: m, tag: t });
+  }));
+  const turns = [...byTurn.keys()].sort((a, b) => a - b);
+  if (!turns.length) { el("tagStream").innerHTML = `<div class="empty">no per-turn tags</div>`; return; }
+  el("tagStream").innerHTML = turns.map(turn => {
+    const items = byTurn.get(turn);
+    const blocks = items.map(({ member, tag }) => {
+      const cites = citeList(tag.evidence);
+      const gap = isGap(tag.behavior) && !gapAnchored(tag) ? ` <span class="agree" style="color:var(--bad)">unanchored gap</span>` : "";
+      const label = EVAL.panel.length > 1 ? `<span class="meta" style="color:${memberColor(member.index)}">${esc(member.label)}</span> ` : "";
+      return `<div class="memberBlock" style="border-color:${memberColor(member.index)}">` +
+        `${label}<span class="tag${valenceClass(tag.behavior)}">${esc(tag.behavior)}: ${colorName(tag.player)}</span>` +
+        `<span class="conf">conf ${tag.confidence}/3</span>${gap}<div class="note">${esc(tag.note)} ${cites}</div></div>`;
+    }).join("");
+    return `<div class="turnBlock"><div class="turnHead">turn ${turn}${agreementChips(items)}</div>${blocks}</div>`;
+  }).join("");
+}
+
+function agreementChips(items) {
+  if (EVAL.panel.length < 2) return "";
+  const byKey = new Map();
+  items.forEach(({ member, tag }) => {
+    const k = `${tag.player}|${tag.behavior}`;
+    if (!byKey.has(k)) byKey.set(k, new Set());
+    byKey.get(k).add(member.index);
+  });
+  return " " + [...byKey.entries()].map(([k, members]) => {
+    const [player, behavior] = k.split("|");
+    const unanimous = members.size === EVAL.panel.length;
+    return `<span class="agree" title="${members.size} of ${EVAL.panel.length} members">${esc(behavior)} ${members.size}/${EVAL.panel.length}${unanimous ? " ✓" : ""}</span>`;
+  }).join("");
+}
+
+function isGap(behavior) { return ["deception", "bluff", "information_dishonesty", "thought_action_mismatch"].includes(behavior); }
+function gapAnchored(tag) {
+  const onTurn = tag.evidence.filter(e => e.resolved && e.turn === tag.turn);
+  return onTurn.length >= 2;
+}
+
+function citeList(evidence) {
+  return (evidence || []).map(e => {
+    const broken = !e.resolved;
+    const quotebad = e.quote != null && e.quote_matched === false;
+    const cls = "cite" + (broken ? " broken" : "") + (quotebad ? " quotebad" : "");
+    const onclick = broken ? "" : ` onclick="jumpTo(${e.step}, ${e.span})"`;
+    const title = e.quote ? esc(e.quote) : (broken ? "unresolved citation" : "");
+    return `<span class="${cls}" title="${title}"${onclick}>[${e.span}]</span>`;
+  }).join("");
+}
+
+function renderTrace() {
+  let html = "", lastTurn = null;
+  const ordered = [...EVAL.spans].sort((a, b) => a.turn - b.turn || a.span - b.span);
+  ordered.forEach(s => {
+    if (s.turn !== lastTurn) { lastTurn = s.turn; html += `<div class="turnHead" style="margin-top:8px">turn ${s.turn}</div>`; }
+    const line = s.layer === "thought" ? `${esc(s.player)} (thinks): ${esc(s.text)}`
+      : s.layer === "note" ? `note ${esc(s.player)}: ${esc(s.text)}` : esc(s.text);
+    html += `<div class="span ${s.layer}" id="span-${s.span}"><span class="h">[${s.span}]</span> ${line}</div>`;
+  });
+  el("trace").innerHTML = html || `<div class="empty">no trace</div>`;
+}
+
+function jumpTo(step, span) {
+  const node = el("span-" + span);
+  if (!node) return;
+  node.scrollIntoView({ behavior: "smooth", block: "center" });
+  node.classList.add("flash");
+  setTimeout(() => node.classList.remove("flash"), 1200);
+}
+
+el("addMember").onclick = addMemberRow;
+el("run").onclick = run;
+loadCatalog();
+render();
+if (EVAL.running) poll();
+{% endraw %}
+</script>
+</body>
+</html>

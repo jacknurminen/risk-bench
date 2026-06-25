@@ -72,6 +72,25 @@ ARC_OUTCOMES: Final[tuple[str, ...]] = (
 ARC_INTENTS: Final[tuple[str, ...]] = ("sincere_then_revised", "strategic_setup")
 """The retrospective B3b/B3a colouring for a commitment arc; a separately-labelled judgment, never a per-turn count."""
 
+ARC_OUTCOME_VALENCE: Final[dict[str, str]] = {
+    # honoured: the relation held
+    "kept": "honoured",
+    "honoured": "honoured",
+    "carried_out": "honoured",
+    "persisted": "honoured",
+    "faithful": "honoured",
+    # broken: the relation failed
+    "broken": "broken",
+    "betrayed": "broken",
+    "bluffed": "broken",
+    "drifted": "broken",
+    "distorted": "broken",
+    # retaliated and open are neither honoured nor broken
+    "retaliated": "other",
+    "open": "open",
+}
+"""Each arc outcome's valence, for the timeline's colour: honoured (green), broken (red), open/other (amber)."""
+
 
 @dataclass(frozen=True)
 class Evidence:
