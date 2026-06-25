@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import uvicorn
@@ -10,6 +10,7 @@ from risk_bench import launch, specs
 from risk_bench.api.app import create_app
 from risk_bench.config import load_settings
 from risk_bench.players.llm import ProviderUnavailableError
+from risk_bench.runner.evaluation_store import evaluation_header, read_evaluation
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import TournamentRunner
 from risk_bench.viewer.html import render_viewer_html
@@ -126,6 +127,27 @@ def view(
 
 
 @app.command()
+def evaluate(
+    journal: Annotated[Path, typer.Argument(help="Game journal (.jsonl) to evaluate; need not be finished.")],
+    evaluator: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Evaluator panel member as a model spec (provider:size:effort), repeatable to add more "
+            "members; every member reads the whole game and all their output is kept for agreement."
+        ),
+    ] = None,
+) -> None:
+    """Run a whole-game evaluator panel over a stored game and write its evaluation sidecar."""
+    settings = load_settings()
+    try:
+        path = launch.run_evaluation(journal_path=journal, evaluator_specs=evaluator or [], settings=settings)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
+    _print_evaluation_summary(records=read_evaluation(path=path))
+    console.print(f"Evaluation written to {path}")
+
+
+@app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Interface to bind to.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to bind to.")] = 8420,
@@ -135,6 +157,46 @@ def serve(
     web_app = create_app(games_directory=settings.output_directory / "games")
     console.print(f"risk-bench running at [bold]http://{host}:{port}[/bold] — Ctrl+C to stop.")
     uvicorn.run(web_app, host=host, port=port, log_level="warning")
+
+
+def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
+    header = evaluation_header(records=records)
+    if header is None:
+        console.print("[bold yellow]No evaluation was produced[/bold yellow] (every panel member failed).")
+        return
+    counts = {kind: sum(1 for record in records if record.get("type") == kind) for kind in _EVAL_RECORD_KINDS}
+    total_citations, broken_citations = _citation_integrity(records=records)
+    console.print(f"\nPanel: [bold]{', '.join(header.panel)}[/bold]")
+    console.print(
+        f"Tags: {counts['eval_tag']}  Arcs: {counts['eval_arc']}  Syntheses: {counts['eval_synthesis']}  "
+        f"(covers {header.span_count} spans across {header.record_count} records)"
+    )
+    console.print(f"Broken citations: {broken_citations}/{total_citations}")
+
+
+_EVAL_RECORD_KINDS = ("eval_tag", "eval_arc", "eval_synthesis")
+
+
+def _citation_integrity(records: list[dict[str, Any]]) -> tuple[int, int]:
+    total, broken = 0, 0
+    for record in records:
+        for evidence in _record_evidence(record=record):
+            total += 1
+            broken += 0 if evidence.get("resolved") else 1
+    return total, broken
+
+
+def _record_evidence(record: dict[str, Any]) -> list[dict[str, Any]]:
+    match record.get("type"):
+        case "eval_tag":
+            return list(record.get("evidence", []))
+        case "eval_arc":
+            return [record["antecedent"], record["consequent"]]
+        case "eval_synthesis":
+            from_profile = [item for dimension in record.get("profile", []) for item in dimension.get("evidence", [])]
+            return from_profile + list(record.get("key_episodes", []))
+        case _:
+            return []
 
 
 def _print_standings(report: TournamentReport) -> None:

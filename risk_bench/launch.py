@@ -1,14 +1,22 @@
 """Running games as plain function calls, shared by the CLI and the web app's worker processes."""
 
 import random
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
 from risk_bench import specs
 from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
 from risk_bench.config import Settings
+from risk_bench.game.rules import reinforcement_count
+from risk_bench.game.state import GameState
+from risk_bench.players.rendering import render_board_text
+from risk_bench.runner.evaluation import Evaluation, Evaluator
+from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
 from risk_bench.runner.game_runner import GameRecord, GameRunner
-from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, restore_game
+from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal, restore_game
+from risk_bench.runner.trace_index import TraceSpan, build_trace_index
 
 
 def run_new_game(
@@ -128,6 +136,106 @@ def resume_game(journal_file: Path, settings: Settings, commentators: list[str],
         journal.close()
         if trace is not None:
             trace.close()
+
+
+def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Settings) -> Path:
+    """Evaluate a stored game with a panel of whole-game evaluators, writing the eval sidecar.
+
+    Reads the journal (which may be a paused game's prefix), builds the trace index the panel
+    cites, runs every member offline and concurrently over the same trace, and writes their
+    tags, arcs, and syntheses to ``game.eval.jsonl`` — overwriting any prior run, since the
+    evaluation is a re-runnable derived artifact, never part of the canonical journal.
+
+    Args:
+        journal_path: The stored game journal to evaluate; need not be a finished game.
+        evaluator_specs: One model spec per panel member, in panel order; must be non-empty.
+        settings: Provides API keys and the token limit.
+
+    Returns:
+        The path to the written evaluation sidecar.
+
+    Raises:
+        ValueError: If no members are given, a spec is invalid, or the journal is unreadable.
+    """
+    if not evaluator_specs:
+        raise ValueError("Provide at least one evaluator panel member.")
+    records = read_journal(path=journal_path)
+    restored = restore_game(path=journal_path)
+    spans = build_trace_index(records=records)
+    overview = _render_game_overview(state=restored.state)
+    # the panel's API calls go to their own trace sidecar, so a re-run overwrites cleanly rather
+    # than appending duplicate evaluator calls into the game's own trace
+    trace = TraceWriter(
+        path=evaluation_path_for_journal(journal_path=journal_path).with_suffix(".trace.jsonl"), append=False
+    )
+    trace.set_context(turn=restored.state.turn_number, kind="evaluation")
+    try:
+        evaluators = specs.build_evaluators(evaluator_specs=evaluator_specs, settings=settings, trace=trace)
+        evaluations = _gather_evaluations(
+            evaluators=evaluators,
+            players=set(restored.state.players),
+            spans=spans,
+            overview=overview,
+            max_workers=min(settings.max_concurrent_commentators, len(evaluators)),
+        )
+    finally:
+        trace.close()
+
+    writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
+    try:
+        writer.write_header(panel=evaluator_specs, record_count=len(records), span_count=len(spans))
+        for index, evaluation in enumerate(evaluations):
+            if evaluation is not None:
+                writer.write_evaluation(evaluator_index=index, evaluation=evaluation)
+    finally:
+        writer.close()
+    return writer.path
+
+
+def _gather_evaluations(
+    evaluators: tuple[Evaluator, ...],
+    players: set[str],
+    spans: tuple[TraceSpan, ...],
+    overview: str,
+    max_workers: int,
+) -> list[Evaluation | None]:
+    if not evaluators:
+        return []
+    # written in panel order regardless of which provider answered first, so the sidecar is stable
+    results: list[Evaluation | None] = [None] * len(evaluators)
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+        futures = {
+            pool.submit(evaluator.evaluate_game, players=players, spans=spans, game_overview=overview): index
+            for index, evaluator in enumerate(evaluators)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results[index] = future.result()
+            except Exception as error:  # noqa: BLE001 - one member must never abort the panel
+                print(f"[evaluator[{index}]-error] {error}", file=sys.stderr)
+    return results
+
+
+def _render_game_overview(state: GameState) -> str:
+    lines = []
+    for player_id, player in state.players.items():
+        if player.eliminated_by is not None:
+            lines.append(
+                f"- {player_id}: ELIMINATED by {player.eliminated_by} | SECRET MISSION: {player.mission.description}"
+            )
+            continue
+        lines.append(
+            f"- {player_id}: {len(state.territories_owned_by(player_id=player_id))} territories, "
+            f"{state.army_count(player_id=player_id)} armies, "
+            f"income {reinforcement_count(state=state, player_id=player_id)}/turn, "
+            f"{len(player.cards)} cards | SECRET MISSION: {player.mission.description}"
+        )
+    outcome = (
+        f"{state.winner} won the game." if state.winner else "The game ended without a winner (draw or unfinished)."
+    )
+    standings = "Final omniscient standings (you see every secret mission):\n" + "\n".join(lines)
+    return f"{standings}\n\n{outcome}\n\n{render_board_text(owner=dict(state.owner), armies=dict(state.armies))}"
 
 
 def _trace_writer(
