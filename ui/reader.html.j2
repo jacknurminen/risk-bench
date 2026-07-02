@@ -614,6 +614,8 @@ function renderFilters() {
   // only offer axis chips for axes that actually occur in the present tags; with no tags at all
   // (nothing evaluated or annotated yet) the whole axis filter disappears rather than sit inert
   const presentAxes = new Set(allTags().map(t => axisOf(t.behavior)));
+  if (state.filters.showCommentary)
+    GAME.commentary.forEach(c => (c.tags || []).forEach(t => presentAxes.add(axisOf(t.behavior))));
   const offeredAxes = AXES.filter(([key]) => presentAxes.has(key));
   el("axisSection").style.display = offeredAxes.length ? "" : "none";
   el("axisRow").innerHTML = offeredAxes.map(([key, label, color]) => {
@@ -758,11 +760,25 @@ function annoCard(t) {
 function commentaryBlock(comments) {
   return comments.map(c => {
     const label = GAME.commentators.length > 1 ? `<span class="mono" style="font-size:9px;color:${MEMBER_COLORS[c.commentator_index % MEMBER_COLORS.length]}">${escapeHtml(c.commentator)}</span> ` : "";
+    // the commentator's own per-turn tags ride with its prose, so the live-commentary toggle governs both
+    const pills = (c.tags || []).filter(t => state.filters.axes.has(axisOf(t.behavior))).map(commentatorPill).join("");
     return `<div class="commentary"><div style="display:flex;gap:9px;align-items:flex-start">
       <span class="live"><span class="swatch" style="background:var(--blue)"></span>live</span>
       <span style="flex:1"><span class="ctext">${richText(c.text)}</span></span></div>
+      ${pills ? `<div class="tpills" style="padding:8px 0 0">${pills}</div>` : ""}
       <div style="margin-top:6px;font-family:var(--font-mono);font-size:9px;color:var(--faint)">${label}</div></div>`;
   }).join("");
+}
+
+/* a commentator tag has no confidence or evidence citation, so its pill is plain: valence tint,
+   axis swatch, a 🎙 mark, and the justification in the tooltip */
+function commentatorPill(t) {
+  const [vc, vt] = valenceStyle(t.behavior);
+  return `<span class="pill" title="${escapeHtml(t.note || "")}" style="background:${vt};color:${vc};cursor:${t.note ? "help" : "default"}">
+    <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>${t.behavior}
+    <span class="mono" style="font-size:9px;color:${colorOf(t.player)};font-weight:600">${tagOf(t.player)}</span>
+    <span style="font-size:9px;opacity:.6">🎙</span>
+  </span>`;
 }
 
 function updateSubBar() {
