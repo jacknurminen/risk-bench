@@ -133,7 +133,8 @@
   .tpills { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 15px 12px 52px; }
 
   .expand { padding: 0 15px 15px; }
-  .traceline { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; }
+  .traceline { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+  .traceline:hover:not(.sel) { background: var(--subtle); }
   .traceline.sel { background: #fbf5e6; box-shadow: inset 0 0 0 1px var(--gold); }
   .kindbar { width: 3px; align-self: stretch; border-radius: 2px; flex: none; }
   .kindlabel { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: #9a917f; }
@@ -581,6 +582,14 @@ function show(newIndex) {
 /* focus a turn: move the board to that turn's end and scroll the card into view */
 function focusTurn(turn) { show(turnStep(turn)); }
 
+/* clicking a trace line winds the pinned board to that line's exact step; the line's own
+   buttons (cite chip, bubble stack, +) keep their roles, so their clicks don't wind */
+function lineClick(event, step) {
+  if (event.target.closest("button")) return;
+  stopPlaying();
+  show(step);
+}
+
 /* ================= LEFT RAIL ================= */
 function playerResult(name) {
   const last = steps[steps.length - 1];
@@ -743,7 +752,7 @@ function traceLine(turn, s, liveAnno) {
   const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
   const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
   return `<div>
-    <div class="traceline ${sel ? "sel" : ""}">
+    <div class="traceline ${sel ? "sel" : ""}" onclick="lineClick(event, ${s.step})" title="wind the board to this moment">
       <button class="chip ${sel ? "on" : ""}" onclick="chipClick(${s.span})" title="cite this line">[${s.span}]</button>
       <span class="kindbar" style="background:${kindColor}"></span>
       <span style="flex:1;min-width:0">
