@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>risk-bench · evaluation reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/theme.css">
+<style>
+  body { padding-bottom: 60px; }
+  a { color: inherit; }
+
+  /* masthead */
+  .masthead { position: sticky; top: 0; z-index: 40; background: rgba(244,243,239,.92); backdrop-filter: blur(10px);
+              border-bottom: 1px solid var(--line-3); }
+  .masthead .inner { max-width: 1440px; margin: 0 auto; padding: 13px 30px; display: flex; align-items: center;
+                     justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .brand { font-family: var(--font-serif); font-weight: 600; font-size: 22px; letter-spacing: -.01em; }
+  .brand small { font-family: var(--font-mono); font-size: 11px; color: var(--mute-2); font-weight: 400; margin-left: 12px; }
+  .mastmeta { display: flex; align-items: center; gap: 14px; font-family: var(--font-mono); font-size: 11px; color: var(--mute); flex-wrap: wrap; }
+  .mastmeta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); display: inline-block; margin-right: 6px; vertical-align: 1px; }
+
+  /* two-column shell */
+  .shell { max-width: 1440px; margin: 0 auto; padding: 22px 30px 0; display: flex; gap: 26px; align-items: flex-start; }
+  .rail { width: 286px; flex: none; position: sticky; top: 78px; max-height: calc(100vh - 92px); overflow: auto;
+          padding-right: 6px; padding-bottom: 30px; }
+  .feed { flex: 1; min-width: 0; }
+  .railHead { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 9px; }
+  .railHint { font-family: var(--font-mono); font-size: 9px; color: var(--faintest); }
+  .section { margin-bottom: 16px; }
+  .filters { padding: 15px; }
+
+  /* player rail card */
+  .pcard { padding: 13px; margin-bottom: 10px; border-top: 3px solid var(--line); }
+  .pcard .top { display: flex; gap: 11px; align-items: flex-start; }
+  .badge { width: 30px; height: 30px; border-radius: 6px; color: #fff; font-family: var(--font-mono); font-size: 11px;
+           font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .ptag { font-family: var(--font-mono); font-size: 11.5px; font-weight: 600; line-height: 1.2; overflow: hidden;
+          text-overflow: ellipsis; white-space: nowrap; }
+  .presult { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .05em; text-transform: uppercase;
+             padding: 1px 6px; border-radius: 999px; flex: none; }
+  .pstats { font-family: var(--font-mono); font-size: 9.5px; color: var(--mute-2); margin-top: 3px; }
+  .pmission { font-family: var(--font-mono); font-size: 9.5px; line-height: 1.4; color: var(--mute-2); padding: 7px 9px;
+              background: var(--subtle); border-radius: 4px; margin: 10px 0 0; }
+  .checkbox { display: block; width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px #cdc8bb; background: transparent; }
+  .checkbox.on { background: var(--coop); box-shadow: inset 0 0 0 1.5px var(--coop); }
+  .iconbtn { background: none; border: none; cursor: pointer; padding: 2px; flex: none; }
+
+  /* filter widgets */
+  .flabel { font-family: var(--font-mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+            color: var(--mute-2); margin-bottom: 9px; }
+  .axisrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 17px; }
+  .axischip { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 11px;
+              padding: 5px 9px; border-radius: 999px; cursor: pointer; border: 1px solid var(--line); background: #fff; color: var(--faint); }
+  .seg { display: flex; background: #eae7de; border-radius: 5px; padding: 3px; gap: 2px; margin-bottom: 17px; }
+  .seg button { flex: 1; font-family: var(--font-mono); font-size: 11px; padding: 6px 10px; border: none; border-radius: 4px;
+                cursor: pointer; background: transparent; color: var(--mute); }
+  .seg button.on { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .annrow { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 5px; cursor: pointer;
+            background: transparent; border: 1px solid transparent; width: 100%; }
+  .annrow.on { background: var(--subtle); border-color: var(--line-2); }
+  .annrow.off { opacity: .45; }
+  .toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px; border-radius: 5px; cursor: pointer;
+            background: #fff; border: 1px solid var(--line); margin-top: 8px; }
+  .toggle.on { background: var(--subtle); }
+
+  /* feed sections — the board pins below the masthead so it stays in view while the feed scrolls */
+  .boardcard { padding: 14px 16px; margin-bottom: 14px; position: sticky; top: 56px; z-index: 25; }
+  .boardhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  #board { position: relative; height: 540px; border-radius: 6px; background: #eef1f4; border: 1px solid var(--line); overflow: hidden; }
+  .tlink { border-bottom: 1px dotted #b3b1aa; cursor: pointer; }
+  .tlink:hover { border-bottom-color: var(--ink); color: var(--ink); }
+  #board svg { width: 100%; height: 100%; }
+  #continentLegend { position: absolute; left: 12px; bottom: 10px; background: #ffffffe8; border: 1px solid var(--line);
+                     border-radius: 5px; padding: 5px 8px; font-family: var(--font-mono); font-size: 10px; line-height: 1.6; }
+  #continentLegend .cdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px;
+                           border: 1px solid #00000026; background: transparent; vertical-align: -1px; }
+  .acount { font: 700 11px var(--font-mono); text-anchor: middle; dominant-baseline: middle; fill: #101010;
+            paint-order: stroke; stroke: #ffffffd0; stroke-width: 2.5px; pointer-events: none; }
+  .tname { font: 400 5px var(--font-sans); text-anchor: middle; dominant-baseline: middle; fill: #2c3540; opacity: .85;
+           paint-order: stroke; stroke: #ffffffa8; stroke-width: 1.6px; pointer-events: none; }
+  #board path.flash { animation: borderFlash 1.2s ease-out; }
+  @keyframes borderFlash { 0% { stroke: #c45d12; stroke-width: 4; } 55% { stroke: #c45d12; stroke-width: 2.5; } 100% { stroke: #000; stroke-width: 1.2; } }
+
+  .controls { display: flex; align-items: center; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .controls input[type=range] { flex: 1; min-width: 140px; accent-color: var(--ink); }
+  .cbtn { font-family: var(--font-mono); font-size: 12px; background: #fff; border: 1px solid var(--line); border-radius: 5px;
+          padding: 5px 9px; cursor: pointer; color: #5a5648; }
+  .cbtn:hover { border-color: #cdc8bb; }
+  #status { font-family: var(--font-mono); font-size: 11px; color: var(--mute); min-width: 190px; }
+  .statstrip { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); }
+
+  .ctaCard { padding: 22px 24px; margin-bottom: 14px; }
+  .ctaCard h2 { font-family: var(--font-serif); font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+  .ctaCard p { font-size: 13px; line-height: 1.5; color: var(--mute); margin: 0; }
+  .evalConfig { margin-top: 14px; display: none; }
+  .evalConfig.open { display: block; }
+  .evalRow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .evalRow select { font-family: var(--font-mono); font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+
+  .synthGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .synthCard { border: 1px solid var(--line-2); border-radius: 6px; padding: 13px; border-top: 3px solid var(--line); }
+  .synthCard .summary { font-size: 12px; line-height: 1.5; color: var(--body); margin: 8px 0 0; }
+  .synthDim { margin-top: 8px; font-size: 11.5px; line-height: 1.45; }
+  .synthDim b { font-family: var(--font-mono); font-size: 10px; color: var(--mute); }
+
+  .subbar { display: flex; align-items: center; justify-content: space-between;
+            gap: 14px; padding: 10px 2px 12px; flex-wrap: wrap; }
+  .subbar .count { font-family: var(--font-serif); font-size: 17px; font-weight: 600; }
+  .subbar .sub { font-family: var(--font-mono); font-size: 11px; color: var(--mute-2); margin-left: 10px; }
+  .modeToggle { display: inline-flex; background: #eae7de; border-radius: 5px; padding: 3px; gap: 2px; margin-right: 8px; }
+  .modeToggle button { font-family: var(--font-mono); font-size: 11px; padding: 5px 12px; border: none; border-radius: 4px; cursor: pointer; background: transparent; color: var(--mute); }
+  .modeToggle button.on { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+  /* turn cards */
+  .tcard { border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 7px; overflow: hidden;
+           background: #fff; margin-bottom: 9px; }
+  .tcard.focus { animation: flashCard 1.2s ease; }
+  .thead { display: flex; align-items: flex-start; gap: 11px; width: 100%; background: none; border: none; padding: 13px 15px;
+           cursor: pointer; text-align: left; }
+  .tbadge { width: 26px; height: 26px; border-radius: 6px; color: #fff; font-family: var(--font-mono); font-size: 10px;
+            font-weight: 600; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  .tmeta { flex: 1; min-width: 0; }
+  .tmeta .line1 { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; flex-wrap: wrap; }
+  .ttag { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+  .tturn { font-family: var(--font-mono); font-size: 10px; color: var(--faint); }
+  .gapbadge { font-family: var(--font-mono); font-size: 9px; letter-spacing: .06em; text-transform: uppercase;
+              color: var(--deceptive); background: var(--deceptive-tint); padding: 2px 6px; border-radius: 3px; }
+  .tsummary { display: block; font-size: 13.5px; line-height: 1.45; color: var(--ink-soft); }
+  .chev { font-size: 17px; color: var(--faint); flex: none; transition: transform .25s; }
+  .tpills { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 15px 12px 52px; }
+
+  .expand { padding: 0 15px 15px; }
+  .traceline { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; }
+  .traceline.sel { background: #fbf5e6; box-shadow: inset 0 0 0 1px var(--gold); }
+  .kindbar { width: 3px; align-self: stretch; border-radius: 2px; flex: none; }
+  .kindlabel { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .08em; text-transform: uppercase; color: #9a917f; }
+  .tracetext { display: block; margin-top: 1px; }
+  .tracetext.msg { font-family: var(--font-serif); font-style: italic; font-size: 13.5px; line-height: 1.5; }
+  .tracetext.mono { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5; }
+  .annodots { display: flex; align-items: center; }
+  .annodot { width: 9px; height: 9px; border-radius: 50%; box-shadow: 0 0 0 1.5px #fff; }
+  .plusbtn { width: 20px; height: 20px; border-radius: 50%; border: 1px dashed #c7c1b3; background: none; color: var(--faint);
+             font-size: 13px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; opacity: .5; }
+  .plusbtn:hover { border-color: var(--ink); color: var(--ink); opacity: 1; }
+  .annocard { border-radius: 6px; padding: 8px 11px; border: 1px solid transparent; }
+  .commentary { padding: 11px 15px; border-top: 1px dashed var(--line); background: var(--subtle-warm); }
+  .commentary .live { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 8.5px;
+                      letter-spacing: .08em; text-transform: uppercase; color: var(--blue); }
+  .commentary .ctext { font-family: var(--font-serif); font-style: italic; font-size: 13.5px; line-height: 1.5; color: #4a4638; }
+
+  /* deception gap panel */
+  .gapbox { border: 1px solid #e6cfef; background: #faf4fc; border-radius: 6px; padding: 11px 13px; margin-bottom: 8px; }
+  .gapbox .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* compare matrix */
+  .matrix { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin-top: 11px; }
+  .matrix .mhead, .matrix .mrow { display: flex; align-items: center; padding: 7px 11px; }
+  .matrix .mhead { background: var(--subtle); border-bottom: 1px solid var(--line-2); }
+  .matrix .mrow { border-bottom: 1px solid #f2efe6; }
+  .mcell { width: 44px; display: flex; justify-content: center; }
+  .mmark { width: 18px; height: 18px; border-radius: 4px; color: #fff; font-family: var(--font-mono); font-size: 9px;
+           font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+
+  /* right-side panels */
+  .overlay { position: fixed; inset: 0; background: rgba(27,26,23,.26); z-index: 60; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 460px; max-width: 94vw; background: #fff; border-left: 1px solid var(--line-3);
+            z-index: 61; display: flex; flex-direction: column; box-shadow: -14px 0 44px rgba(27,26,23,.13); animation: panelIn .24s cubic-bezier(.16,1,.3,1); }
+  .drawer .dhead { padding: 16px 18px; border-bottom: 1px solid var(--line-2); display: flex; align-items: center; justify-content: space-between; }
+  .drawer .dbody { flex: 1; overflow: auto; padding: 14px 18px 40px; }
+  .drawer .dfoot { padding: 14px 18px; border-top: 1px solid var(--line-2); display: flex; gap: 8px; align-items: center; }
+  .field { margin-bottom: 16px; }
+  .field textarea { width: 100%; min-height: 64px; resize: vertical; font-family: var(--font-sans); font-size: 12.5px; line-height: 1.5;
+                    color: var(--ink-soft); padding: 9px 11px; border: 1px solid var(--line); border-radius: 6px; outline: none; }
+  .vocabGroup { margin-bottom: 11px; }
+  .vocabGroup .items { display: flex; flex-wrap: wrap; gap: 5px; }
+  .vocabItem { font-family: var(--font-mono); font-size: 10px; padding: 4px 8px; border-radius: 5px; cursor: pointer;
+               border: 1px solid var(--line); background: #fff; color: var(--mute); }
+  .traceRow { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 5px; margin-bottom: 2px; }
+  .traceRow .ln { font-family: var(--font-mono); font-size: 10px; color: var(--faint); flex: none; width: 30px; text-align: right; }
+
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff;
+           font-family: var(--font-mono); font-size: 12px; padding: 9px 16px; border-radius: 6px; z-index: 80; display: none; }
+  .empty { color: var(--mute-2); font-size: 12.5px; padding: 8px 2px; }
+
+  /* notes modal (full private-note history for one player) */
+  #notesModal { display: none; position: fixed; inset: 0; background: rgba(27,26,23,.34); z-index: 70; align-items: center; justify-content: center; }
+  #notesModal.open { display: flex; }
+  .notesBox { width: min(640px, 92vw); max-height: 86vh; overflow: auto; padding: 18px 20px; }
+  .notesHead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .noteVersion { border-top: 1px solid var(--line); padding: 9px 0; }
+  .noteVersion:first-child { border-top: none; }
+  .noteMeta { font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); margin-bottom: 3px; }
+  .noteText { white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; color: var(--body); }
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="inner">
+    <div><span class="brand">risk-bench</span><small>evaluation reader</small></div>
+    <div class="mastmeta">
+      <span id="mastStatus"></span>
+      <span style="color:#c7c1b3">·</span>
+      <span id="mastWinner"></span>
+      <button class="btn" id="gameControl" style="display:none;font-size:10px;padding:4px 10px">⏸ pause game</button>
+      <a class="mono" href="" id="statsLink" style="color:var(--faint);text-decoration:underline;font-size:10px">📊 stats ↗</a>
+      <a class="mono" href="" id="classicLink" style="color:var(--faint);text-decoration:underline;font-size:10px">classic view ↗</a>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="section">
+      <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
+      <div id="railPlayers"></div>
+    </div>
+    <div class="card filters">
+      <div class="flabel">Behaviour axis</div>
+      <div class="axisrow" id="axisRow"></div>
+      <div class="flabel">Min confidence</div>
+      <div class="seg" id="confSeg"></div>
+      <div class="flabel">Annotators</div>
+      <div id="annList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px"></div>
+      <div class="toggle" id="privToggle" style="margin-top:0"><span class="switch"><span class="knob"></span></span>
+        <span class="mono" style="font-size:11.5px">Private layers (thoughts · notes)</span></div>
+      <div class="toggle" id="commToggle"><span class="switch"><span class="knob"></span></span>
+        <span class="mono" style="font-size:11.5px">Live commentary</span></div>
+    </div>
+  </aside>
+
+  <main class="feed">
+    <section class="card boardcard">
+      <div class="boardhead"><span class="eyebrow" id="boardTurnLabel">Board</span>
+        <span class="mono" style="font-size:10px;color:var(--faintest)" id="boardHint"></span></div>
+      <div id="board">{{ board_svg }}<div id="continentLegend"></div></div>
+      <div class="controls">
+        <button class="cbtn" id="first" title="first">⏮</button>
+        <button class="cbtn" id="prevTurn" title="previous turn">«turn</button>
+        <button class="cbtn" id="prev" title="step back">◀</button>
+        <button class="cbtn" id="play">▶ play</button>
+        <button class="cbtn" id="next" title="step forward">▶</button>
+        <button class="cbtn" id="nextTurn" title="next turn">turn»</button>
+        <button class="cbtn" id="last" title="last">⏭</button>
+        <input type="range" id="slider" min="0" value="0">
+        <span id="status"></span>
+      </div>
+      <div class="statstrip" id="statStrip"></div>
+    </section>
+
+    <section class="card ctaCard" id="evalCta" hidden></section>
+    <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+
+    <div class="subbar">
+      <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="modeToggle" id="modeToggle"></span>
+        <button class="btn dark" id="newAnno">+ new annotation</button>
+        <button class="btn" id="expandAll">expand</button>
+        <button class="btn" id="collapseAll">collapse</button>
+      </div>
+    </div>
+
+    <div id="timeline"></div>
+  </main>
+</div>
+
+<div id="panelRoot"></div>
+<div id="notesModal" onclick="if(event.target===this)closeNotes()">
+  <div class="card notesBox">
+    <div class="notesHead"><span class="serif" id="notesTitle" style="font-size:16px;font-weight:600"></span>
+      <button class="iconbtn" onclick="closeNotes()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+    <div id="notesBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const GAME = {{ game_json }};
+let EVAL = {{ eval_json }};
+const LIVE = {{ live_json }};
+const POLL_URL = {{ poll_url_json }};
+const EVAL_POLL_URL = {{ eval_poll_url_json }};
+const EVALUATE_URL = {{ evaluate_url_json }};
+const ANNOTATIONS_URL = {{ annotations_url_json }};
+const TRACE_URL = {{ trace_url_json }};
+const CLASSIC_URL = {{ classic_url_json }};
+let gameRunning = {{ live_running_json }};  // whether the game's worker is currently playing (live games only)
+
+const COLORS = ["#a33f3b","#3c6c9e","#6e8f3a","#6b5288","#c97a29","#2f8a9e"];
+const MEMBER_COLORS = ["#7a6a55","#4a7a6e","#8a6f9e","#9e6a4a","#5a7a3c","#3c6a8a","#9a8a3c","#6a6a6a"];
+const HUMAN = -1;
+GAME.notes ??= []; GAME.commentary ??= []; GAME.commentators ??= [];
+const steps = GAME.steps;
+let index = 0, timer = null;
+
+const el = id => document.getElementById(id);
+const pretty = name => (name ?? "").replaceAll("_", " ");
+const escapeHtml = t => (t ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+/* ---- player identity ---- */
+const seatOf = {}; GAME.players.forEach((p, seat) => seatOf[p.name] = seat);
+const informalToken = name => name.split(/[-#.:\s]/)[0].toLowerCase();
+const tagOf = name => informalToken(name);
+const initialsOf = name => informalToken(name).slice(0, 2).toUpperCase();
+const colorOf = name => COLORS[seatOf[name] ?? 0];
+
+/* name + place highlighting (ported from the classic viewer) */
+const seatByAlias = {};
+{
+  const counts = {}; GAME.players.forEach(p => counts[informalToken(p.name)] = (counts[informalToken(p.name)] || 0) + 1);
+  GAME.players.forEach((p, seat) => { seatByAlias[p.name.toLowerCase()] = seat;
+    const inf = informalToken(p.name); if (inf && counts[inf] === 1) seatByAlias[inf] = seat; });
+}
+const NAME_PATTERN = new RegExp("\\b(" + Object.keys(seatByAlias).sort((a, b) => b.length - a.length)
+  .map(a => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "gi");
+const colorizeNames = t => escapeHtml(t).replace(NAME_PATTERN, m =>
+  `<span style="color:${COLORS[seatByAlias[m.toLowerCase()]]};font-weight:600">${m}</span>`);
+const CONTINENT_TERRITORIES = {}; GAME.continents.forEach(c => CONTINENT_TERRITORIES[c.name] = c.territories);
+const CONTINENT_OF = {}; GAME.continents.forEach(c => c.territories.forEach(t => CONTINENT_OF[t] = c.name));
+const PLACE_PATTERN = new RegExp("\\b(" + [...Object.keys(steps[0].board), ...GAME.continents.map(c => c.name)]
+  .sort((a, b) => b.length - a.length).join("|") + ")\\b", "g");
+const richText = t => colorizeNames(t).replace(PLACE_PATTERN, m => `<span class="tlink" data-place="${m}">${m}</span>`);
+
+/* ---- behaviour vocabulary + valence ---- */
+const VOCAB = {}; (EVAL.vocabulary || []).forEach(v => VOCAB[v.behavior] = v);
+const axisOf = b => VOCAB[b]?.axis ?? "conduct";
+const valenceOf = b => EVAL.tag_valence?.[b] ?? null;
+const AXES = [["skill", "Game skill", "var(--axis-skill)"], ["conduct", "Social conduct", "var(--axis-conduct)"], ["affect", "Affect", "var(--axis-affect)"]];
+const AXIS_COLOR = { skill: "var(--axis-skill)", conduct: "var(--axis-conduct)", affect: "var(--axis-affect)" };
+function valenceStyle(behavior) {
+  const v = valenceOf(behavior);
+  const map = { cooperative: ["var(--coop)", "var(--coop-tint)"], strong: ["var(--coop)", "var(--coop-tint)"],
+    adversarial: ["var(--adversarial)", "var(--adversarial-tint)"], weak: ["var(--gold)", "#f6eede"],
+    deceptive: ["var(--deceptive)", "var(--deceptive-tint)"] };
+  return map[v] ?? ["var(--neutral)", "var(--neutral-tint)"];
+}
+
+/* ---- annotators (LLM panel + you) ---- */
+const annotators = () => EVAL.annotators || [];
+const annotatorColor = idx => idx === HUMAN ? "var(--ink)" : MEMBER_COLORS[idx % MEMBER_COLORS.length];
+const annotatorLabel = idx => (annotators().find(a => a.index === idx) || {}).label || (idx === HUMAN ? "you" : "evaluator");
+const annotatorBadge = idx => idx === HUMAN ? "✎" : annotatorLabel(idx)[0].toUpperCase();
+
+/* every tag from every annotator, flattened and stamped with who authored it */
+function allTags() {
+  const out = [];
+  (EVAL.members || []).forEach(m => (m.tags || []).forEach(t => out.push({ ...t, annotator: m.index, human: false })));
+  (EVAL.annotations || []).forEach(a => out.push({ ...a, annotator: HUMAN, human: true }));
+  return out;
+}
+function tagVisible(t) {
+  return state.filters.axes.has(axisOf(t.behavior)) && t.confidence >= state.filters.minConf
+    && state.filters.annotators.has(t.annotator);
+}
+
+/* ---- trace spans grouped by turn (rebuilt on every evaluation refresh, so the trace grows live) ---- */
+let spanById = new Map(), spansByTurn = new Map(), turns = [], actorByTurn = {}, lastNoteSpanByPlayer = {};
+function rebuildTrace() {
+  spanById = new Map((EVAL.spans || []).map(s => [s.span, s]));
+  spansByTurn = new Map();
+  (EVAL.spans || []).forEach(s => { if (!spansByTurn.has(s.turn)) spansByTurn.set(s.turn, []); spansByTurn.get(s.turn).push(s); });
+  turns = [...spansByTurn.keys()].sort((a, b) => a - b);
+  // the acting player of a turn is whoever the engine had take the board actions — not whoever
+  // happened to speak first during negotiation (which was pinning every card to one player)
+  actorByTurn = {};
+  steps.forEach(s => { if (s.current_player != null) actorByTurn[s.turn] = s.current_player; });
+  // remember each player's most recent note span; only that one stays in the feed (spans are in order)
+  lastNoteSpanByPlayer = {};
+  (EVAL.spans || []).forEach(s => { if (s.layer === "note" && s.player != null) lastNoteSpanByPlayer[s.player] = s.span; });
+}
+rebuildTrace();
+function turnActor(turn) {
+  if (actorByTurn[turn] != null) return actorByTurn[turn];
+  const ls = spansByTurn.get(turn) || [];
+  return (ls.find(s => s.layer === "action") || ls.find(s => s.player) || {}).player || GAME.players[0].name;
+}
+const turnStep = turn => { const ls = spansByTurn.get(turn) || []; return ls.length ? Math.max(...ls.map(s => s.step)) : 0; };
+const turnOfStep = step => (steps[step] || {}).turn ?? turns[0];
+/* a short headline for the collapsed card: prefer a win/elimination, else the actor's first message, else its first action */
+function turnSummary(turn) {
+  const ls = spansByTurn.get(turn) || [];
+  const win = ls.find(s => s.layer === "event" && /WON|ELIMINATED/i.test(s.text));
+  if (win) return win.text;
+  const msg = ls.find(s => s.layer === "message");
+  if (msg) return msg.text.replace(/^[^:]*:\s*/, "");
+  const act = ls.find(s => s.layer === "action");
+  return act ? act.text : "—";
+}
+
+/* ---- reader state ---- */
+const state = {
+  expanded: new Set(), openAnno: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
+  filters: {
+    axes: new Set(["skill", "conduct", "affect"]), minConf: 1,
+    annotators: new Set(annotators().map(a => a.index)),
+    showPrivate: true, showCommentary: true,
+  },
+  editor: null, drawer: null,
+};
+
+/* ================= BOARD (ported, restyled) ================= */
+const SVG_NS = "http://www.w3.org/2000/svg";
+const territoryShapes = {};
+function buildBoard() {
+  const svg = document.querySelector("#board svg");
+  for (const territory of Object.keys(steps[0].board)) {
+    const path = svg.getElementById(territory);
+    if (!path) continue;
+    const box = path.getBBox();
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const label = document.createElementNS(SVG_NS, "text");
+    label.setAttribute("x", cx); label.setAttribute("y", cy); label.setAttribute("class", "acount");
+    path.parentNode.appendChild(label);
+    const nameLabel = document.createElementNS(SVG_NS, "text");
+    nameLabel.setAttribute("x", cx); nameLabel.setAttribute("y", cy + 8); nameLabel.setAttribute("class", "tname");
+    nameLabel.textContent = pretty(territory); path.parentNode.appendChild(nameLabel);
+    const tooltip = document.createElementNS(SVG_NS, "title"); path.appendChild(tooltip);
+    territoryShapes[territory] = { path, label, tooltip };
+  }
+}
+function buildContinentLegend() {
+  const container = el("continentLegend");
+  GAME.continents.forEach((c, i) => {
+    const row = document.createElement("div");
+    row.innerHTML = `<span class="cdot" id="cl-${i}"></span><span class="tlink" data-place="${c.name}">${pretty(c.name)}</span> +${c.bonus}`;
+    container.appendChild(row);
+  });
+}
+function updateContinentLegend(step) {
+  GAME.continents.forEach((c, i) => {
+    const seats = new Set(c.territories.map(t => step.board[t][0]));
+    const controller = seats.size === 1 ? [...seats][0] : null;
+    const dot = el("cl-" + i);
+    dot.style.background = controller === null ? "transparent" : COLORS[controller];
+  });
+}
+function flashPlace(place) {
+  for (const territory of CONTINENT_TERRITORIES[place] ?? [place]) {
+    const shape = territoryShapes[territory]; if (!shape) continue;
+    shape.path.classList.remove("flash"); void shape.path.getBoundingClientRect(); shape.path.classList.add("flash");
+  }
+}
+document.addEventListener("click", e => { const link = e.target.closest(".tlink"); if (link) flashPlace(link.dataset.place); });
+
+function show(newIndex) {
+  index = Math.max(0, Math.min(steps.length - 1, newIndex));
+  const step = steps[index];
+  for (const [territory, [seat, armies]] of Object.entries(step.board)) {
+    const shape = territoryShapes[territory]; if (!shape) continue;
+    shape.path.style.fill = COLORS[seat]; shape.path.style.fillOpacity = "0.78";
+    shape.label.textContent = armies;
+    shape.tooltip.textContent = `${pretty(territory)} (${pretty(CONTINENT_OF[territory])}) — ${GAME.players[seat].name}, ${armies} armies`;
+  }
+  updateContinentLegend(step);
+  el("statStrip").innerHTML = step.players.map((s, seat) =>
+    `<span style="color:${COLORS[seat]}${s.eliminated ? ";opacity:.45;text-decoration:line-through" : ""}">${tagOf(GAME.players[seat].name)} ${s.territories}▪ ${s.armies}⚔ ${s.cards}◈ +${s.income}</span>`).join("");
+  el("slider").value = index;
+  const liveMark = LIVE && !GAME.result ? " · LIVE" : "";
+  el("status").textContent = `step ${index}/${steps.length - 1} · turn ${step.turn} · ${pretty(step.phase)}${liveMark}`;
+  el("boardTurnLabel").textContent = "Board · turn " + String(step.turn).padStart(2, "0");
+  state.focusTurn = step.turn;
+  document.querySelectorAll(".tcard").forEach(card => card.classList.toggle("focus", Number(card.dataset.turn) === step.turn));
+  // update rail stat lines
+  step.players.forEach((s, seat) => {
+    const line = el("prstats-" + seat); if (!line) return;
+    line.textContent = `${s.territories} terr · ${s.armies} armies · ${s.cards} cards · +${s.income}/turn`;
+    el("pcard-" + seat).classList.toggle("acting", GAME.players[seat].name === step.current_player);
+  });
+}
+
+/* focus a turn: move the board to that turn's end and scroll the card into view */
+function focusTurn(turn) { show(turnStep(turn)); }
+
+/* ================= LEFT RAIL ================= */
+function playerResult(name) {
+  const last = steps[steps.length - 1];
+  const seat = seatOf[name];
+  if (GAME.result && GAME.result.winner === name) return ["winner", "var(--coop)"];
+  if (last.players[seat].eliminated) return ["eliminated", "var(--adversarial)"];
+  return ["survived", "var(--gold)"];
+}
+function renderRail() {
+  el("railPlayers").innerHTML = GAME.players.map((p, seat) => {
+    const [rl, rc] = playerResult(p.name);
+    const hasNotes = GAME.notes.some(n => n.player === p.name);
+    return `<article class="card pcard" id="pcard-${seat}" style="border-top-color:${COLORS[seat]}">
+      <div class="top">
+        <span class="badge" style="background:${COLORS[seat]}">${initialsOf(p.name)}</span>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:7px">
+            <span class="ptag" style="color:${COLORS[seat]}">${tagOf(p.name)}</span>
+            <span class="presult" style="color:${rc};background:color-mix(in srgb, ${rc} 13%, #fff)">${rl}</span>
+            ${hasNotes ? `<button class="iconbtn" onclick="openNotes('${p.name}')" title="all private notes" style="margin-left:auto;font-size:12px">📝</button>` : ""}
+          </div>
+          <div class="pstats" id="prstats-${seat}"></div>
+        </div>
+      </div>
+      <div class="pmission">▸ ${escapeHtml(p.mission)}</div>
+    </article>`;
+  }).join("");
+  renderFilters();
+}
+function renderFilters() {
+  el("axisRow").innerHTML = AXES.map(([key, label, color]) => {
+    const on = state.filters.axes.has(key);
+    return `<button class="axischip" onclick="toggleAxis('${key}')" style="${on ? `border-color:${color};background:color-mix(in srgb, ${color} 12%, #fff);color:var(--ink)` : ""}">
+      <span class="swatch" style="background:${color}"></span>${label}</button>`;
+  }).join("");
+  el("confSeg").innerHTML = [[1, "≥1"], [2, "≥2"], [3, "3"]].map(([n, l]) =>
+    `<button class="${state.filters.minConf === n ? "on" : ""}" onclick="setMinConf(${n})">${l}</button>`).join("");
+  const counts = {}; allTags().forEach(t => counts[t.annotator] = (counts[t.annotator] || 0) + 1);
+  el("annList").innerHTML = annotators().map(a => {
+    const on = state.filters.annotators.has(a.index);
+    return `<button class="annrow ${on ? "on" : "off"}" onclick="toggleAnnotator(${a.index})">
+      <span class="swatch" style="width:9px;height:9px;border-radius:2px;background:${annotatorColor(a.index)}"></span>
+      <span class="mono" style="font-size:11.5px;flex:1;text-align:left">${escapeHtml(a.label)}</span>
+      <span class="mono" style="font-size:10px;color:var(--faintest)">${counts[a.index] || 0}</span>
+      <span class="checkbox ${on ? "on" : ""}"></span></button>`;
+  }).join("");
+  el("privToggle").className = "toggle" + (state.filters.showPrivate ? " on" : "");
+  el("privToggle").querySelector(".switch").className = "switch" + (state.filters.showPrivate ? " on" : "");
+  el("privToggle").querySelector(".switch").style.background = state.filters.showPrivate ? "var(--deceptive)" : "";
+  el("commToggle").className = "toggle" + (state.filters.showCommentary ? " on" : "");
+  el("commToggle").querySelector(".switch").className = "switch" + (state.filters.showCommentary ? " on" : "");
+  el("commToggle").querySelector(".switch").style.background = state.filters.showCommentary ? "var(--blue)" : "";
+}
+function toggleAxis(key) { const s = state.filters.axes; s.has(key) ? (s.size > 1 && s.delete(key)) : s.add(key); renderFilters(); renderTimeline(); }
+function setMinConf(n) { state.filters.minConf = n; renderFilters(); renderTimeline(); }
+function toggleAnnotator(idx) { const s = state.filters.annotators; s.has(idx) ? s.delete(idx) : s.add(idx); renderFilters(); renderTimeline(); }
+el("privToggle").onclick = () => { state.filters.showPrivate = !state.filters.showPrivate; renderFilters(); renderTimeline(); };
+el("commToggle").onclick = () => { state.filters.showCommentary = !state.filters.showCommentary; renderFilters(); renderTimeline(); };
+
+/* ================= TIMELINE ================= */
+const KINDS = {
+  thought: ["thinks · private", "var(--deceptive)"], message: ["public · table-talk", "var(--blue)"],
+  action: ["board action", "#8a7b57"], event: ["engine", "#9aa3ae"], note: ["memory · private", "#b07d2e"],
+};
+function tagsForTurn(turn) { return allTags().filter(t => t.turn === turn && tagVisible(t)); }
+
+function pill(t) {
+  const [vc, vt] = valenceStyle(t.behavior);
+  const ac = annotatorColor(t.annotator);
+  return `<span class="pill" onclick="openTagDrawer(${t.human ? `'${t.id}'` : `${t.annotator}`}, '${t.behavior}', ${t.turn})"
+    style="background:${vt};color:${vc};border-color:${t.human ? "var(--ink)" : "transparent"};${t.human ? "border-style:dashed" : ""}">
+    <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>${t.behavior}
+    <span class="mono" style="font-size:9px;color:${colorOf(t.player)};font-weight:600">${tagOf(t.player)}</span>
+    <span class="mono" style="font-size:9px;opacity:.7">${t.confidence}/3</span>
+    <span style="width:14px;height:14px;border-radius:3px;background:${ac};color:#fff;font-family:var(--font-mono);font-size:8px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${annotatorBadge(t.annotator)}</span>
+  </span>`;
+}
+
+function renderTimeline() {
+  if (state.mode === "compare") { renderCompare(); return; }
+  const container = el("timeline");
+  const visible = turns.filter(turn => state.filters.annotators.size || true);
+  container.innerHTML = visible.map(turn => turnCard(turn)).join("");
+  updateSubBar();
+  show(index); // re-apply focus highlight
+}
+
+function turnCard(turn) {
+  const actor = turnActor(turn) || GAME.players[0].name;
+  const expanded = state.expanded.has(turn);
+  const pills = tagsForTurn(turn);
+  const hasGap = pills.some(t => valenceOf(t.behavior) === "deceptive");
+  // the live-commentary toggle also hides the panel's read (tag pills + deception badge) so annotation stays unbiased
+  const showTags = state.filters.showCommentary;
+  const commentary = state.filters.showCommentary ? GAME.commentary.filter(c => c.turn === turn) : [];
+  return `<article class="tcard" data-turn="${turn}" style="border-left-color:${colorOf(actor)}">
+    <button class="thead" onclick="toggleExpand(${turn})">
+      <span class="tbadge" style="background:${colorOf(actor)}">${initialsOf(actor)}</span>
+      <span class="tmeta">
+        <span class="line1">
+          <span class="ttag" style="color:${colorOf(actor)}">${tagOf(actor)}</span>
+          <span class="tturn">turn ${String(turn).padStart(2, "0")}</span>
+          ${hasGap && showTags ? `<span class="gapbadge">⚡ deception gap</span>` : ""}
+        </span>
+        <span class="tsummary">${richText(turnSummary(turn))}</span>
+      </span>
+      <span class="chev" style="transform:rotate(${expanded ? 180 : 0}deg)">⌄</span>
+    </button>
+    ${showTags && pills.length ? `<div class="tpills">${pills.map(pill).join("")}</div>` : ""}
+    ${expanded ? expandedBody(turn) : ""}
+    ${commentary.length ? commentaryBlock(commentary) : ""}
+  </article>`;
+}
+
+function expandedBody(turn) {
+  const lines = (spansByTurn.get(turn) || []).filter(s =>
+    (state.filters.showPrivate || (s.layer !== "thought" && s.layer !== "note"))
+    && !(s.layer === "event" && eventEchoesAction(s.text))
+    && !(s.layer === "note" && lastNoteSpanByPlayer[s.player] !== s.span));
+  return `<div class="expand">${lines.map(s => traceLine(turn, s)).join("")}</div>`;
+}
+// engine events that merely restate the board action above them (place/fortify), or the turn header
+// the card already shows — hidden from the timeline, but still present in the raw-trace evidence drawer
+function eventEchoesAction(text) { return /\bplaced\b|\bfortified\b/.test(text) || /^Turn \d+ started/.test(text); }
+
+function traceLine(turn, s) {
+  const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
+  const isMsg = s.layer === "message", isPrivate = s.layer === "thought" || s.layer === "note";
+  const editing = !!state.editor;
+  const sel = editing && state.editor.citations.has(s.span);
+  const anno = tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span));
+  const annoOpen = state.openAnno.has(turn + ":" + s.span);
+  const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
+  const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
+  return `<div>
+    <div class="traceline ${sel ? "sel" : ""}">
+      <button class="chip ${sel ? "on" : ""}" onclick="chipClick(${s.span})" title="cite this line">[${s.span}]</button>
+      <span class="kindbar" style="background:${kindColor}"></span>
+      <span style="flex:1;min-width:0">
+        <span class="kindlabel">${kindLabel}</span>
+        <span class="tracetext ${isMsg ? "msg" : "mono"}" style="color:${bodyColor}">${richText(s.text)}</span>
+      </span>
+      ${anno.length ? `<button class="iconbtn" onclick="toggleAnno(${turn}, ${s.span})" title="annotations on this line" style="display:flex;align-items:center;gap:6px">
+        <span class="annodots">${dots}</span><span class="chev" style="font-size:13px;transform:rotate(${annoOpen ? 180 : 0}deg)">⌄</span></button>` :
+      `<button class="plusbtn" onclick="openEditor(${turn}, ${s.span})" title="annotate this line">+</button>`}
+    </div>
+    ${annoOpen ? `<div style="margin:3px 0 9px 42px;display:flex;flex-direction:column;gap:6px">${anno.map(annoCard).join("")}</div>` : ""}
+  </div>`;
+}
+
+function annoCard(t) {
+  const [vc, vt] = valenceStyle(t.behavior);
+  const ac = annotatorColor(t.annotator);
+  const cites = (t.evidence || []).map(e => `<button class="chip" onclick="openLineDrawer(${e.span})">[${e.span}]</button>`).join(" ");
+  return `<div class="annocard" style="background:${t.human ? "var(--subtle-warm)" : vt};border-color:${t.human ? "#ddd6c7" : "transparent"};border-left:3px solid ${vc}">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+      <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
+      <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
+      <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)} · ${t.confidence}/3</span>
+      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${ac};background:color-mix(in srgb, ${ac} 12%, #fff);${t.human ? `border:1px dashed ${ac}` : ""}">${annotatorLabel(t.annotator)}</span>
+      ${t.human ? `<span style="margin-left:auto;display:flex;gap:8px">
+        <button class="mono" onclick="editAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--mute);text-decoration:underline">edit</button>
+        <button class="mono" onclick="deleteAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--adversarial);text-decoration:underline">delete</button></span>` : ""}
+    </div>
+    <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note)}</div>
+    ${cites ? `<div style="display:flex;align-items:center;gap:4px;margin-top:7px;flex-wrap:wrap"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${cites}</div>` : ""}
+  </div>`;
+}
+
+function commentaryBlock(comments) {
+  return comments.map(c => {
+    const label = GAME.commentators.length > 1 ? `<span class="mono" style="font-size:9px;color:${MEMBER_COLORS[c.commentator_index % MEMBER_COLORS.length]}">${escapeHtml(c.commentator)}</span> ` : "";
+    return `<div class="commentary"><div style="display:flex;gap:9px;align-items:flex-start">
+      <span class="live"><span class="swatch" style="background:var(--blue)"></span>live</span>
+      <span style="flex:1"><span class="ctext">${richText(c.text)}</span></span></div>
+      <div style="margin-top:6px;font-family:var(--font-mono);font-size:9px;color:var(--faint)">${label}</div></div>`;
+  }).join("");
+}
+
+function updateSubBar() {
+  el("turnCount").textContent = turns.length + " turns";
+  const tags = allTags().filter(tagVisible);
+  const yours = (EVAL.annotations || []).length;
+  el("subStat").textContent = EVAL.has_evaluation
+    ? `${tags.length} tags · ${yours} of yours`
+    : (yours ? `not yet evaluated · ${yours} of your annotations` : "not yet evaluated — run the panel to generate annotations");
+}
+
+function toggleExpand(turn) { state.expanded.has(turn) ? state.expanded.delete(turn) : state.expanded.add(turn); focusTurn(turn); renderTimeline(); }
+function toggleAnno(turn, span) { const k = turn + ":" + span; state.openAnno.has(k) ? state.openAnno.delete(k) : state.openAnno.add(k); renderTimeline(); }
+el("expandAll").onclick = () => { turns.forEach(t => state.expanded.add(t)); renderTimeline(); };
+el("collapseAll").onclick = () => { state.expanded.clear(); renderTimeline(); };
+
+/* ================= COMPARE (agreement matrix) ================= */
+function renderCompare() {
+  const container = el("timeline");
+  const active = annotators().filter(a => state.filters.annotators.has(a.index));
+  const groups = new Map();
+  allTags().filter(tagVisible).forEach(t => {
+    const key = t.turn + "|" + t.player + "|" + t.behavior;
+    if (!groups.has(key)) groups.set(key, { turn: t.turn, player: t.player, behavior: t.behavior, byAnn: {} });
+    groups.get(key).byAnn[t.annotator] = t.confidence;
+  });
+  const rows = [...groups.values()].sort((a, b) => a.turn - b.turn || a.player.localeCompare(b.player));
+  const head = `<div class="mhead"><span style="flex:1" class="eyebrow">behaviour · player · turn</span>${active.map(a =>
+    `<span class="mcell mono" style="font-size:9px;color:${annotatorColor(a.index)}">${a.index === HUMAN ? "you" : escapeHtml(a.label).slice(0, 4)}</span>`).join("")}</div>`;
+  const body = rows.map(r => {
+    const n = active.filter(a => r.byAnn[a.index] != null).length;
+    const consensus = n >= 2;
+    const [vc] = valenceStyle(r.behavior);
+    return `<div class="mrow" style="background:${consensus ? "#fafcfa" : "#fff"}">
+      <span style="flex:1;display:flex;align-items:center;gap:7px;min-width:0">
+        <span class="swatch" style="background:${AXIS_COLOR[axisOf(r.behavior)]}"></span>
+        <span class="mono" style="font-size:10.5px;color:${vc};font-weight:500">${r.behavior}</span>
+        <span class="mono" style="font-size:9px;color:var(--mute-2)">${tagOf(r.player)} · t${r.turn}</span>
+        <span class="mono" style="font-size:8.5px;padding:1px 6px;border-radius:999px;background:${consensus ? "#e2f0e9" : "#f6eede"};color:${consensus ? "var(--coop)" : "var(--gold)"}">${consensus ? "consensus" : "lone"}</span>
+      </span>
+      ${active.map(a => { const c = r.byAnn[a.index];
+        return `<span class="mcell">${c != null ? `<span class="mmark" style="background:${annotatorColor(a.index)}">${c}</span>` : `<span class="mono" style="color:#d2ccbe">·</span>`}</span>`; }).join("")}
+    </div>`;
+  }).join("");
+  container.innerHTML = `<div class="matrix">${head}${body || '<div class="empty" style="padding:14px">No tags match the current filters.</div>'}</div>`;
+  updateSubBar();
+}
+
+/* ================= EVIDENCE DRAWER ================= */
+function openLineDrawer(span) { state.drawer = { focus: span, cites: new Set([span]) }; renderPanels(); }
+function openTagDrawer(idOrIndex, behavior, turn) {
+  const tags = allTags().filter(t => t.turn === turn && t.behavior === behavior &&
+    (typeof idOrIndex === "string" ? t.id === idOrIndex : t.annotator === idOrIndex));
+  const t = tags[0]; if (!t) return;
+  const cites = (t.evidence || []).map(e => e.span);
+  state.drawer = { focus: cites[0] ?? null, cites: new Set(cites), tag: t }; renderPanels();
+}
+function chipClick(span) { if (state.editor) toggleCite(span); else openLineDrawer(span); }
+function closeDrawer() { state.drawer = null; renderPanels(); }
+
+/* ================= ANNOTATION EDITOR ================= */
+function openEditor(turn, span) {
+  const actor = turnActor(turn) || GAME.players[0].name;
+  state.editor = { id: null, turn, player: actor, behavior: null, confidence: 2, note: "", citations: new Set(span != null ? [span] : []) };
+  state.drawer = null; renderPanels(); renderTimeline();
+}
+el("newAnno").onclick = () => openEditor(state.focusTurn, null);
+function editAnnotation(id) {
+  const t = (EVAL.annotations || []).find(a => a.id === id); if (!t) return;
+  state.editor = { id, turn: t.turn, player: t.player, behavior: t.behavior, confidence: t.confidence, note: t.note,
+    citations: new Set((t.evidence || []).map(e => e.span)) };
+  renderPanels(); renderTimeline();
+}
+function closeEditor() { state.editor = null; renderPanels(); renderTimeline(); }
+function setEd(patch) { Object.assign(state.editor, patch); renderPanels(); if ("citations" in patch) renderTimeline(); }
+function toggleCite(span) { const s = state.editor.citations; s.has(span) ? s.delete(span) : s.add(span); renderPanels(); renderTimeline(); }
+
+async function saveEditor() {
+  const e = state.editor; if (!e || !e.behavior) { toast("pick a behaviour label first"); return; }
+  const body = { player: e.player, behavior: e.behavior, confidence: e.confidence, note: el("edNote").value.trim(),
+    evidence: [...e.citations].sort((a, b) => a - b).map(span => ({ span })) };
+  if (!body.evidence.length) body.turn = e.turn;
+  const url = e.id ? `${ANNOTATIONS_URL}/${e.id}` : ANNOTATIONS_URL;
+  const res = await fetch(url, { method: e.id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) { toast("could not save: " + (await res.json()).detail); return; }
+  state.editor = null; await refreshEvaluation(); renderPanels(); renderRail(); renderTimeline();
+  toast("annotation saved");
+}
+async function deleteAnnotation(id) {
+  const res = await fetch(`${ANNOTATIONS_URL}/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 204) { toast("could not delete"); return; }
+  if (state.editor && state.editor.id === id) state.editor = null;
+  await refreshEvaluation(); renderPanels(); renderRail(); renderTimeline(); toast("annotation deleted");
+}
+
+/* ================= RIGHT-SIDE PANEL RENDER ================= */
+function renderPanels() {
+  const root = el("panelRoot");
+  if (state.editor) { root.innerHTML = editorPanel(); wireEditor(); return; }
+  if (state.drawer) { root.innerHTML = drawerPanel(); return; }
+  root.innerHTML = "";
+}
+function editorPanel() {
+  const e = state.editor;
+  const players = GAME.players.map(p => { const on = e.player === p.name;
+    return `<button class="vocabItem" onclick="setEd({player:'${p.name}'})" style="flex:1;${on ? `border-color:${colorOf(p.name)};color:${colorOf(p.name)};font-weight:600` : ""}">${initialsOf(p.name)} ${tagOf(p.name)}</button>`; }).join("");
+  const vocab = AXES.map(([axis, label, color]) => {
+    const items = (EVAL.vocabulary || []).filter(v => v.axis === axis).map(v => { const on = e.behavior === v.behavior;
+      const [vc, vt] = valenceStyle(v.behavior);
+      return `<button class="vocabItem" onclick="setEd({behavior:'${v.behavior}'})" style="${on ? `border-color:${vc};background:${vt};color:${vc};font-weight:600` : ""}">${v.behavior}</button>`; }).join("");
+    return `<div class="vocabGroup"><div style="display:flex;align-items:center;gap:6px;margin-bottom:5px"><span class="swatch" style="background:${color}"></span><span class="mono" style="font-size:9.5px;color:var(--mute-2)">${label}</span></div><div class="items">${items}</div></div>`;
+  }).join("");
+  const conf = [1, 2, 3].map(n => `<button class="${e.confidence === n ? "on" : ""}" onclick="setEd({confidence:${n}})">${n}/3</button>`).join("");
+  const cites = [...e.citations].sort((a, b) => a - b).map(span => `<button class="chip" onclick="toggleCite(${span})">[${span}] ✕</button>`).join(" ");
+  return `<aside class="drawer" style="width:430px">
+    <div class="dhead"><span class="serif" style="font-size:16px;font-weight:600">${e.id ? "Edit annotation" : "New annotation"}</span>
+      <button class="iconbtn" onclick="closeEditor()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+    <div class="dbody">
+      <div class="field"><div class="flabel">Player</div><div style="display:flex;gap:6px">${players}</div></div>
+      <div class="field"><div class="flabel">Behaviour label</div>${vocab}</div>
+      <div class="field"><div class="flabel">Confidence</div><div class="seg" style="margin-bottom:0">${conf}</div></div>
+      <div class="field"><div class="flabel">Justification</div><textarea id="edNote" placeholder="One-line rationale for the tag…">${escapeHtml(e.note)}</textarea></div>
+      <div class="field"><div class="flabel">Evidence · linked lines <span style="color:${e.citations.size ? "var(--coop)" : "var(--mute)"}">(${e.citations.size})</span></div>
+        <div class="mono" style="font-size:10.5px;color:var(--mute-2);line-height:1.5;margin-bottom:9px">Click the <span class="chip">[n]</span> chips on any trace line to link or unlink evidence.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;min-height:26px">${cites}</div></div>
+    </div>
+    <div class="dfoot"><button class="btn dark" onclick="saveEditor()">${e.id ? "update tag" : "save tag"}</button>
+      <button class="btn" onclick="closeEditor()">cancel</button>
+      ${e.id ? `<button class="mono" onclick="deleteAnnotation('${e.id}')" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--adversarial);text-decoration:underline">delete</button>` : ""}</div>
+  </aside>`;
+}
+function wireEditor() { const ta = el("edNote"); if (ta) ta.focus(); }
+
+function drawerPanel() {
+  const d = state.drawer;
+  const rows = (EVAL.spans || []).map(s => {
+    const hot = d.cites.has(s.span), focus = s.span === d.focus;
+    const pc = s.player ? colorOf(s.player) : "#9aa3ae";
+    return `<div class="traceRow" style="background:${hot ? "color-mix(in srgb, " + pc + " 9%, #fff)" : "transparent"};${focus ? "box-shadow:inset 0 0 0 1px " + pc : ""}">
+      <span class="ln">[${s.span}]</span><span class="swatch" style="background:${pc};margin-top:5px"></span>
+      <span class="mono" style="font-size:11px;line-height:1.5;color:${hot ? "var(--ink)" : "var(--mute-2)"};flex:1">${richText(s.text)}</span></div>`;
+  }).join("");
+  const title = d.tag ? `${d.tag.behavior} · ${tagOf(d.tag.player)}` : `trace line [${d.focus}]`;
+  return `<div class="overlay" onclick="closeDrawer()"></div><aside class="drawer">
+    <div class="dhead"><div><span class="eyebrow">Evidence · raw trace</span>
+      <div class="mono" style="font-size:12px;font-weight:600;margin-top:6px">${escapeHtml(title)}</div>
+      ${d.tag ? `<div style="font-size:12.5px;color:var(--body);margin-top:4px">${escapeHtml(d.tag.note)}</div>` : ""}</div>
+      <button class="iconbtn" onclick="closeDrawer()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+    <div class="dbody">${rows}</div></aside>`;
+}
+
+/* ================= EVALUATE (configure + run the panel) ================= */
+let modelCatalog = null;
+async function loadCatalog() { if (modelCatalog) return modelCatalog; modelCatalog = await (await fetch("/api/models")).json(); return modelCatalog; }
+function renderEvalCta() {
+  const cta = el("evalCta");
+  if (EVAL.has_evaluation && !EVAL.running) { cta.hidden = true; return; }
+  cta.hidden = false;
+  if (EVAL.running) {
+    cta.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:13px;color:var(--mute)">◐ evaluating… the panel is reading all ${turns.length} turns</span></div>`;
+    return;
+  }
+  cta.innerHTML = `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px"><h2>This game is over — not yet evaluated</h2>
+        <p>Run the evaluator panel to read all ${turns.length} turns and generate behaviour annotations, deception-gap detection, and a per-player synthesis. You can also annotate manually at any time.</p></div>
+      <button class="btn dark" id="evalToggle" style="font-size:12.5px;padding:11px 20px">▶ Configure panel</button></div>
+    <div class="evalConfig" id="evalConfig"><div id="evalRows"></div>
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="evalAdd">+ add member</button>
+      <button class="btn dark" id="evalRun">▶ Run evaluation</button></div></div>`;
+  el("evalToggle").onclick = async () => { await loadCatalog(); el("evalConfig").classList.toggle("open"); if (!el("evalRows").children.length) addEvalRow(); };
+  el("evalAdd") && (el("evalAdd").onclick = addEvalRow);
+  el("evalRun") && (el("evalRun").onclick = runEvaluation);
+}
+function addEvalRow() {
+  const providers = Object.keys(modelCatalog.tiers_by_provider);
+  const row = document.createElement("div"); row.className = "evalRow";
+  const opt = (arr, sel) => arr.map(v => `<option${v === sel ? " selected" : ""}>${v}</option>`).join("");
+  row.innerHTML = `<select class="evP">${opt(providers)}</select><select class="evT"></select><select class="evE">${opt(modelCatalog.efforts)}</select>
+    <button class="btn" onclick="this.parentNode.remove()">✕</button>`;
+  el("evalRows").appendChild(row);
+  const syncTiers = () => { const tiers = Object.keys(modelCatalog.tiers_by_provider[row.querySelector(".evP").value]);
+    row.querySelector(".evT").innerHTML = opt(tiers); };
+  row.querySelector(".evP").onchange = syncTiers; syncTiers();
+}
+async function runEvaluation() {
+  const rows = [...el("evalRows").children].map(r =>
+    `${r.querySelector(".evP").value}:${r.querySelector(".evT").value}:${r.querySelector(".evE").value}`);
+  if (!rows.length) { toast("add at least one panel member"); return; }
+  const res = await fetch(EVALUATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ evaluators: rows }) });
+  if (!res.ok) { toast("could not start: " + (await res.json()).detail); return; }
+  EVAL.running = true; renderEvalCta();
+  const poll = setInterval(async () => { await refreshEvaluation();
+    if (!EVAL.running) { clearInterval(poll); renderRail(); renderTimeline(); renderSynthesis(); toast("evaluation complete"); }
+    renderEvalCta(); }, 2500);
+}
+
+/* ================= SYNTHESIS ================= */
+function renderSynthesis() {
+  const section = el("synthSection");
+  const synth = {};
+  (EVAL.members || []).forEach(m => (m.syntheses || []).forEach(s => { synth[s.player] ??= s; }));
+  if (!EVAL.has_evaluation || !Object.keys(synth).length) { section.hidden = true; return; }
+  section.hidden = false;
+  section.innerHTML = `<div class="eyebrow" style="margin-bottom:12px">Panel synthesis · whole-game</div>
+    <div class="synthGrid">${GAME.players.map(p => { const s = synth[p.name]; if (!s) return "";
+      const [rl, rc] = playerResult(p.name);
+      return `<article class="synthCard" style="border-top-color:${colorOf(p.name)}">
+        <div style="display:flex;gap:10px;align-items:center"><span class="tbadge" style="background:${colorOf(p.name)}">${initialsOf(p.name)}</span>
+          <span class="ptag" style="color:${colorOf(p.name)};flex:1">${tagOf(p.name)}</span>
+          <span class="presult" style="color:${rc};background:color-mix(in srgb, ${rc} 13%, #fff)">${rl}</span></div>
+        <p class="summary">${richText(s.summary)}</p>
+        ${(s.profile || []).map(d => `<div class="synthDim"><b>${d.dimension}:</b> ${richText(d.characterization)}</div>`).join("")}
+      </article>`; }).join("")}</div>`;
+}
+
+/* ================= MASTHEAD + MODE ================= */
+function renderMasthead() {
+  el("classicLink").href = CLASSIC_URL;
+  el("statsLink").href = CLASSIC_URL + "#stats";  // the classic view opens its stats modal on this hash
+  const status = GAME.result ? (GAME.result.winner ? "game over" : "draw") : (LIVE ? "in progress" : "paused");
+  el("mastStatus").innerHTML = `<span class="dot"></span>${status}`;
+  el("mastWinner").innerHTML = GAME.result && GAME.result.winner
+    ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
+}
+function renderModeToggle() {
+  el("modeToggle").innerHTML = [["read", "Timeline"], ["compare", "Compare"]].map(([k, l]) =>
+    `<button class="${state.mode === k ? "on" : ""}" onclick="setMode('${k}')">${l}</button>`).join("");
+}
+function setMode(m) { state.mode = m; renderModeToggle(); renderTimeline(); }
+
+/* pause/resume the running game worker (only meaningful while the game is unfinished) */
+function renderGameControl() {
+  const btn = el("gameControl");
+  if (!LIVE || GAME.result) { btn.style.display = "none"; return; }
+  btn.style.display = "";
+  btn.textContent = gameRunning ? "⏸ pause game" : "▶ resume game";
+}
+el("gameControl").onclick = async () => {
+  const action = gameRunning ? "pause" : "resume";
+  const res = await fetch(`${POLL_URL}/${action}`, { method: "POST" });
+  // 204 = done; 409 = already in the opposite state — either way the game now matches the intent
+  if (res.ok || res.status === 409) { gameRunning = action === "resume"; renderGameControl(); toast("game " + (gameRunning ? "resumed" : "paused")); }
+  else toast(`could not ${action} the game`);
+};
+
+/* the full private-note history for one player (every end-of-turn version), like the classic view */
+function openNotes(name) {
+  const versions = GAME.notes.filter(n => n.player === name);
+  el("notesTitle").innerHTML = `📝 <span style="color:${colorOf(name)}">${tagOf(name)}</span> — private notes`;
+  el("notesBody").innerHTML = versions.length
+    ? [...versions].reverse().map(n =>
+        `<div class="noteVersion"><div class="noteMeta">end of turn ${n.turn}</div><div class="noteText">${richText(n.text)}</div></div>`).join("")
+    : `<div class="empty">This player kept no notes.</div>`;
+  el("notesModal").classList.add("open");
+}
+function closeNotes() { el("notesModal").classList.remove("open"); }
+
+/* ================= EVALUATION REFRESH ================= */
+async function refreshEvaluation() {
+  const res = await fetch(EVAL_POLL_URL, { cache: "no-store" });
+  if (res.ok) EVAL = await res.json();
+}
+
+/* ================= PLAYBACK WIRING (ported) ================= */
+function stopPlaying() { clearInterval(timer); timer = null; el("play").textContent = "▶ play"; }
+function turnBoundary(direction) { const turn = steps[index].turn; let i = index;
+  while (i + direction >= 0 && i + direction < steps.length && steps[i = i + direction].turn === turn); return i; }
+el("first").onclick = () => show(0);
+el("last").onclick = () => show(steps.length - 1);
+el("prev").onclick = () => show(index - 1);
+el("next").onclick = () => show(index + 1);
+el("prevTurn").onclick = () => show(turnBoundary(-1));
+el("nextTurn").onclick = () => show(turnBoundary(1));
+el("slider").max = steps.length - 1;
+el("slider").oninput = e => show(Number(e.target.value));
+el("play").onclick = () => { if (timer) { stopPlaying(); return; } el("play").textContent = "⏸ pause";
+  timer = setInterval(() => { if (index >= steps.length - 1) stopPlaying(); else show(index + 1); }, 250); };
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && el("notesModal").classList.contains("open")) { closeNotes(); return; }
+  if (state.editor || state.drawer) { if (e.key === "Escape") { state.editor = null; state.drawer = null; renderPanels(); renderTimeline(); } return; }
+  if (e.key === "ArrowLeft") show(index - 1);
+  if (e.key === "ArrowRight") show(index + 1);
+});
+
+/* ================= TOAST ================= */
+let toastTimer = null;
+function toast(message) { const t = el("toast"); t.textContent = message; t.style.display = "block";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = "none", 2600); }
+
+/* ================= LIVE POLLING ================= */
+let lastFingerprint = null;
+async function refreshFromJournal() {
+  const res = await fetch(POLL_URL, { cache: "no-store" }); if (!res.ok) return;
+  const updated = await res.json();
+  const fingerprint = JSON.stringify([updated.steps.length, updated.steps.at(-1), updated.messages.length,
+    updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.result]);
+  if (fingerprint === lastFingerprint) return; lastFingerprint = fingerprint;
+  const following = index === steps.length - 1;
+  steps.splice(0, steps.length, ...updated.steps);
+  GAME.messages.splice(0, GAME.messages.length, ...updated.messages);
+  GAME.thoughts.splice(0, GAME.thoughts.length, ...updated.thoughts);
+  GAME.notes.splice(0, GAME.notes.length, ...updated.notes);
+  GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
+  GAME.commentators = updated.commentators ?? GAME.commentators;
+  GAME.result = updated.result;
+  // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
+  await refreshEvaluation(); rebuildTrace();
+  el("slider").max = steps.length - 1;
+  renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderSynthesis(); renderTimeline();
+  show(following ? steps.length - 1 : index);
+}
+
+/* ================= INIT ================= */
+buildBoard(); buildContinentLegend();
+renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderSynthesis(); renderTimeline();
+show(LIVE ? steps.length - 1 : 0);
+if (LIVE) setInterval(refreshFromJournal, 1000);
+</script>
+</body>
+</html>

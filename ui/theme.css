@@ -1,0 +1,132 @@
+/* Shared design tokens and primitives for the risk-bench client — the "evaluation reader" look.
+   A warm-paper palette with IBM Plex (UI + mono) and Source Serif for headings and table-talk.
+   Fonts load from Google Fonts via a <link> in the page head; the stacks fall back to system
+   fonts so the client stays usable offline. Per-page <style> blocks build layout on top of these. */
+
+:root {
+  /* surfaces */
+  --paper: #f4f3ef;
+  --card: #ffffff;
+  --subtle: #faf9f5;
+  --subtle-warm: #fbfaf6;
+
+  /* ink + muted text, lightest last */
+  --ink: #1b1a17;
+  --ink-soft: #27241d;
+  --body: #3a372f;
+  --mute: #6e695e;
+  --mute-2: #8b8472;
+  --faint: #a39c8b;
+  --faintest: #b3ac9b;
+
+  /* lines */
+  --line: #e4e1d9;
+  --line-2: #edeae0;
+  --line-3: #e2dfd6;
+
+  /* accents */
+  --gold: #c99a2e;
+  --blue: #2e7cb0;
+
+  /* behaviour valences (tag colour + tint) */
+  --coop: #1f8a5b;         --coop-tint: #e2f0e9;
+  --adversarial: #c0392b;  --adversarial-tint: #f7e2df;
+  --deceptive: #8e44ad;    --deceptive-tint: #efe2f4;
+  --neutral: #5f5a50;      --neutral-tint: #eceae4;
+
+  /* analysis axes (skill / conduct / affect) */
+  --axis-skill: #3b6fb0;
+  --axis-conduct: #8e44ad;
+  --axis-affect: #c99a2e;
+
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* type primitives */
+.mono { font-family: var(--font-mono); }
+.serif { font-family: var(--font-serif); }
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--mute-2);
+}
+
+/* card */
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+/* pill (rounded tag) + chip (square evidence handle) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #7a6f5c;
+  background: #efeade;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+}
+.chip.on { color: #fff; background: var(--ink); border-color: var(--ink); }
+
+/* buttons */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: #5a5648;
+}
+.btn:hover { border-color: #cdc8bb; }
+.btn.dark { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn.dark:hover { opacity: .9; border-color: var(--ink); }
+
+/* toggle switch (label + track + knob) */
+.switch { width: 30px; height: 17px; border-radius: 999px; background: #cdc8bb; position: relative; flex: none; }
+.switch .knob { position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left .18s; }
+.switch.on .knob { left: 15px; }
+
+/* dot swatch */
+.swatch { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-thumb { background: #cdc8bb; border-radius: 6px; border: 3px solid var(--paper); }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes flashCard {
+  0%   { box-shadow: 0 0 0 0 rgba(194,96,61,0); }
+  25%  { box-shadow: 0 0 0 3px rgba(194,96,61,.5); }
+  100% { box-shadow: 0 0 0 0 rgba(194,96,61,0); }
+}
+@keyframes panelIn { from { transform: translateX(22px); } to { transform: none; } }
