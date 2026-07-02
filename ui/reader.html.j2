@@ -707,18 +707,38 @@ function expandedBody(turn) {
     (state.filters.showPrivate || (s.layer !== "thought" && s.layer !== "note"))
     && !(s.layer === "event" && eventEchoesAction(s.text))
     && !(s.layer === "note" && lastNoteSpanByPlayer[s.player] !== s.span));
-  return `<div class="expand">${lines.map(s => traceLine(turn, s)).join("")}</div>`;
+  const liveBySpan = commentatorTagsBySpan(turn);
+  return `<div class="expand">${lines.map(s => traceLine(turn, s, liveBySpan.get(s.span) || [])).join("")}</div>`;
 }
 // engine events that merely restate the board action above them (place/fortify), or the turn header
 // the card already shows — hidden from the timeline, but still present in the raw-trace evidence drawer
 function eventEchoesAction(text) { return /\bplaced\b|\bfortified\b/.test(text) || /^Turn \d+ started/.test(text); }
 
-function traceLine(turn, s) {
+/* A commentator tags a (turn, player) pair, not a line, so its bubble is anchored to the tagged
+   player's first public span that turn — the message or action a spectator actually saw. Tags whose
+   player never spoke or acted that turn stay visible in the commentary block only. */
+function commentatorTagsBySpan(turn) {
+  const bySpan = new Map();
+  if (!state.filters.showCommentary) return bySpan;
+  const lines = spansByTurn.get(turn) || [];
+  const anchorOf = player =>
+    (lines.find(s => s.player === player && (s.layer === "message" || s.layer === "action")) || {}).span;
+  GAME.commentary.filter(c => c.turn === turn).forEach(c => (c.tags || []).forEach(t => {
+    if (!state.filters.axes.has(axisOf(t.behavior))) return;
+    const span = anchorOf(t.player);
+    if (span == null) return;
+    if (!bySpan.has(span)) bySpan.set(span, []);
+    bySpan.get(span).push({ ...t, live: true, commentator: c.commentator, commentator_index: c.commentator_index });
+  }));
+  return bySpan;
+}
+
+function traceLine(turn, s, liveAnno) {
   const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
   const isMsg = s.layer === "message", isPrivate = s.layer === "thought" || s.layer === "note";
   const editing = !!state.editor;
   const sel = editing && state.editor.citations.has(s.span);
-  const anno = tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span));
+  const anno = [...tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span)), ...liveAnno];
   const annoOpen = state.openAnno.has(turn + ":" + s.span);
   const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
   const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
@@ -739,6 +759,7 @@ function traceLine(turn, s) {
 }
 
 function annoCard(t) {
+  if (t.live) return liveAnnoCard(t);
   const [vc, vt] = valenceStyle(t.behavior);
   const ac = annotatorColor(t.annotator);
   const cites = (t.evidence || []).map(e => `<button class="chip" onclick="openLineDrawer(${e.span})">[${e.span}]</button>`).join(" ");
@@ -754,6 +775,22 @@ function annoCard(t) {
     </div>
     <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note)}</div>
     ${cites ? `<div style="display:flex;align-items:center;gap:4px;margin-top:7px;flex-wrap:wrap"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${cites}</div>` : ""}
+  </div>`;
+}
+
+/* a live commentator's tag in the bubble stack: no confidence, no citations, no edit — just the
+   member's read of the line, attributed with the 🎙 chip in the member's colour */
+function liveAnnoCard(t) {
+  const [vc, vt] = valenceStyle(t.behavior);
+  const mc = MEMBER_COLORS[t.commentator_index % MEMBER_COLORS.length];
+  return `<div class="annocard" style="background:${vt};border-left:3px solid ${vc}">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+      <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
+      <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
+      <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)}</span>
+      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${mc};background:color-mix(in srgb, ${mc} 12%, #fff)">🎙 ${escapeHtml(t.commentator || "live")}</span>
+    </div>
+    <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note || "")}</div>
   </div>`;
 }
 
