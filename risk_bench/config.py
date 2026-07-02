@@ -18,6 +18,9 @@ class Settings(BaseSettings):
 
     # agent limits
     max_agent_tokens: int = 4096
+    # the evaluator panel writes a whole game's tags + syntheses in one response, so it needs a far
+    # larger output budget than the per-move game agents and per-turn commentators
+    max_evaluator_tokens: int = 32000
     agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
     max_consecutive_provider_failures: int = 6

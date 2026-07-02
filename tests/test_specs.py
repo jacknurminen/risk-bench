@@ -44,11 +44,11 @@ def test_effort_suffix_is_stripped_when_resolving_the_model():
 def test_build_agent_uses_the_spec_effort_and_otherwise_the_default():
     settings = Settings(anthropic_api_key="unused", agent_reasoning_effort=ReasoningEffort.LOW)
 
-    chosen = specs.build_agent(spec="anthropic:hi:high", settings=settings)
+    chosen = specs.build_agent(spec="anthropic:hi:high", settings=settings, max_tokens=settings.max_agent_tokens)
     assert isinstance(chosen, AnthropicAgent)
     assert chosen._reasoning_effort is ReasoningEffort.HIGH
 
-    default = specs.build_agent(spec="anthropic:hi", settings=settings)
+    default = specs.build_agent(spec="anthropic:hi", settings=settings, max_tokens=settings.max_agent_tokens)
     assert isinstance(default, AnthropicAgent)
     assert default._reasoning_effort is ReasoningEffort.LOW
 

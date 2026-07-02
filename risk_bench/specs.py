@@ -96,7 +96,7 @@ def player_factory(spec: str, settings: Settings, trace: TraceWriter | None) -> 
     """
     if spec == "random":
         return lambda player_id, rng: RandomPlayer(player_id=player_id, rng=rng)
-    agent = build_agent(spec=spec, settings=settings)
+    agent = build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
     model = resolve_model(spec=spec)
 
     def create_llm_player(player_id: PlayerId, rng: random.Random) -> Player:
@@ -114,12 +114,14 @@ def player_factory(spec: str, settings: Settings, trace: TraceWriter | None) -> 
     return create_llm_player
 
 
-def build_agent(spec: str, settings: Settings) -> Agent:
+def build_agent(spec: str, settings: Settings, max_tokens: int) -> Agent:
     """Build the provider client for a model spec.
 
     Args:
         spec: A 'provider:tier' or 'provider:model' spec.
-        settings: Provides API keys and the token limit.
+        settings: Provides API keys and the default reasoning effort.
+        max_tokens: Output token budget per response; differs by role (game agents
+            answer one move at a time, the evaluator writes a whole game's worth).
 
     Returns:
         The provider agent.
@@ -135,25 +137,12 @@ def build_agent(spec: str, settings: Settings) -> Agent:
     match provider:
         case "anthropic":
             return AnthropicAgent(
-                model=model,
-                api_key=api_key,
-                max_tokens=settings.max_agent_tokens,
-                reasoning_effort=reasoning_effort,
+                model=model, api_key=api_key, max_tokens=max_tokens, reasoning_effort=reasoning_effort
             )
         case "openai":
-            return OpenAIAgent(
-                model=model,
-                api_key=api_key,
-                max_tokens=settings.max_agent_tokens,
-                reasoning_effort=reasoning_effort,
-            )
+            return OpenAIAgent(model=model, api_key=api_key, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         case "google":
-            return GeminiAgent(
-                model=model,
-                api_key=api_key,
-                max_tokens=settings.max_agent_tokens,
-                reasoning_effort=reasoning_effort,
-            )
+            return GeminiAgent(model=model, api_key=api_key, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         case unknown_provider:
             raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
 
@@ -185,7 +174,7 @@ def build_commentators(
 
 
 def _build_commentator(index: int, spec: str, settings: Settings, trace: TraceWriter | None) -> Commentator:
-    agent = build_agent(spec=spec, settings=settings)
+    agent = build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
     if trace is not None:
         agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller=f"commentator[{index}]", writer=trace)
     return Commentator(agent=agent, spec=spec)
@@ -217,7 +206,9 @@ def build_evaluators(
 
 
 def _build_evaluator(index: int, spec: str, settings: Settings, trace: TraceWriter | None) -> Evaluator:
-    agent = build_agent(spec=spec, settings=settings)
+    # a member emits every tag, arc, and synthesis for the whole game in one response,
+    # so it gets the evaluator budget rather than the per-move agent budget
+    agent = build_agent(spec=spec, settings=settings, max_tokens=settings.max_evaluator_tokens)
     if trace is not None:
         agent = TracingAgent(agent=agent, model=resolve_model(spec=spec), caller=f"evaluator[{index}]", writer=trace)
     return Evaluator(agent=agent, spec=spec)

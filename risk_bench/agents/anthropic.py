@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Sequence
 from typing import Literal
 
 import anthropic
@@ -32,14 +33,18 @@ class AnthropicAgent:
         system_prompt, conversation = _split_system(messages=messages)
         system_blocks = _system_blocks(system_prompt=system_prompt)
 
-        response = self._client.messages.create(
+        # Streamed rather than created in one shot: with a large output budget (the evaluator's
+        # whole-game pass) the SDK refuses non-streaming requests that may run past 10 minutes.
+        # We still only consume the accumulated final message, so behaviour is otherwise identical.
+        with self._client.messages.stream(
             model=self._model,
             max_tokens=self._max_tokens,
             messages=conversation,
             system=system_blocks if system_blocks else anthropic.omit,
             tools=[_to_anthropic_tool(tool=tool) for tool in tools] if tools else anthropic.omit,
             output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
-        )
+        ) as stream:
+            response = stream.get_final_message()
         parsed = _parse_response(content_blocks=response.content)
         return dataclasses.replace(
             parsed, input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
@@ -96,7 +101,7 @@ def _to_anthropic_tool(tool: Tool) -> anthropic.types.ToolParam:
     return {"name": tool.name, "description": tool.description, "input_schema": tool.parameters}
 
 
-def _parse_response(content_blocks: list[anthropic.types.ContentBlock]) -> Response:
+def _parse_response(content_blocks: Sequence[anthropic.types.ContentBlock]) -> Response:
     text_parts: list[str] = []
     tool_calls: list[ToolCall] = []
     for block in content_blocks:

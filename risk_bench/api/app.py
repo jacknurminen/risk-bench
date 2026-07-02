@@ -581,7 +581,7 @@ def _validate_launch_request(request: NewGameRequest) -> None:
         specs.named_specs(specs=request.players)
         for spec in request.players:
             if spec != "random":
-                specs.build_agent(spec=spec, settings=settings)
+                specs.build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
         # mirror player validation: build every panel member up front so a bad spec fails fast
         specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)
     except ValueError as error:
