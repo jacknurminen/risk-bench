@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import time
 import uuid
 from datetime import UTC, datetime
@@ -186,6 +187,18 @@ def create_app(games_directory: Path) -> FastAPI:
     def resume_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
         _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
+
+    @app.delete("/api/games/{game_id}", status_code=204)
+    def delete_game(game_id: str) -> None:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        if manager.is_running(game_id=game_id):
+            raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
+        if manager.is_evaluating(game_id=game_id):
+            raise HTTPException(
+                status_code=409, detail="An evaluation is running for this game; wait for it to finish."
+            )
+        # removes the whole game folder: journal, trace, evaluation, and annotation sidecars alike
+        shutil.rmtree(journal_path.parent)
 
     @app.post("/api/games/{game_id}/evaluate", status_code=202)
     def evaluate_game(game_id: str, request: EvaluateRequest) -> dict[str, bool]:

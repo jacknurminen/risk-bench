@@ -190,6 +190,39 @@ def test_resuming_a_finished_game_is_rejected(tmp_path: Path):
     assert "finished" in response.json()["detail"]
 
 
+def test_deleting_a_game_removes_its_folder_and_listing(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    assert client.delete(f"/api/games/{game_id}").status_code == 204
+
+    assert not (tmp_path / "games" / game_id).exists()
+    assert client.get("/api/games").json()["games"] == []
+    assert client.get(f"/api/games/{game_id}").status_code == 404
+
+
+def test_deleting_a_running_game_is_rejected(tmp_path: Path):
+    client = client_for(tmp_path=tmp_path)
+    # six random players and an unreachable turn limit keep the game running long enough to hit delete
+    game_id = client.post("/api/games", json={"players": ["random"] * 6, "seed": 5, "max_turns": 1_000_000}).json()[
+        "id"
+    ]
+
+    response = client.delete(f"/api/games/{game_id}")
+
+    assert response.status_code == 409
+    assert "running" in response.json()["detail"]
+    # once paused, the same delete goes through
+    assert client.post(f"/api/games/{game_id}/pause").status_code == 204
+    assert client.delete(f"/api/games/{game_id}").status_code == 204
+    assert client.get("/api/games").json()["games"] == []
+
+
+def test_deleting_an_unknown_game_is_a_404(tmp_path: Path):
+    client = client_for(tmp_path=tmp_path)
+
+    assert client.delete("/api/games/no-such-game").status_code == 404
+
+
 def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
     client, game_id = client_with_finished_game(tmp_path=tmp_path)
     trace_record = {

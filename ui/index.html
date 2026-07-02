@@ -83,6 +83,20 @@
   tr.child td:first-child { padding-left: 28px; font-family: var(--font-mono); font-size: 10.5px; color: var(--mute-2); }
   .caret { color: var(--mute-2); font-size: 11px; margin-right: 6px; }
   .trophy { margin-right: 4px; }
+  button.danger:hover { border-color: var(--adversarial); color: var(--adversarial); }
+
+  /* delete confirmation modal */
+  #confirmModal { position: fixed; inset: 0; background: rgba(27,26,23,.34); z-index: 70;
+                  display: flex; align-items: center; justify-content: center; }
+  #confirmModal[hidden] { display: none; }
+  .confirmBox { width: min(440px, 92vw); padding: 18px 20px; }
+  .confirmBox h3 { font-family: var(--font-serif); font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+  .confirmBox p { font-size: 12.5px; line-height: 1.55; color: var(--body); margin: 0 0 16px; }
+  .confirmBox .buttons { display: flex; gap: 8px; justify-content: flex-end; }
+  #confirmDelete { font-family: var(--font-mono); font-size: 11px; background: var(--adversarial);
+                   border: 1px solid var(--adversarial); color: #fff; border-radius: 5px; padding: 6px 14px; cursor: pointer; }
+  #confirmDelete:hover { opacity: .88; }
+  #confirmError { font-family: var(--font-mono); font-size: 11px; color: var(--adversarial); margin: -8px 0 12px; }
 </style>
 </head>
 <body>
@@ -128,6 +142,17 @@
         <th title="tokens (in + out) and cost per turn">avg / turn</th><th></th></tr></thead>
       <tbody id="games"><tr><td class="empty" colspan="9">Loading…</td></tr></tbody>
     </table>
+    </div>
+  </div>
+</div>
+<div id="confirmModal" hidden onclick="if (event.target === this) closeConfirm()">
+  <div class="card confirmBox">
+    <h3>Delete this game?</h3>
+    <p id="confirmText"></p>
+    <div id="confirmError"></div>
+    <div class="buttons">
+      <button class="subtle" onclick="closeConfirm()">cancel</button>
+      <button id="confirmDelete" onclick="deleteGame()">🗑 delete game</button>
     </div>
   </div>
 </div>
@@ -269,6 +294,39 @@ async function gameAction(event, gameId, action) {
   loadGames();
 }
 
+// Deleting is irreversible (journal, trace, evaluation, and annotations all go), so it is
+// always routed through the confirmation modal rather than acting on the row click directly.
+let pendingDeleteId = null;
+
+function confirmDelete(event, gameId) {
+  event.stopPropagation();
+  pendingDeleteId = gameId;
+  el("confirmText").textContent =
+    `${gameId} will be permanently deleted, including its journal, API trace, evaluation, and annotations.`;
+  el("confirmError").textContent = "";
+  el("confirmModal").hidden = false;
+}
+
+function closeConfirm() {
+  pendingDeleteId = null;
+  el("confirmModal").hidden = true;
+}
+
+async function deleteGame() {
+  const response = await fetch(`/api/games/${pendingDeleteId}`, { method: "DELETE" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    el("confirmError").textContent = payload.detail ?? "Could not delete the game.";
+    return;
+  }
+  closeConfirm();
+  loadGames();
+}
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !el("confirmModal").hidden) closeConfirm();
+});
+
 const expandedTournaments = new Set();
 
 function toggleTournament(tournamentId) {
@@ -300,9 +358,9 @@ function gameRow(game, child) {
   const runControl = game.finished ? "" : game.running
     ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
     : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
-  const evaluateControl =
-    `<button class="tiny subtle" onclick="event.stopPropagation();location.href='/games/${game.id}/evaluation'">🔬 evaluate</button>`;
-  const control = `${runControl} ${evaluateControl}`;
+  const deleteControl =
+    `<button class="tiny subtle danger" onclick="confirmDelete(event, '${game.id}')" title="delete this game">🗑</button>`;
+  const control = `${runControl} ${deleteControl}`;
   const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
   const mic = (game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "")
     + (game.has_evaluation ? ' <span class="mic" title="evaluated">🔬</span>' : "");
