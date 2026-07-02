@@ -308,3 +308,68 @@ def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path:
 
     [game] = client.get("/api/games").json()["games"]
     assert game["id"] == game_id and game["finished"] is True
+
+
+def test_human_annotations_round_trip_through_the_api(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    cited = client.get(f"/api/games/{game_id}/evaluation").json()["spans"][0]
+
+    created = client.post(
+        f"/api/games/{game_id}/annotations",
+        json={
+            "player": PLAYER_NAMES[0],
+            "behavior": "deception",
+            "confidence": 2,
+            "note": "my read",
+            "evidence": [{"span": cited["span"]}],
+        },
+    )
+    assert created.status_code == 201
+    annotation_id = created.json()["id"]
+    assert created.json()["turn"] == cited["turn"]  # the turn is derived from the cited span
+
+    [listed] = client.get(f"/api/games/{game_id}/annotations").json()["annotations"]
+    assert listed["id"] == annotation_id and listed["human"] is True
+    assert listed["evidence"][0]["step"] == cited["step"]  # resolved for click-through
+
+    updated = client.put(
+        f"/api/games/{game_id}/annotations/{annotation_id}",
+        json={
+            "player": PLAYER_NAMES[0],
+            "behavior": "deception",
+            "confidence": 3,
+            "note": "revised",
+            "evidence": [{"span": cited["span"]}],
+        },
+    )
+    assert updated.status_code == 200 and updated.json()["confidence"] == 3
+    assert updated.json()["created_at"] == created.json()["created_at"]  # creation time survives an edit
+
+    assert client.delete(f"/api/games/{game_id}/annotations/{annotation_id}").status_code == 204
+    assert client.get(f"/api/games/{game_id}/annotations").json()["annotations"] == []
+
+
+def test_editing_or_deleting_a_missing_annotation_is_not_found(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    missing = client.put(
+        f"/api/games/{game_id}/annotations/nope",
+        json={"player": PLAYER_NAMES[0], "behavior": "deception", "confidence": 1, "evidence": [{"span": 0}]},
+    )
+    assert missing.status_code == 404
+    assert client.delete(f"/api/games/{game_id}/annotations/nope").status_code == 404
+
+
+def test_annotation_validation_rejects_bad_input(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    span_count = client.get(f"/api/games/{game_id}/evaluation").json()["journal_span_count"]
+
+    def post(payload: dict) -> int:
+        return client.post(f"/api/games/{game_id}/annotations", json=payload).status_code
+
+    valid = {"player": PLAYER_NAMES[0], "behavior": "deception", "confidence": 2, "evidence": [{"span": 0}]}
+    assert post({**valid, "player": "nobody"}) == 400
+    assert post({**valid, "behavior": "not_a_behavior"}) == 400
+    assert post({**valid, "evidence": [{"span": span_count}]}) == 400  # out of range
+    assert post({**valid, "evidence": []}) == 400  # no turn and no citation to anchor to
+    assert post({**valid, "confidence": 5}) == 422  # outside the 1-3 bounds

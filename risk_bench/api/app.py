@@ -1,6 +1,7 @@
 import json
 import re
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -14,6 +15,7 @@ from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
+    AnnotationBody,
     EvaluateRequest,
     GameListResponse,
     GameSummary,
@@ -24,12 +26,22 @@ from risk_bench.api.schemas import (
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
+from risk_bench.runner.annotation_store import (
+    annotations_path_for_journal,
+    delete_annotation,
+    read_annotations,
+    write_annotation,
+)
+from risk_bench.runner.commentary import BEHAVIORS
 from risk_bench.runner.evaluation_store import evaluation_path_for_journal
+from risk_bench.runner.journal import read_journal
+from risk_bench.runner.trace_index import TraceSpan, build_trace_index
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import (
     UI_DIRECTORY,
     render_evaluation_html,
     render_live_viewer_html,
+    render_reader_html,
     render_tournament_html,
     render_viewer_html,
 )
@@ -76,6 +88,29 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.get("/games/{game_id}", include_in_schema=False)
     def game_page(game_id: str) -> HTMLResponse:
+        game_view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
+        evaluation_view_model = _load_evaluation_view_model(
+            games_directory=games_directory, game_id=game_id, manager=manager
+        )
+        return HTMLResponse(
+            render_reader_html(
+                game_view_model=game_view_model,
+                evaluation_view_model=evaluation_view_model,
+                live=game_view_model["result"] is None,
+                live_running=manager.is_running(game_id=game_id),
+                poll_url=f"/api/games/{game_id}",
+                eval_poll_url=f"/api/games/{game_id}/evaluation",
+                evaluate_url=f"/api/games/{game_id}/evaluate",
+                annotations_url=f"/api/games/{game_id}/annotations",
+                trace_url=f"/api/games/{game_id}/trace",
+                classic_url=f"/games/{game_id}/classic",
+            )
+        )
+
+    @app.get("/games/{game_id}/classic", include_in_schema=False)
+    def game_page_classic(game_id: str) -> HTMLResponse:
+        # the original cockpit: the reader links here for the stats modal and the API-call inspector,
+        # which the reader does not yet host
         view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
         trace_url = f"/api/games/{game_id}/trace"
         if view_model["result"] is not None:
@@ -161,6 +196,41 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.get("/api/games/{game_id}/evaluation")
     def evaluation_view_model(game_id: str) -> dict[str, Any]:
         return _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
+
+    @app.get("/api/games/{game_id}/annotations")
+    def list_annotations(game_id: str) -> dict[str, Any]:
+        view_model = _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
+        return {"annotations": view_model["annotations"]}
+
+    @app.post("/api/games/{game_id}/annotations", status_code=201)
+    def create_annotation(game_id: str, body: AnnotationBody) -> dict[str, Any]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        record = _build_annotation_record(
+            journal_path=journal_path, body=body, annotation_id=uuid.uuid4().hex, created_at=None
+        )
+        write_annotation(path=annotations_path_for_journal(journal_path=journal_path), annotation=record)
+        return record
+
+    @app.put("/api/games/{game_id}/annotations/{annotation_id}")
+    def replace_annotation(game_id: str, annotation_id: str, body: AnnotationBody) -> dict[str, Any]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        path = annotations_path_for_journal(journal_path=journal_path)
+        existing = next((record for record in read_annotations(path=path) if record["id"] == annotation_id), None)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="No such annotation.")
+        record = _build_annotation_record(
+            journal_path=journal_path, body=body, annotation_id=annotation_id, created_at=existing["created_at"]
+        )
+        write_annotation(path=path, annotation=record)
+        return record
+
+    @app.delete("/api/games/{game_id}/annotations/{annotation_id}", status_code=204)
+    def remove_annotation(game_id: str, annotation_id: str) -> None:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        if not delete_annotation(
+            path=annotations_path_for_journal(journal_path=journal_path), annotation_id=annotation_id
+        ):
+            raise HTTPException(status_code=404, detail="No such annotation.")
 
     @app.get("/api/games/{game_id}/trace")
     def trace_call_list(game_id: str) -> dict[str, Any]:
@@ -253,6 +323,52 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
         evaluator_specs=request.evaluators,
         log_path=journal_path.parent / "evaluation.log",
     )
+
+
+def _build_annotation_record(
+    journal_path: Path, body: AnnotationBody, annotation_id: str, created_at: str | None
+) -> dict[str, Any]:
+    # validate against the same ground truth the evaluator uses: the roster, the behaviour vocabulary,
+    # and the trace index a citation must land in — a bad annotation fails before it is ever persisted
+    records = read_journal(path=journal_path)
+    if not records or records[0].get("type") != "header":
+        raise HTTPException(status_code=404, detail="No such game.")
+    if body.player not in records[0]["player_specs"]:
+        raise HTTPException(status_code=400, detail=f"Unknown player '{body.player}'.")
+    if body.behavior not in BEHAVIORS:
+        raise HTTPException(status_code=400, detail=f"Unknown behaviour '{body.behavior}'.")
+    spans = build_trace_index(records=records)
+    for evidence in body.evidence:
+        if not 0 <= evidence.span < len(spans):
+            raise HTTPException(status_code=400, detail=f"Citation span {evidence.span} is out of range.")
+    turn = _annotation_turn(body=body, spans=spans)
+    if turn is None:
+        raise HTTPException(status_code=400, detail="An annotation needs a turn or at least one citation.")
+    now = datetime.now(tz=UTC).isoformat()
+    return {
+        "type": "annotation",
+        "id": annotation_id,
+        "author": "you",
+        "player": body.player,
+        "behavior": body.behavior,
+        "turn": turn,
+        "confidence": body.confidence,
+        "note": body.note,
+        "evidence": [{"span": evidence.span, "quote": evidence.quote} for evidence in body.evidence],
+        "created_at": created_at if created_at is not None else now,
+        "updated_at": now,
+    }
+
+
+def _annotation_turn(body: AnnotationBody, spans: tuple[TraceSpan, ...]) -> int | None:
+    if body.turn is not None:
+        return body.turn
+    if not body.evidence:
+        return None
+    span_by_id = {span.span: span for span in spans}
+    lowest = min(body.evidence, key=lambda evidence: evidence.span)
+    resolved = span_by_id.get(lowest.span)
+    return resolved.turn if resolved is not None else None
 
 
 def _read_trace_records(journal_path: Path) -> list[dict[str, Any]]:

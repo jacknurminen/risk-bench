@@ -1072,6 +1072,7 @@ buildBoard(); buildContinentLegend(); buildPlayers();
 appendChat(0); appendLog(0); renderCommentary();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
+if (location.hash === "#stats") el("statsButton").click();  // deep link from the reader's "stats" link
 </script>
 </body>
 </html>

@@ -70,6 +70,29 @@ class EvaluateRequest(BaseModel):
     evaluators: list[str] = Field(default_factory=list)
 
 
+class AnnotationEvidence(BaseModel):
+    """One citation backing a human annotation: a trace-index span and an optional verbatim quote."""
+
+    span: int
+    quote: str | None = None
+
+
+class AnnotationBody(BaseModel):
+    """A human annotation to create or replace: a behaviour tag on one turn, backed by evidence.
+
+    ``turn`` is optional; when omitted it is derived from the lowest cited span (mirroring the
+    evaluator panel's tags), so the annotation is always anchored somewhere. ``confidence`` is the
+    1-3 coding confidence — how sure the annotator is of the label, not how strong the behaviour is.
+    """
+
+    player: str
+    behavior: str
+    confidence: int = Field(ge=1, le=3)
+    note: str = ""
+    turn: int | None = None
+    evidence: list[AnnotationEvidence] = Field(default_factory=list)
+
+
 class ModelCatalogResponse(BaseModel):
     """The choices the setup form can offer: a model per provider/tier, and the reasoning efforts."""
 
