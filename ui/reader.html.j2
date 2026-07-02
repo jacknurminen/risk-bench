@@ -280,8 +280,10 @@
       <div id="railPlayers"></div>
     </div>
     <div class="card filters">
-      <div class="flabel">Behaviour axis</div>
-      <div class="axisrow" id="axisRow"></div>
+      <div id="axisSection">
+        <div class="flabel">Behaviour axis</div>
+        <div class="axisrow" id="axisRow"></div>
+      </div>
       <div class="flabel">Min confidence</div>
       <div class="seg" id="confSeg"></div>
       <div class="flabel">Annotators</div>
@@ -609,7 +611,12 @@ function renderRail() {
   renderFilters();
 }
 function renderFilters() {
-  el("axisRow").innerHTML = AXES.map(([key, label, color]) => {
+  // only offer axis chips for axes that actually occur in the present tags; with no tags at all
+  // (nothing evaluated or annotated yet) the whole axis filter disappears rather than sit inert
+  const presentAxes = new Set(allTags().map(t => axisOf(t.behavior)));
+  const offeredAxes = AXES.filter(([key]) => presentAxes.has(key));
+  el("axisSection").style.display = offeredAxes.length ? "" : "none";
+  el("axisRow").innerHTML = offeredAxes.map(([key, label, color]) => {
     const on = state.filters.axes.has(key);
     return `<button class="axischip" onclick="toggleAxis('${key}')" style="${on ? `border-color:${color};background:color-mix(in srgb, ${color} 12%, #fff);color:var(--ink)` : ""}">
       <span class="swatch" style="background:${color}"></span>${label}</button>`;
