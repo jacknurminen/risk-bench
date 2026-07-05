@@ -1615,6 +1615,7 @@ async function refreshFromJournal() {
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.commentators = updated.commentators ?? GAME.commentators;
   GAME.result = updated.result;
+  GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
   el("slider").max = steps.length - 1;
