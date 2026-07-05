@@ -5,6 +5,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from risk_bench.api.app import create_app
+from risk_bench.runner.evaluation import Evaluation, EvaluatorTag
+from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
 
 
@@ -343,66 +345,55 @@ def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path:
     assert game["id"] == game_id and game["finished"] is True
 
 
-def test_human_annotations_round_trip_through_the_api(tmp_path: Path):
+def client_with_evaluated_game(tmp_path: Path) -> tuple[TestClient, str]:
     client, game_id = client_with_finished_game(tmp_path=tmp_path)
-    cited = client.get(f"/api/games/{game_id}/evaluation").json()["spans"][0]
-
-    created = client.post(
-        f"/api/games/{game_id}/annotations",
-        json={
-            "player": PLAYER_NAMES[0],
-            "behavior": "deception",
-            "confidence": 2,
-            "note": "my read",
-            "evidence": [{"span": cited["span"]}],
-        },
+    evaluation = Evaluation(
+        evaluator_spec="anthropic:hi",
+        tags=(
+            EvaluatorTag(
+                player=PLAYER_NAMES[0],
+                behavior="deception",
+                turn=1,
+                evidence=(),
+                confidence=2,
+                note="a panel tag to verify",
+            ),
+        ),
+        arcs=(),
+        syntheses=(),
     )
-    assert created.status_code == 201
-    annotation_id = created.json()["id"]
-    assert created.json()["turn"] == cited["turn"]  # the turn is derived from the cited span
-
-    [listed] = client.get(f"/api/games/{game_id}/annotations").json()["annotations"]
-    assert listed["id"] == annotation_id and listed["human"] is True
-    assert listed["evidence"][0]["step"] == cited["step"]  # resolved for click-through
-
-    updated = client.put(
-        f"/api/games/{game_id}/annotations/{annotation_id}",
-        json={
-            "player": PLAYER_NAMES[0],
-            "behavior": "deception",
-            "confidence": 3,
-            "note": "revised",
-            "evidence": [{"span": cited["span"]}],
-        },
-    )
-    assert updated.status_code == 200 and updated.json()["confidence"] == 3
-    assert updated.json()["created_at"] == created.json()["created_at"]  # creation time survives an edit
-
-    assert client.delete(f"/api/games/{game_id}/annotations/{annotation_id}").status_code == 204
-    assert client.get(f"/api/games/{game_id}/annotations").json()["annotations"] == []
+    journal_path = tmp_path / "games" / game_id / "game.jsonl"
+    writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
+    writer.write_header(panel=["anthropic:hi"], record_count=1, span_count=1)
+    writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
+    writer.close()
+    return client, game_id
 
 
-def test_editing_or_deleting_a_missing_annotation_is_not_found(tmp_path: Path):
-    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+def test_verifying_a_tag_round_trips_through_the_api(tmp_path: Path):
+    client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
+    tag_key = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "deception", "turn": 1}
 
-    missing = client.put(
-        f"/api/games/{game_id}/annotations/nope",
-        json={"player": PLAYER_NAMES[0], "behavior": "deception", "confidence": 1, "evidence": [{"span": 0}]},
-    )
-    assert missing.status_code == 404
-    assert client.delete(f"/api/games/{game_id}/annotations/nope").status_code == 404
+    set_response = client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": True})
+    assert set_response.status_code == 204
+    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    assert tag["verified"] is True
+
+    # verifying again is idempotent, and clearing brings the tag back to unverified
+    assert client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": True}).status_code == 204
+    clear = client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": False})
+    assert clear.status_code == 204
+    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    assert tag["verified"] is False
+
+    # clearing an already-clear tag stays a no-op, not an error
+    assert client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": False}).status_code == 204
 
 
-def test_annotation_validation_rejects_bad_input(tmp_path: Path):
-    client, game_id = client_with_finished_game(tmp_path=tmp_path)
-    span_count = client.get(f"/api/games/{game_id}/evaluation").json()["journal_span_count"]
+def test_verifying_a_tag_the_evaluation_does_not_hold_is_not_found(tmp_path: Path):
+    client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
 
-    def post(payload: dict) -> int:
-        return client.post(f"/api/games/{game_id}/annotations", json=payload).status_code
+    wrong_turn = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "deception", "turn": 99}
+    response = client.put(f"/api/games/{game_id}/verifications", json={**wrong_turn, "verified": True})
 
-    valid = {"player": PLAYER_NAMES[0], "behavior": "deception", "confidence": 2, "evidence": [{"span": 0}]}
-    assert post({**valid, "player": "nobody"}) == 400
-    assert post({**valid, "behavior": "not_a_behavior"}) == 400
-    assert post({**valid, "evidence": [{"span": span_count}]}) == 400  # out of range
-    assert post({**valid, "evidence": []}) == 400  # no turn and no citation to anchor to
-    assert post({**valid, "confidence": 5}) == 422  # outside the 1-3 bounds
+    assert response.status_code == 404

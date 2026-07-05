@@ -9,10 +9,9 @@ and the per-player arc resolution tallies the report wants.
 
 from collections import Counter
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from risk_bench import specs
-from risk_bench.runner.annotation_store import annotations_path_for_journal, read_annotations
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.evaluation import ARC_OUTCOME_VALENCE
 from risk_bench.runner.evaluation_store import (
@@ -22,16 +21,13 @@ from risk_bench.runner.evaluation_store import (
 )
 from risk_bench.runner.journal import read_journal
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index
-
-# the human annotator sits alongside the LLM panel members (indices 0..n); a negative sentinel keeps
-# it distinct from any panel index while flowing through the same agreement bookkeeping
-HUMAN_ANNOTATOR_INDEX: Final[int] = -1
+from risk_bench.runner.verification_store import read_verifications, verifications_path_for_journal
 
 _VALENCE_BY_BEHAVIOR: dict[str, str | None] = {
     behavior: axis_and_valence(behavior=behavior)[1] for behavior in BEHAVIORS
 }
 
-# the full behaviour vocabulary, in canonical order, so the annotation editor and the axis filters
+# the full behaviour vocabulary, in canonical order, so the axis filters
 # can offer exactly what the LLM panel uses — grouped by axis, coloured by valence, on the client
 _VOCABULARY: list[dict[str, str | None]] = [
     {
@@ -69,10 +65,8 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
     eval_records = read_evaluation(path=evaluation_path_for_journal(journal_path=journal_path))
     eval_header = evaluation_header(records=eval_records)
     roster = _roster(panel_specs=eval_header.panel if eval_header else [], eval_records=eval_records)
-    members = _members(eval_records=eval_records, roster=roster, span_by_id=span_by_id)
-
-    annotation_records = read_annotations(path=annotations_path_for_journal(journal_path=journal_path))
-    annotations = [_annotation_view(record=record, span_by_id=span_by_id) for record in annotation_records]
+    verified_keys = _verified_tag_keys(journal_path=journal_path)
+    members = _members(eval_records=eval_records, roster=roster, span_by_id=span_by_id, verified_keys=verified_keys)
 
     return {
         "title": journal_path.name,
@@ -86,11 +80,8 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
         "coverage": _coverage(eval_header=eval_header, journal_span_count=len(spans)),
         "panel": roster,
         "members": members,
-        # the human annotator ("you") is a first-class annotator: its tags render in the timeline and
-        # count toward cross-annotator agreement, but stay out of the panel's integrity/arc tallies
-        "annotations": annotations,
         "annotators": _annotators(roster=roster),
-        "aggregate": _aggregate(members=members, annotations=annotations, player_names=player_names),
+        "aggregate": _aggregate(members=members, player_names=player_names),
     }
 
 
@@ -148,16 +139,20 @@ def _resolve_member_label(spec: str | None) -> str:
 
 
 def _annotators(roster: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # the roster the filter UI and compare matrix iterate: every LLM panel member plus the human
-    panel = [
-        {"index": member["index"], "label": member["label"], "spec": member["spec"], "human": False}
-        for member in roster
-    ]
-    return [*panel, {"index": HUMAN_ANNOTATOR_INDEX, "label": "you", "spec": None, "human": True}]
+    # the roster the filter UI and compare matrix iterate over
+    return [{"index": member["index"], "label": member["label"], "spec": member["spec"]} for member in roster]
+
+
+def _verified_tag_keys(journal_path: Path) -> set[tuple[int, str, str, int]]:
+    records = read_verifications(path=verifications_path_for_journal(journal_path=journal_path))
+    return {(record["evaluator_index"], record["player"], record["behavior"], record["turn"]) for record in records}
 
 
 def _members(
-    eval_records: list[dict[str, Any]], roster: list[dict[str, Any]], span_by_id: dict[int, TraceSpan]
+    eval_records: list[dict[str, Any]],
+    roster: list[dict[str, Any]],
+    span_by_id: dict[int, TraceSpan],
+    verified_keys: set[tuple[int, str, str, int]],
 ) -> list[dict[str, Any]]:
     members = []
     for member in roster:
@@ -168,7 +163,7 @@ def _members(
                 "index": index,
                 "label": member["label"],
                 "tags": [
-                    _tag_view(record=record, span_by_id=span_by_id)
+                    _tag_view(record=record, span_by_id=span_by_id, verified_keys=verified_keys)
                     for record in records
                     if record["type"] == "eval_tag"
                 ],
@@ -187,13 +182,17 @@ def _members(
     return members
 
 
-def _tag_view(record: dict[str, Any], span_by_id: dict[int, TraceSpan]) -> dict[str, Any]:
+def _tag_view(
+    record: dict[str, Any], span_by_id: dict[int, TraceSpan], verified_keys: set[tuple[int, str, str, int]]
+) -> dict[str, Any]:
+    tag_key = (record["evaluator_index"], record["player"], record["behavior"], record["turn"])
     return {
         "player": record["player"],
         "behavior": record["behavior"],
         "turn": record["turn"],
         "confidence": record["confidence"],
         "note": record["note"],
+        "verified": tag_key in verified_keys,
         "evidence": [_evidence_view(evidence=evidence, span_by_id=span_by_id) for evidence in record["evidence"]],
     }
 
@@ -246,48 +245,10 @@ def _evidence_view(evidence: dict[str, Any], span_by_id: dict[int, TraceSpan]) -
     }
 
 
-def _annotation_view(record: dict[str, Any], span_by_id: dict[int, TraceSpan]) -> dict[str, Any]:
-    return {
-        "id": record["id"],
-        "author": record.get("author", "you"),
-        "human": True,
-        "player": record["player"],
-        "behavior": record["behavior"],
-        "turn": record["turn"],
-        "confidence": record["confidence"],
-        "note": record["note"],
-        "evidence": [
-            _annotation_evidence_view(evidence=evidence, span_by_id=span_by_id) for evidence in record["evidence"]
-        ],
-        "created_at": record.get("created_at"),
-        "updated_at": record.get("updated_at"),
-    }
-
-
-def _annotation_evidence_view(evidence: dict[str, Any], span_by_id: dict[int, TraceSpan]) -> dict[str, Any]:
-    # annotations store only the raw citation (span + optional quote); resolution against the current
-    # trace index is computed here, exactly as the evaluator computes it at validation time
-    span = span_by_id.get(evidence["span"])
-    quote = evidence.get("quote")
-    return {
-        "span": evidence["span"],
-        "quote": quote,
-        "resolved": span is not None,
-        "quote_matched": None if quote is None else (span is not None and quote in span.text),
-        "step": span.step if span is not None else None,
-        "turn": span.turn if span is not None else None,
-    }
-
-
-def _aggregate(
-    members: list[dict[str, Any]], annotations: list[dict[str, Any]], player_names: list[str]
-) -> dict[str, Any]:
-    # the human joins agreement (so "you vs the panel" is measurable) as a synthetic member, but is
-    # kept out of integrity and arc resolution — those measure the LLM panel's citation discipline
-    human_member = {"index": HUMAN_ANNOTATOR_INDEX, "tags": annotations}
+def _aggregate(members: list[dict[str, Any]], player_names: list[str]) -> dict[str, Any]:
     return {
         "integrity": _integrity(members=members),
-        "agreement": _tag_agreement(members=[*members, human_member]),
+        "agreement": _tag_agreement(members=members),
         "arc_resolution": _arc_resolution(members=members, player_names=player_names),
     }
 

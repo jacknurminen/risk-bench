@@ -23,15 +23,15 @@ def render_reader_html(
     poll_url: str,
     eval_poll_url: str,
     evaluate_url: str,
-    annotations_url: str,
+    verifications_url: str,
     trace_url: str,
 ) -> str:
-    """Render the unified evaluation reader: the game timeline with the panel and annotations merged in.
+    """Render the unified evaluation reader: the game timeline with the panel's read merged in.
 
     Args:
         game_view_model: The dict produced by ``snapshots.build_view_model`` (board, trace, stats).
         evaluation_view_model: The dict produced by ``evaluation.build_evaluation_view_model`` (spans,
-            panel tags, human annotations, agreement, vocabulary).
+            panel tags with human verifications, agreement, vocabulary).
         live: Whether the game is unfinished and the page should poll for updates.
         live_running: Whether the game's worker is currently playing (vs paused), so the page can
             show the right pause/resume control; only meaningful when ``live`` is True.
@@ -39,7 +39,7 @@ def render_reader_html(
         eval_poll_url: The URL the page polls (and re-fetches after annotating/evaluating) for the
             evaluation view model JSON.
         evaluate_url: The URL the page POSTs an evaluator panel to, to start a run.
-        annotations_url: The base URL for human-annotation CRUD.
+        verifications_url: The URL human tag-verifications are PUT to.
         trace_url: The URL serving the game's API call trace (feeds the stats modal's call inspector).
 
     Returns:
@@ -53,7 +53,7 @@ def render_reader_html(
         poll_url_json=json.dumps(poll_url),
         eval_poll_url_json=json.dumps(eval_poll_url),
         evaluate_url_json=json.dumps(evaluate_url),
-        annotations_url_json=json.dumps(annotations_url),
+        verifications_url_json=json.dumps(verifications_url),
         trace_url_json=json.dumps(trace_url),
         board_svg=_BOARD_SVG,
     )
@@ -64,13 +64,13 @@ def render_reader_export_html(game_view_model: dict[str, Any], evaluation_view_m
 
     Every /assets stylesheet and script reference is inlined, so the file works from disk with
     no server behind it. All action URLs are blank; the page hides the affordances that would
-    need a server (evaluate, annotate, the API-call inspector) and shows everything embedded:
+    need a server (evaluate, verify, the API-call inspector) and shows everything embedded:
     the full timeline, panel tags with evidence, and the stats charts.
 
     Args:
         game_view_model: The dict produced by ``snapshots.build_view_model``.
         evaluation_view_model: The dict produced by ``evaluation.build_evaluation_view_model``;
-            panel tags and human annotations ride along when the sidecars exist.
+            panel tags and human verifications ride along when the sidecars exist.
 
     Returns:
         A complete static HTML document with all data and assets embedded.
@@ -83,7 +83,7 @@ def render_reader_export_html(game_view_model: dict[str, Any], evaluation_view_m
         poll_url="",
         eval_poll_url="",
         evaluate_url="",
-        annotations_url="",
+        verifications_url="",
         trace_url="",
     )
     return _inline_assets(html=html)

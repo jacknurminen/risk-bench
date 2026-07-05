@@ -67,7 +67,7 @@ el("play").onclick = () => { if (timer) { stopPlaying(); return; } el("play").te
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && statsOpen()) { closeStats(); return; }
   if (e.key === "Escape" && el("notesModal").classList.contains("open")) { closeNotes(); return; }
-  if (state.editor || state.drawer) { if (e.key === "Escape") { state.editor = null; state.drawer = null; renderPanels(); renderTimeline(); } return; }
+  if (state.drawer) { if (e.key === "Escape") { state.drawer = null; renderPanels(); } return; }
   if (e.key === "ArrowLeft") show(index - 1);
   if (e.key === "ArrowRight") show(index + 1);
 });

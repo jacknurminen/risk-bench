@@ -75,7 +75,6 @@
       <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
       <div style="display:flex;align-items:center;gap:6px">
         <span class="modeToggle" id="modeToggle"></span>
-        <button class="btn dark" id="newAnno">+ new annotation</button>
         <button class="btn" id="expandAll">expand</button>
         <button class="btn" id="collapseAll">collapse</button>
       </div>
@@ -146,7 +145,7 @@ window.BOOT = {
     poll: {{ poll_url_json }},
     evaluation_poll: {{ eval_poll_url_json }},
     evaluate: {{ evaluate_url_json }},
-    annotations: {{ annotations_url_json }},
+    verifications: {{ verifications_url_json }},
     trace: {{ trace_url_json }},
   },
 };
@@ -154,7 +153,7 @@ window.BOOT = {
 <script src="/assets/reader/state.js"></script>
 <script src="/assets/reader/board.js"></script>
 <script src="/assets/reader/timeline.js"></script>
-<script src="/assets/reader/annotations.js"></script>
+<script src="/assets/reader/drawer.js"></script>
 <script src="/assets/reader/evaluate.js"></script>
 <script src="/assets/reader/shell.js"></script>
 <script src="/assets/reader/stats.js"></script>

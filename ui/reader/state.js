@@ -7,7 +7,7 @@ const LIVE = window.BOOT.live;
 const POLL_URL = window.BOOT.urls.poll;
 const EVAL_POLL_URL = window.BOOT.urls.evaluation_poll;
 const EVALUATE_URL = window.BOOT.urls.evaluate;
-const ANNOTATIONS_URL = window.BOOT.urls.annotations;
+const VERIFICATIONS_URL = window.BOOT.urls.verifications;
 const TRACE_URL = window.BOOT.urls.trace;
 let gameRunning = window.BOOT.live_running;  // whether the game's worker is currently playing (live games only)
 
@@ -16,7 +16,6 @@ let gameRunning = window.BOOT.live_running;  // whether the game's worker is cur
 // chart surface: lightness band, chroma floor, CVD adjacent-pair separation, and 3:1 contrast
 const COLORS = ["#a33f3b","#3670ab","#6e8f3a","#71509c","#c97a29","#1f92ab"];
 const MEMBER_COLORS = ["#7a6a55","#4a7a6e","#8a6f9e","#9e6a4a","#5a7a3c","#3c6a8a","#9a8a3c","#6a6a6a"];
-const HUMAN = -1;
 GAME.notes ??= []; GAME.commentary ??= []; GAME.commentators ??= [];
 const steps = GAME.steps;
 let index = 0, timer = null;
@@ -63,17 +62,16 @@ function valenceStyle(behavior) {
   return map[v] ?? ["var(--neutral)", "var(--neutral-tint)"];
 }
 
-/* ---- annotators (LLM panel + you) ---- */
+/* ---- annotators (the LLM panel; humans verify its tags rather than authoring their own) ---- */
 const annotators = () => EVAL.annotators || [];
-const annotatorColor = idx => idx === HUMAN ? "var(--ink)" : MEMBER_COLORS[idx % MEMBER_COLORS.length];
-const annotatorLabel = idx => (annotators().find(a => a.index === idx) || {}).label || (idx === HUMAN ? "you" : "evaluator");
-const annotatorBadge = idx => idx === HUMAN ? "✎" : annotatorLabel(idx)[0].toUpperCase();
+const annotatorColor = idx => MEMBER_COLORS[idx % MEMBER_COLORS.length];
+const annotatorLabel = idx => (annotators().find(a => a.index === idx) || {}).label || "evaluator";
+const annotatorBadge = idx => annotatorLabel(idx)[0].toUpperCase();
 
-/* every tag from every annotator, flattened and stamped with who authored it */
+/* every tag from every panel member, flattened and stamped with who authored it */
 function allTags() {
   const out = [];
-  (EVAL.members || []).forEach(m => (m.tags || []).forEach(t => out.push({ ...t, annotator: m.index, human: false })));
-  (EVAL.annotations || []).forEach(a => out.push({ ...a, annotator: HUMAN, human: true }));
+  (EVAL.members || []).forEach(m => (m.tags || []).forEach(t => out.push({ ...t, annotator: m.index })));
   return out;
 }
 function tagVisible(t) {
@@ -123,7 +121,7 @@ const state = {
     annotators: new Set(annotators().map(a => a.index)),
     showPrivate: true, showCommentary: true,
   },
-  editor: null, drawer: null,
+  drawer: null,
 };
 // annotators the filter set has already decided on; lets a panel that finishes after page
 // load default to visible without re-enabling members the viewer explicitly hid

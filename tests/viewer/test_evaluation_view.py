@@ -5,7 +5,6 @@ from risk_bench.game.actions import PlaceArmies
 from risk_bench.game.events import TurnStarted
 from risk_bench.game.serialization import action_to_json, event_to_json
 from risk_bench.game.types import Territory
-from risk_bench.runner.annotation_store import annotations_path_for_journal, write_annotation
 from risk_bench.runner.evaluation import (
     Arc,
     DimensionProfile,
@@ -15,6 +14,7 @@ from risk_bench.runner.evaluation import (
     PlayerSynthesis,
 )
 from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
+from risk_bench.runner.verification_store import verifications_path_for_journal, write_verification
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 
 
@@ -106,6 +106,7 @@ def test_view_model_resolves_citations_and_computes_aggregates(tmp_path: Path):
 
     (member,) = view_model["members"]
     (tag,) = member["tags"]
+    assert tag["verified"] is False  # no human has checked it yet
     # a resolved citation carries the trace step (span 1 -> the thought, replay step 0) for click-through
     assert tag["evidence"][0]["resolved"] is True and tag["evidence"][0]["step"] == 0
     assert tag["evidence"][1]["resolved"] is False and tag["evidence"][1]["step"] is None
@@ -125,43 +126,43 @@ def test_view_model_resolves_citations_and_computes_aggregates(tmp_path: Path):
     assert agreement["player"] == "alice" and agreement["behavior"] == "deception" and agreement["count"] == 1
 
 
-def test_view_model_folds_in_human_annotations(tmp_path: Path):
+def test_view_model_stamps_human_verified_tags(tmp_path: Path):
     journal_path = tmp_path / "game.jsonl"
     _write_journal(path=journal_path)
     _write_evaluation(journal_path=journal_path)  # the panel tags alice/deception on turn 1
-    write_annotation(
-        path=annotations_path_for_journal(journal_path=journal_path),
-        annotation={
-            "type": "annotation",
-            "id": "h1",
-            "author": "you",
+    write_verification(
+        path=verifications_path_for_journal(journal_path=journal_path),
+        verification={
+            "type": "verification",
+            "evaluator_index": 0,
             "player": "alice",
             "behavior": "deception",
             "turn": 1,
-            "confidence": 3,
-            "note": "I agree with the panel",
-            "evidence": [{"span": 1, "quote": "betray bob"}],
-            "created_at": "2026-01-01T00:00:00+00:00",
-            "updated_at": "2026-01-01T00:00:00+00:00",
+            "verified_at": "2026-01-01T00:00:00+00:00",
+        },
+    )
+    # a verification whose key matches no current tag is a harmless orphan (e.g. after a re-run)
+    write_verification(
+        path=verifications_path_for_journal(journal_path=journal_path),
+        verification={
+            "type": "verification",
+            "evaluator_index": 0,
+            "player": "alice",
+            "behavior": "betrayal",
+            "turn": 1,
+            "verified_at": "2026-01-01T00:00:00+00:00",
         },
     )
 
     view_model = build_evaluation_view_model(journal_path=journal_path)
 
-    (annotation,) = view_model["annotations"]
-    assert annotation["id"] == "h1" and annotation["human"] is True
-    # the citation resolves against the live trace index (span 1 = alice's thought, replay step 0)
-    assert annotation["evidence"][0]["resolved"] is True and annotation["evidence"][0]["step"] == 0
-    assert annotation["evidence"][0]["quote_matched"] is True
-
-    # the annotators roster is the LLM panel plus "you"
-    assert view_model["annotators"][-1] == {"index": -1, "label": "you", "spec": None, "human": True}
-
-    # you and the panel both tagged alice/deception/turn 1, so agreement now counts two annotators
+    (member,) = view_model["members"]
+    (tag,) = member["tags"]
+    assert tag["verified"] is True
+    # the roster is the panel alone: humans verify the panel's tags rather than authoring their own
+    assert [annotator["index"] for annotator in view_model["annotators"]] == [0]
     (agreement,) = view_model["aggregate"]["agreement"]
-    assert agreement["count"] == 2 and -1 in agreement["members"]
-    # but the human stays out of the panel's integrity tally (still the 5 panel citations)
-    assert view_model["aggregate"]["integrity"]["total_citations"] == 5
+    assert agreement["count"] == 1  # agreement stays a property of the panel
 
 
 def test_view_model_without_a_sidecar_offers_only_the_run_controls(tmp_path: Path):

@@ -12,7 +12,7 @@ function renderEvalCta() {
   }
   cta.innerHTML = `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
       <div style="flex:1;min-width:240px"><h2>This game is over — not yet evaluated</h2>
-        <p>Run the evaluator panel to read all ${turns.length} turns and generate behaviour annotations, deception-gap detection, and a per-player synthesis. You can also annotate manually at any time.</p></div>
+        <p>Run the evaluator panel to read all ${turns.length} turns and generate behaviour annotations, deception-gap detection, and a per-player synthesis. Each tag can then be human-verified in the timeline.</p></div>
       <button class="btn dark" id="evalToggle" style="font-size:12.5px;padding:11px 20px">▶ Configure panel</button></div>
     <div class="evalConfig" id="evalConfig"><div id="evalRows"></div>
       <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="evalAdd">+ add member</button>

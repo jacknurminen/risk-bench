@@ -74,11 +74,12 @@ function tagsForTurn(turn) { return allTags().filter(t => t.turn === turn && tag
 function pill(t) {
   const [vc, vt] = valenceStyle(t.behavior);
   const ac = annotatorColor(t.annotator);
-  return `<span class="pill" onclick="openTagDrawer(${t.human ? `'${t.id}'` : `${t.annotator}`}, '${t.behavior}', ${t.turn})"
-    style="background:${vt};color:${vc};border-color:${t.human ? "var(--ink)" : "transparent"};${t.human ? "border-style:dashed" : ""}">
+  return `<span class="pill" onclick="openTagDrawer(${t.annotator}, '${t.behavior}', ${t.turn})"
+    style="background:${vt};color:${vc};border-color:${t.verified ? "var(--coop)" : "transparent"}">
     <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>${t.behavior}
     <span class="mono" style="font-size:9px;color:${colorOf(t.player)};font-weight:600">${tagOf(t.player)}</span>
     <span class="mono" style="font-size:9px;opacity:.7">${t.confidence}/3</span>
+    ${t.verified ? '<span class="mono" style="font-size:9px;color:var(--coop);font-weight:700" title="human-verified">✓</span>' : ""}
     <span style="width:14px;height:14px;border-radius:3px;background:${ac};color:#fff;font-family:var(--font-mono);font-size:8px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${annotatorBadge(t.annotator)}</span>
   </span>`;
 }
@@ -97,7 +98,7 @@ function turnCard(turn) {
   const expanded = state.expanded.has(turn);
   const pills = tagsForTurn(turn);
   const hasGap = pills.some(t => valenceOf(t.behavior) === "deceptive");
-  // the live-commentary toggle also hides the panel's read (tag pills + deception badge) so annotation stays unbiased
+  // the live-commentary toggle also hides the panel's read (tag pills + deception badge) so a human can read unbiased
   const showTags = state.filters.showCommentary;
   const commentary = state.filters.showCommentary ? GAME.commentary.filter(c => c.turn === turn) : [];
   return `<article class="tcard" data-turn="${turn}" style="border-left-color:${colorOf(actor)}">
@@ -153,15 +154,13 @@ function commentatorTagsBySpan(turn) {
 function traceLine(turn, s, liveAnno) {
   const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
   const isMsg = s.layer === "message", isPrivate = s.layer === "thought" || s.layer === "note";
-  const editing = !!state.editor;
-  const sel = editing && state.editor.citations.has(s.span);
   const anno = [...tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span)), ...liveAnno];
   const annoOpen = state.openAnno.has(turn + ":" + s.span);
   const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
   const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
   return `<div>
-    <div class="traceline ${sel ? "sel" : ""}" onclick="lineClick(event, ${s.step})" title="wind the board to this moment">
-      <button class="chip ${sel ? "on" : ""}" onclick="chipClick(${s.span})" title="cite this line">[${s.span}]</button>
+    <div class="traceline" onclick="lineClick(event, ${s.step})" title="wind the board to this moment">
+      <button class="chip" onclick="chipClick(${s.span})" title="open in the raw trace">[${s.span}]</button>
       <span class="kindbar" style="background:${kindColor}"></span>
       <span style="flex:1;min-width:0">
         <span class="kindlabel">${kindLabel}</span>
@@ -169,7 +168,6 @@ function traceLine(turn, s, liveAnno) {
       </span>
       ${anno.length ? `<button class="iconbtn" onclick="toggleAnno(${turn}, ${s.span})" title="annotations on this line" style="display:flex;align-items:center;gap:6px">
         <span class="annodots">${dots}</span><span class="chev" style="font-size:13px;transform:rotate(${annoOpen ? 180 : 0}deg)">⌄</span></button>` : ""}
-      ${ANNOTATIONS_URL ? `<button class="plusbtn" onclick="openEditor(${turn}, ${s.span})" title="annotate this line">+</button>` : ""}
     </div>
     ${annoOpen ? `<div style="margin:3px 0 9px 42px;display:flex;flex-direction:column;gap:6px">${anno.map(annoCard).join("")}</div>` : ""}
   </div>`;
@@ -180,19 +178,27 @@ function annoCard(t) {
   const [vc, vt] = valenceStyle(t.behavior);
   const ac = annotatorColor(t.annotator);
   const evidence = (t.evidence || []).map(e => evidenceQuote(t, e)).join("");
-  return `<div class="annocard" style="background:${t.human ? "var(--subtle-warm)" : vt};border-color:${t.human ? "#ddd6c7" : "transparent"};border-left:3px solid ${vc}">
+  return `<div class="annocard" style="background:${vt};border-color:${t.verified ? "var(--coop)" : "transparent"};border-left:3px solid ${vc}">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
       <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
       <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
       <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)} · ${t.confidence}/3</span>
-      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${ac};background:color-mix(in srgb, ${ac} 12%, #fff);${t.human ? `border:1px dashed ${ac}` : ""}">${annotatorLabel(t.annotator)}</span>
-      ${t.human && ANNOTATIONS_URL ? `<span style="margin-left:auto;display:flex;gap:8px">
-        <button class="mono" onclick="editAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--mute);text-decoration:underline">edit</button>
-        <button class="mono" onclick="deleteAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--adversarial);text-decoration:underline">delete</button></span>` : ""}
+      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${ac};background:color-mix(in srgb, ${ac} 12%, #fff)">${annotatorLabel(t.annotator)}</span>
+      <span style="margin-left:auto">${verifyControl(t)}</span>
     </div>
     <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note)}</div>
     ${evidence ? `<div style="margin-top:7px"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${evidence}</div>` : ""}
   </div>`;
+}
+
+/* the human's verdict on a panel tag: one toggle that marks it checked-and-correct. In a static
+   export there is nowhere to save, so only an already-earned mark is shown. */
+function verifyControl(t) {
+  if (!VERIFICATIONS_URL)
+    return t.verified ? '<span class="mono" style="font-size:9.5px;color:var(--coop);font-weight:600">✓ verified</span>' : "";
+  return `<button class="verifybtn ${t.verified ? "on" : ""}"
+    onclick="setTagVerified(${t.annotator}, '${t.behavior}', '${t.player}', ${t.turn}, ${!t.verified})"
+    title="${t.verified ? "click to remove your verification" : "mark this tag as human-verified"}">${t.verified ? "✓ verified" : "✓ verify"}</button>`;
 }
 
 /* Each citation is printed in place — the cited line's kind, speaker, and text — so a tag reads
@@ -204,7 +210,7 @@ function evidenceQuote(t, e) {
   const chip = `<button class="chip" onclick="openLineDrawer(${e.span})" title="open in the raw trace">[${e.span}]</button>`;
   if (!s) return `<div class="evquote">${chip} <span class="mono" style="font-size:9.5px;color:var(--faint)">not in the trace (unresolved citation)</span></div>`;
   const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
-  const key = `${t.human ? t.id : t.annotator + "." + t.behavior + "." + t.player + "." + t.turn}:${e.span}`;
+  const key = `${t.annotator}.${t.behavior}.${t.player}.${t.turn}:${e.span}`;
   const long = s.text.length > EVIDENCE_COLLAPSE_LIMIT;
   const open = state.openEvidence.has(key);
   return `<div class="evquote" style="border-left-color:${kindColor}">
@@ -277,10 +283,10 @@ function commentatorPill(t) {
 function updateSubBar() {
   el("turnCount").textContent = turns.length + " turns";
   const tags = allTags().filter(tagVisible);
-  const yours = (EVAL.annotations || []).length;
+  const verified = tags.filter(t => t.verified).length;
   el("subStat").textContent = EVAL.has_evaluation
-    ? `${tags.length} tags · ${yours} of yours`
-    : (yours ? `not yet evaluated · ${yours} of your annotations` : "not yet evaluated — run the panel to generate annotations");
+    ? `${tags.length} tags · ${verified} verified`
+    : "not yet evaluated — run the panel to generate annotations";
 }
 
 function toggleExpand(turn) { state.expanded.has(turn) ? state.expanded.delete(turn) : state.expanded.add(turn); focusTurn(turn); renderTimeline(); }
@@ -300,7 +306,7 @@ function renderCompare() {
   });
   const rows = [...groups.values()].sort((a, b) => a.turn - b.turn || a.player.localeCompare(b.player));
   const head = `<div class="mhead"><span style="flex:1" class="eyebrow">behaviour · player · turn</span>${active.map(a =>
-    `<span class="mcell mono" style="font-size:9px;color:${annotatorColor(a.index)}">${a.index === HUMAN ? "you" : escapeHtml(a.label).slice(0, 4)}</span>`).join("")}</div>`;
+    `<span class="mcell mono" style="font-size:9px;color:${annotatorColor(a.index)}">${escapeHtml(a.label).slice(0, 4)}</span>`).join("")}</div>`;
   const body = rows.map(r => {
     const n = active.filter(a => r.byAnn[a.index] != null).length;
     const consensus = n >= 2;

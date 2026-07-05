@@ -316,7 +316,7 @@ def test_reader_rendering_polls_the_given_url(tmp_path: Path):
         poll_url="/api/games/some-game",
         eval_poll_url="/api/games/some-game/evaluation",
         evaluate_url="/api/games/some-game/evaluate",
-        annotations_url="/api/games/some-game/annotations",
+        verifications_url="/api/games/some-game/verifications",
         trace_url="/api/games/some-game/trace",
     )
 

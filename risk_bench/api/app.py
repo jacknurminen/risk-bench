@@ -2,7 +2,6 @@ import json
 import re
 import shutil
 import time
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -16,27 +15,23 @@ from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
-    AnnotationBody,
     EvaluateRequest,
     GameListResponse,
     GameSummary,
     ModelCatalogResponse,
     NewGameRequest,
     NewGameResponse,
+    TagVerificationBody,
     TournamentSummary,
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
-from risk_bench.runner.annotation_store import (
-    annotations_path_for_journal,
-    delete_annotation,
-    read_annotations,
-    write_annotation,
+from risk_bench.runner.evaluation_store import evaluation_path_for_journal, read_evaluation
+from risk_bench.runner.verification_store import (
+    delete_verification,
+    verifications_path_for_journal,
+    write_verification,
 )
-from risk_bench.runner.commentary import BEHAVIORS
-from risk_bench.runner.evaluation_store import evaluation_path_for_journal
-from risk_bench.runner.journal import read_journal
-from risk_bench.runner.trace_index import TraceSpan, build_trace_index
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
 from risk_bench.viewer.snapshots import build_view_model
@@ -95,7 +90,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 poll_url=f"/api/games/{game_id}",
                 eval_poll_url=f"/api/games/{game_id}/evaluation",
                 evaluate_url=f"/api/games/{game_id}/evaluate",
-                annotations_url=f"/api/games/{game_id}/annotations",
+                verifications_url=f"/api/games/{game_id}/verifications",
                 trace_url=f"/api/games/{game_id}/trace",
             )
         )
@@ -185,40 +180,34 @@ def create_app(games_directory: Path) -> FastAPI:
     def evaluation_view_model(game_id: str) -> dict[str, Any]:
         return _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
 
-    @app.get("/api/games/{game_id}/annotations")
-    def list_annotations(game_id: str) -> dict[str, Any]:
-        view_model = _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
-        return {"annotations": view_model["annotations"]}
-
-    @app.post("/api/games/{game_id}/annotations", status_code=201)
-    def create_annotation(game_id: str, body: AnnotationBody) -> dict[str, Any]:
+    @app.put("/api/games/{game_id}/verifications", status_code=204)
+    def set_tag_verification(game_id: str, body: TagVerificationBody) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        record = _build_annotation_record(
-            journal_path=journal_path, body=body, annotation_id=uuid.uuid4().hex, created_at=None
+        path = verifications_path_for_journal(journal_path=journal_path)
+        if not body.verified:
+            # clearing is idempotent: un-verifying an unverified tag is a no-op, not an error
+            delete_verification(
+                path=path,
+                evaluator_index=body.evaluator_index,
+                player=body.player,
+                behavior=body.behavior,
+                turn=body.turn,
+            )
+            return
+        # a verification must point at a tag the current evaluation actually holds
+        if not _evaluation_has_tag(journal_path=journal_path, body=body):
+            raise HTTPException(status_code=404, detail="No such tag in the current evaluation.")
+        write_verification(
+            path=path,
+            verification={
+                "type": "verification",
+                "evaluator_index": body.evaluator_index,
+                "player": body.player,
+                "behavior": body.behavior,
+                "turn": body.turn,
+                "verified_at": datetime.now(tz=UTC).isoformat(),
+            },
         )
-        write_annotation(path=annotations_path_for_journal(journal_path=journal_path), annotation=record)
-        return record
-
-    @app.put("/api/games/{game_id}/annotations/{annotation_id}")
-    def replace_annotation(game_id: str, annotation_id: str, body: AnnotationBody) -> dict[str, Any]:
-        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        path = annotations_path_for_journal(journal_path=journal_path)
-        existing = next((record for record in read_annotations(path=path) if record["id"] == annotation_id), None)
-        if existing is None:
-            raise HTTPException(status_code=404, detail="No such annotation.")
-        record = _build_annotation_record(
-            journal_path=journal_path, body=body, annotation_id=annotation_id, created_at=existing["created_at"]
-        )
-        write_annotation(path=path, annotation=record)
-        return record
-
-    @app.delete("/api/games/{game_id}/annotations/{annotation_id}", status_code=204)
-    def remove_annotation(game_id: str, annotation_id: str) -> None:
-        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        if not delete_annotation(
-            path=annotations_path_for_journal(journal_path=journal_path), annotation_id=annotation_id
-        ):
-            raise HTTPException(status_code=404, detail="No such annotation.")
 
     @app.get("/api/games/{game_id}/trace")
     def trace_call_list(game_id: str) -> dict[str, Any]:
@@ -313,50 +302,16 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
     )
 
 
-def _build_annotation_record(
-    journal_path: Path, body: AnnotationBody, annotation_id: str, created_at: str | None
-) -> dict[str, Any]:
-    # validate against the same ground truth the evaluator uses: the roster, the behaviour vocabulary,
-    # and the trace index a citation must land in — a bad annotation fails before it is ever persisted
-    records = read_journal(path=journal_path)
-    if not records or records[0].get("type") != "header":
-        raise HTTPException(status_code=404, detail="No such game.")
-    if body.player not in records[0]["player_specs"]:
-        raise HTTPException(status_code=400, detail=f"Unknown player '{body.player}'.")
-    if body.behavior not in BEHAVIORS:
-        raise HTTPException(status_code=400, detail=f"Unknown behaviour '{body.behavior}'.")
-    spans = build_trace_index(records=records)
-    for evidence in body.evidence:
-        if not 0 <= evidence.span < len(spans):
-            raise HTTPException(status_code=400, detail=f"Citation span {evidence.span} is out of range.")
-    turn = _annotation_turn(body=body, spans=spans)
-    if turn is None:
-        raise HTTPException(status_code=400, detail="An annotation needs a turn or at least one citation.")
-    now = datetime.now(tz=UTC).isoformat()
-    return {
-        "type": "annotation",
-        "id": annotation_id,
-        "author": "you",
-        "player": body.player,
-        "behavior": body.behavior,
-        "turn": turn,
-        "confidence": body.confidence,
-        "note": body.note,
-        "evidence": [{"span": evidence.span, "quote": evidence.quote} for evidence in body.evidence],
-        "created_at": created_at if created_at is not None else now,
-        "updated_at": now,
-    }
-
-
-def _annotation_turn(body: AnnotationBody, spans: tuple[TraceSpan, ...]) -> int | None:
-    if body.turn is not None:
-        return body.turn
-    if not body.evidence:
-        return None
-    span_by_id = {span.span: span for span in spans}
-    lowest = min(body.evidence, key=lambda evidence: evidence.span)
-    resolved = span_by_id.get(lowest.span)
-    return resolved.turn if resolved is not None else None
+def _evaluation_has_tag(journal_path: Path, body: TagVerificationBody) -> bool:
+    eval_records = read_evaluation(path=evaluation_path_for_journal(journal_path=journal_path))
+    return any(
+        record.get("type") == "eval_tag"
+        and record.get("evaluator_index") == body.evaluator_index
+        and record.get("player") == body.player
+        and record.get("behavior") == body.behavior
+        and record.get("turn") == body.turn
+        for record in eval_records
+    )
 
 
 def _read_trace_records(journal_path: Path) -> list[dict[str, Any]]:
