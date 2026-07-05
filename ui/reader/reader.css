@@ -1,5 +1,7 @@
   body { padding-bottom: 60px; }
   a { color: inherit; }
+  .attribution { font-family: var(--font-mono); font-size: 8.5px; color: var(--faint); text-align: right; padding: 2px 6px 0; }
+  .attribution a { color: var(--mute-2); }
 
   /* masthead */
   .masthead { position: sticky; top: 0; z-index: 40; background: rgba(244,243,239,.92); backdrop-filter: blur(10px);

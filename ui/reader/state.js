@@ -9,7 +9,6 @@ const EVAL_POLL_URL = window.BOOT.urls.evaluation_poll;
 const EVALUATE_URL = window.BOOT.urls.evaluate;
 const ANNOTATIONS_URL = window.BOOT.urls.annotations;
 const TRACE_URL = window.BOOT.urls.trace;
-const CLASSIC_URL = window.BOOT.urls.classic;
 let gameRunning = window.BOOT.live_running;  // whether the game's worker is currently playing (live games only)
 
 

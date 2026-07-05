@@ -17,6 +17,7 @@ function openEditor(turn, span) {
   state.drawer = null; renderPanels(); renderTimeline();
 }
 el("newAnno").onclick = () => openEditor(state.focusTurn, null);
+if (!ANNOTATIONS_URL) el("newAnno").hidden = true;  // static export: nowhere to save
 function editAnnotation(id) {
   const t = (EVAL.annotations || []).find(a => a.id === id); if (!t) return;
   state.editor = { id, turn: t.turn, player: t.player, behavior: t.behavior, confidence: t.confidence, note: t.note,

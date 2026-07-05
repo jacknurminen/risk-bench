@@ -20,7 +20,6 @@
       <span id="mastWinner"></span>
       <button class="btn" id="gameControl" style="display:none;font-size:10px;padding:4px 10px">⏸ pause game</button>
       <button class="btn" onclick="openStats()" style="font-size:10px;padding:4px 10px">📊 stats</button>
-      <a class="mono" href="" id="classicLink" style="color:var(--faint);text-decoration:underline;font-size:10px">classic view ↗</a>
     </div>
   </div>
 </header>
@@ -51,7 +50,10 @@
     <section class="card boardcard">
       <div class="boardhead"><span class="eyebrow" id="boardTurnLabel">Board</span>
         <span class="mono" style="font-size:10px;color:var(--faintest)" id="boardHint"></span></div>
-      <div id="board">{{ board_svg }}<div id="continentLegend"></div></div>
+      <div id="board">{{ board_svg }}<div id="continentLegend"></div>
+        <div class="attribution">Map: <a href="https://commons.wikimedia.org/wiki/File:Risk_board.svg">Risk board</a>
+          by Gr0gmint, Wikimedia Commons, <a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a></div>
+      </div>
       <div class="controls">
         <button class="cbtn" id="first" title="first">⏮</button>
         <button class="cbtn" id="prevTurn" title="previous turn">«turn</button>
@@ -146,7 +148,6 @@ window.BOOT = {
     evaluate: {{ evaluate_url_json }},
     annotations: {{ annotations_url_json }},
     trace: {{ trace_url_json }},
-    classic: {{ classic_url_json }},
   },
 };
 </script>

@@ -421,6 +421,7 @@ function showStatsSheet(name) {
 
 async function loadCalls() {
   const container = el("callsList");
+  if (!TRACE_URL) { el("callsStatus").textContent = "no trace in a static export"; container.innerHTML = ""; return; }
   el("callsStatus").textContent = "loading…";
   const response = await fetch(TRACE_URL, { cache: "no-store" });
   if (!response.ok) { el("callsStatus").textContent = "could not load the trace"; return; }

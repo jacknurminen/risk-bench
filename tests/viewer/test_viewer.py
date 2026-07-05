@@ -5,7 +5,8 @@ import pytest
 
 from risk_bench.game.types import Territory
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
-from risk_bench.viewer.html import render_live_viewer_html, render_viewer_html
+from risk_bench.viewer.evaluation import build_evaluation_view_model
+from risk_bench.viewer.html import render_reader_export_html, render_reader_html
 from risk_bench.viewer.snapshots import build_view_model
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
 
@@ -274,21 +275,29 @@ def test_a_game_without_a_trace_reports_no_usage(tmp_path: Path):
     assert model["stats"]["usage"] == {}
 
 
-def test_rendered_html_is_self_contained(tmp_path: Path):
-    model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
+def test_exported_reader_html_is_self_contained(tmp_path: Path):
+    journal_path = journal_with_game(tmp_path=tmp_path)
+    model = build_view_model(journal_path=journal_path)
 
-    html = render_viewer_html(view_model=model, trace_url="")
+    html = render_reader_export_html(
+        game_view_model=model, evaluation_view_model=build_evaluation_view_model(journal_path=journal_path)
+    )
 
     assert html.startswith("<!DOCTYPE html>")
-    assert "const GAME =" in html
-    assert "const LIVE = false" in html
+    assert "window.BOOT" in html
+    assert "live: false" in html
     assert model["players"][0]["name"] in html
-    assert "<script src=" not in html  # no external dependencies
+    # every stylesheet and script is inlined; the file must work from disk with no server behind it
+    assert "<script src=" not in html
+    assert 'href="/assets/' not in html
 
 
-def test_rendered_html_embeds_the_board_map_with_every_territory(tmp_path: Path):
-    html = render_viewer_html(
-        view_model=build_view_model(journal_path=journal_with_game(tmp_path=tmp_path)), trace_url=""
+def test_exported_reader_html_embeds_the_board_map_with_every_territory(tmp_path: Path):
+    journal_path = journal_with_game(tmp_path=tmp_path)
+
+    html = render_reader_export_html(
+        game_view_model=build_view_model(journal_path=journal_path),
+        evaluation_view_model=build_evaluation_view_model(journal_path=journal_path),
     )
 
     assert "<svg" in html
@@ -296,14 +305,22 @@ def test_rendered_html_embeds_the_board_map_with_every_territory(tmp_path: Path)
     assert "CC BY-SA 3.0" in html  # the map's attribution requirement
 
 
-def test_live_rendering_polls_the_given_url(tmp_path: Path):
-    model = build_view_model(journal_path=journal_with_game(tmp_path=tmp_path))
+def test_reader_rendering_polls_the_given_url(tmp_path: Path):
+    journal_path = journal_with_game(tmp_path=tmp_path)
 
-    html = render_live_viewer_html(
-        view_model=model, poll_url="/api/games/some-game", trace_url="/api/games/some-game/trace"
+    html = render_reader_html(
+        game_view_model=build_view_model(journal_path=journal_path),
+        evaluation_view_model=build_evaluation_view_model(journal_path=journal_path),
+        live=True,
+        live_running=True,
+        poll_url="/api/games/some-game",
+        eval_poll_url="/api/games/some-game/evaluation",
+        evaluate_url="/api/games/some-game/evaluate",
+        annotations_url="/api/games/some-game/annotations",
+        trace_url="/api/games/some-game/trace",
     )
 
-    assert "const LIVE = true" in html
+    assert "live: true" in html
     assert '"/api/games/some-game"' in html
 
 

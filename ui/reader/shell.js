@@ -1,6 +1,5 @@
 /* ================= MASTHEAD + MODE ================= */
 function renderMasthead() {
-  el("classicLink").href = CLASSIC_URL;
   const status = GAME.result ? (GAME.result.winner ? "game over" : "draw") : (LIVE ? "in progress" : "paused");
   el("mastStatus").innerHTML = `<span class="dot"></span>${status}`;
   el("mastWinner").innerHTML = GAME.result && GAME.result.winner

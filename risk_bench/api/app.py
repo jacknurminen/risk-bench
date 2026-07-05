@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from risk_bench import specs
@@ -38,14 +38,7 @@ from risk_bench.runner.evaluation_store import evaluation_path_for_journal
 from risk_bench.runner.journal import read_journal
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index
 from risk_bench.viewer.evaluation import build_evaluation_view_model
-from risk_bench.viewer.html import (
-    UI_DIRECTORY,
-    render_evaluation_html,
-    render_live_viewer_html,
-    render_reader_html,
-    render_tournament_html,
-    render_viewer_html,
-)
+from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
 from risk_bench.viewer.snapshots import build_view_model
 from risk_bench.viewer.tournament import build_tournament_view_model
 
@@ -104,33 +97,15 @@ def create_app(games_directory: Path) -> FastAPI:
                 evaluate_url=f"/api/games/{game_id}/evaluate",
                 annotations_url=f"/api/games/{game_id}/annotations",
                 trace_url=f"/api/games/{game_id}/trace",
-                classic_url=f"/games/{game_id}/classic",
             )
         )
 
+    # the classic cockpit and the standalone evaluation page are retired; the reader hosts
+    # everything they did, so old bookmarks land on the game page
     @app.get("/games/{game_id}/classic", include_in_schema=False)
-    def game_page_classic(game_id: str) -> HTMLResponse:
-        # the original cockpit: the reader links here for the stats modal and the API-call inspector,
-        # which the reader does not yet host
-        view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
-        trace_url = f"/api/games/{game_id}/trace"
-        if view_model["result"] is not None:
-            return HTMLResponse(render_viewer_html(view_model=view_model, trace_url=trace_url))
-        return HTMLResponse(
-            render_live_viewer_html(view_model=view_model, poll_url=f"/api/games/{game_id}", trace_url=trace_url)
-        )
-
     @app.get("/games/{game_id}/evaluation", include_in_schema=False)
-    def evaluation_page(game_id: str) -> HTMLResponse:
-        view_model = _load_evaluation_view_model(games_directory=games_directory, game_id=game_id, manager=manager)
-        return HTMLResponse(
-            render_evaluation_html(
-                view_model=view_model,
-                game_id=game_id,
-                poll_url=f"/api/games/{game_id}/evaluation",
-                evaluate_url=f"/api/games/{game_id}/evaluate",
-            )
-        )
+    def retired_game_page(game_id: str) -> RedirectResponse:
+        return RedirectResponse(url=f"/games/{game_id}")
 
     @app.get("/tournaments/{tournament_id}", include_in_schema=False)
     def tournament_page(tournament_id: str) -> HTMLResponse:

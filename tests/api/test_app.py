@@ -65,7 +65,7 @@ def test_the_game_page_renders_the_viewer(tmp_path: Path):
 
     assert page.status_code == 200
     assert "<svg" in page.text
-    assert "const LIVE = false" in page.text  # the game is finished: no polling
+    assert "live: false" in page.text  # the game is finished: no polling
 
 
 def test_an_unfinished_game_page_polls_the_api(tmp_path: Path):
@@ -78,7 +78,7 @@ def test_an_unfinished_game_page_polls_the_api(tmp_path: Path):
 
     page = client_for(tmp_path=tmp_path).get("/games/running")
 
-    assert "const LIVE = true" in page.text
+    assert "live: true" in page.text
     assert '"/api/games/running"' in page.text
 
 

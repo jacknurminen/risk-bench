@@ -3,7 +3,8 @@ let modelCatalog = null;
 async function loadCatalog() { if (modelCatalog) return modelCatalog; modelCatalog = await (await fetch("/api/models")).json(); return modelCatalog; }
 function renderEvalCta() {
   const cta = el("evalCta");
-  if (EVAL.has_evaluation && !EVAL.running) { cta.hidden = true; return; }
+  // no evaluate endpoint means a static export: nothing to run, so no call to action
+  if (!EVALUATE_URL || (EVAL.has_evaluation && !EVAL.running)) { cta.hidden = true; return; }
   cta.hidden = false;
   if (EVAL.running) {
     cta.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:13px;color:var(--mute)">◐ evaluating… the panel is reading all ${turns.length} turns</span></div>`;

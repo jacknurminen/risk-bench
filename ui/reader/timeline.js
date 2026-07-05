@@ -169,7 +169,7 @@ function traceLine(turn, s, liveAnno) {
       </span>
       ${anno.length ? `<button class="iconbtn" onclick="toggleAnno(${turn}, ${s.span})" title="annotations on this line" style="display:flex;align-items:center;gap:6px">
         <span class="annodots">${dots}</span><span class="chev" style="font-size:13px;transform:rotate(${annoOpen ? 180 : 0}deg)">⌄</span></button>` : ""}
-      <button class="plusbtn" onclick="openEditor(${turn}, ${s.span})" title="annotate this line">+</button>
+      ${ANNOTATIONS_URL ? `<button class="plusbtn" onclick="openEditor(${turn}, ${s.span})" title="annotate this line">+</button>` : ""}
     </div>
     ${annoOpen ? `<div style="margin:3px 0 9px 42px;display:flex;flex-direction:column;gap:6px">${anno.map(annoCard).join("")}</div>` : ""}
   </div>`;
@@ -186,7 +186,7 @@ function annoCard(t) {
       <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
       <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)} · ${t.confidence}/3</span>
       <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${ac};background:color-mix(in srgb, ${ac} 12%, #fff);${t.human ? `border:1px dashed ${ac}` : ""}">${annotatorLabel(t.annotator)}</span>
-      ${t.human ? `<span style="margin-left:auto;display:flex;gap:8px">
+      ${t.human && ANNOTATIONS_URL ? `<span style="margin-left:auto;display:flex;gap:8px">
         <button class="mono" onclick="editAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--mute);text-decoration:underline">edit</button>
         <button class="mono" onclick="deleteAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--adversarial);text-decoration:underline">delete</button></span>` : ""}
     </div>
