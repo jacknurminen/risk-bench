@@ -508,6 +508,9 @@ const state = {
   },
   editor: null, drawer: null,
 };
+// annotators the filter set has already decided on; lets a panel that finishes after page
+// load default to visible without re-enabling members the viewer explicitly hid
+const knownAnnotators = new Set(state.filters.annotators);
 
 /* ================= BOARD (ported, restyled) ================= */
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -1084,7 +1087,13 @@ function closeNotes() { el("notesModal").classList.remove("open"); }
 /* ================= EVALUATION REFRESH ================= */
 async function refreshEvaluation() {
   const res = await fetch(EVAL_POLL_URL, { cache: "no-store" });
-  if (res.ok) EVAL = await res.json();
+  if (!res.ok) return;
+  EVAL = await res.json();
+  annotators().forEach(a => {
+    if (knownAnnotators.has(a.index)) return;
+    knownAnnotators.add(a.index);
+    state.filters.annotators.add(a.index);
+  });
 }
 
 /* ================= PLAYBACK WIRING (ported) ================= */
