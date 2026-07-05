@@ -147,6 +147,13 @@
              font-size: 13px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; opacity: .5; }
   .plusbtn:hover { border-color: var(--ink); color: var(--ink); opacity: 1; }
   .annocard { border-radius: 6px; padding: 8px 11px; border: 1px solid transparent; }
+  .evquote { margin-top: 5px; padding: 6px 9px 7px; background: rgba(255,255,255,.65); border: 1px solid var(--line-2);
+             border-left-width: 2px; border-radius: 6px; }
+  .evquote .evhead { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 3px; }
+  .evquote .evtext { font-size: 11px; line-height: 1.55; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; }
+  .evquote mark { background: #f2e4bb; color: inherit; border-radius: 2px; padding: 0 1px; }
+  .evmore { font-family: var(--font-mono); font-size: 9px; background: none; border: none; cursor: pointer;
+            color: var(--mute); text-decoration: underline; padding: 0; margin-left: auto; }
   .commentary { padding: 11px 15px; border-top: 1px dashed var(--line); background: var(--subtle-warm); }
   .commentary .live { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 8.5px;
                       letter-spacing: .08em; text-transform: uppercase; color: var(--blue); }
@@ -500,7 +507,7 @@ function turnSummary(turn) {
 
 /* ---- reader state ---- */
 const state = {
-  expanded: new Set(), openAnno: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
+  expanded: new Set(), openAnno: new Set(), openEvidence: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
   filters: {
     axes: new Set(["skill", "conduct", "affect"]), minConf: 1,
     annotators: new Set(annotators().map(a => a.index)),
@@ -774,7 +781,7 @@ function annoCard(t) {
   if (t.live) return liveAnnoCard(t);
   const [vc, vt] = valenceStyle(t.behavior);
   const ac = annotatorColor(t.annotator);
-  const cites = (t.evidence || []).map(e => `<button class="chip" onclick="openLineDrawer(${e.span})">[${e.span}]</button>`).join(" ");
+  const evidence = (t.evidence || []).map(e => evidenceQuote(t, e)).join("");
   return `<div class="annocard" style="background:${t.human ? "var(--subtle-warm)" : vt};border-color:${t.human ? "#ddd6c7" : "transparent"};border-left:3px solid ${vc}">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
       <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
@@ -786,8 +793,47 @@ function annoCard(t) {
         <button class="mono" onclick="deleteAnnotation('${t.id}')" style="font-size:9.5px;background:none;border:none;cursor:pointer;color:var(--adversarial);text-decoration:underline">delete</button></span>` : ""}
     </div>
     <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note)}</div>
-    ${cites ? `<div style="display:flex;align-items:center;gap:4px;margin-top:7px;flex-wrap:wrap"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${cites}</div>` : ""}
+    ${evidence ? `<div style="margin-top:7px"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${evidence}</div>` : ""}
   </div>`;
+}
+
+/* Each citation is printed in place — the cited line's kind, speaker, and text — so a tag reads
+   without leaving the feed. Long lines collapse to the cited quote (or a leading snippet) behind
+   a toggle; the [n] chip still opens the raw-trace drawer for full surrounding context. */
+const EVIDENCE_COLLAPSE_LIMIT = 280;
+function evidenceQuote(t, e) {
+  const s = spanById.get(e.span);
+  const chip = `<button class="chip" onclick="openLineDrawer(${e.span})" title="open in the raw trace">[${e.span}]</button>`;
+  if (!s) return `<div class="evquote">${chip} <span class="mono" style="font-size:9.5px;color:var(--faint)">not in the trace (unresolved citation)</span></div>`;
+  const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
+  const key = `${t.human ? t.id : t.annotator + "." + t.behavior + "." + t.player + "." + t.turn}:${e.span}`;
+  const long = s.text.length > EVIDENCE_COLLAPSE_LIMIT;
+  const open = state.openEvidence.has(key);
+  return `<div class="evquote" style="border-left-color:${kindColor}">
+    <div class="evhead">
+      ${chip}
+      <span class="kindlabel">${kindLabel}</span>
+      ${s.player ? `<span class="mono" style="font-size:9px;font-weight:600;color:${colorOf(s.player)}">${tagOf(s.player)}</span>` : ""}
+      ${s.turn !== t.turn ? `<span class="mono" style="font-size:9px;color:var(--faint)">turn ${s.turn}</span>` : ""}
+      ${long ? `<button class="evmore" onclick="toggleEvidence('${key}')">${open ? "▴ collapse" : "▸ show full line"}</button>` : ""}
+    </div>
+    <div class="evtext">${evidenceText(s, e, long && !open)}</div>
+  </div>`;
+}
+
+function evidenceText(s, e, collapsed) {
+  const quoted = e.quote_matched && e.quote;
+  if (collapsed) {
+    if (quoted && e.quote.length <= EVIDENCE_COLLAPSE_LIMIT) return `…<mark>${escapeHtml(e.quote)}</mark>…`;
+    return escapeHtml(s.text.slice(0, EVIDENCE_COLLAPSE_LIMIT)) + "…";
+  }
+  const html = escapeHtml(s.text);
+  return quoted ? html.replace(escapeHtml(e.quote), match => `<mark>${match}</mark>`) : html;
+}
+
+function toggleEvidence(key) {
+  state.openEvidence.has(key) ? state.openEvidence.delete(key) : state.openEvidence.add(key);
+  renderTimeline();
 }
 
 /* a live commentator's tag in the bubble stack: no confidence, no citations, no edit — just the
