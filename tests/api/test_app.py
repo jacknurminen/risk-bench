@@ -313,7 +313,7 @@ def test_the_tournament_stats_page_and_view_model_are_served(tmp_path: Path):
 
     page = client.get(f"/tournaments/{tournament_id}")
     assert page.status_code == 200
-    assert "Cross-game statistics" in page.text
+    assert "cross-game statistics" in page.text
     assert "const LIVE = false" in page.text  # both members finished: no polling
 
     model = client.get(f"/api/tournaments/{tournament_id}").json()
