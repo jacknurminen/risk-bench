@@ -171,6 +171,52 @@ def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
     assert commentary.tags == (BehaviorTag(player="bob", behavior="deception", note="said one thing"),)
 
 
+def test_markup_leaked_inside_a_real_calls_commentary_argument_is_salvaged():
+    # observed with claude-opus-4-8: a real commentate call whose commentary string
+    # carries the prose and then the tags parameter written as markup inside it
+    contaminated = (
+        "alice played a strong turn.</parameter>\n"
+        '<parameter name="tags">[{"player": "alice", "behavior": "strong_move", "note": "good odds"}]'
+        "</parameter>\n</invoke>"
+    )
+    call = ToolCall(
+        id="call-1",
+        name="commentate",
+        arguments={
+            "commentary": contaminated,
+            "tags": [{"player": "bob", "behavior": "betrayal", "note": "a properly passed tag survives too"}],
+        },
+    )
+    commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=(call,))), spec="anthropic:hi")
+
+    commentary = commentator.comment_on_turn(
+        state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[], notes={}
+    )
+
+    assert commentary is not None
+    assert commentary.text == "alice played a strong turn."
+    assert "<parameter" not in commentary.text
+    assert commentary.tags == (
+        BehaviorTag(player="alice", behavior="strong_move", note="good odds"),
+        BehaviorTag(player="bob", behavior="betrayal", note="a properly passed tag survives too"),
+    )
+
+
+def test_an_unsalvageable_contaminated_call_falls_back_to_the_text_channel():
+    call = ToolCall(id="call-1", name="commentate", arguments={"commentary": '<parameter name="tags">[]</parameter>'})
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text="carla held the line.", tool_calls=(call,))), spec="anthropic:hi"
+    )
+
+    commentary = commentator.comment_on_turn(
+        state=game_state(), turn_number=1, turn_log=["carla defended"], previous_commentary=[], notes={}
+    )
+
+    assert commentary is not None
+    assert commentary.text == "carla held the line."
+    assert commentary.tags == ()
+
+
 def test_leaked_markup_without_salvageable_commentary_is_discarded():
     commentator = Commentator(
         agent=StubAgent(response=Response(text='<parameter name="tags">[]</parameter>', tool_calls=())),

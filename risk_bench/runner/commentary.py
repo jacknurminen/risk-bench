@@ -312,14 +312,11 @@ class Commentator:
             return None
         for call in response.tool_calls:
             if call.name == "commentate" and isinstance(call.arguments.get("commentary"), str):
-                return Commentary(
-                    text=call.arguments["commentary"],
-                    tags=_valid_tags(
-                        raw_tags=call.arguments.get("tags"),
-                        player_ids=set(state.players),
-                        valid_behaviors=self._behaviors,
-                    ),
+                commentary = _commentary_from_call_arguments(
+                    arguments=call.arguments, player_ids=set(state.players), valid_behaviors=self._behaviors
                 )
+                if commentary is not None:
+                    return commentary
         text = (response.text or "").strip()
         if not text:
             return None
@@ -467,6 +464,21 @@ def _render_previous_commentary(previous_commentary: list[str]) -> str:
 
 
 _LEAKED_TOOL_CALL_MARKERS: Final[tuple[str, ...]] = ("<parameter", "</parameter>", "<invoke", "<function")
+
+
+def _commentary_from_call_arguments(
+    arguments: dict[str, Any], player_ids: set[PlayerId], valid_behaviors: set[str]
+) -> Commentary | None:
+    text = arguments["commentary"]
+    tags = _valid_tags(raw_tags=arguments.get("tags"), player_ids=player_ids, valid_behaviors=valid_behaviors)
+    if not any(marker in text for marker in _LEAKED_TOOL_CALL_MARKERS):
+        return Commentary(text=text, tags=tags)
+    # markup can leak inside a real call too: the commentary string carries the prose
+    # and then the remaining parameters written as markup, so salvage it the same way
+    salvaged = _salvage_leaked_tool_call(text=text, player_ids=player_ids, valid_behaviors=valid_behaviors)
+    if salvaged is None:
+        return None
+    return Commentary(text=salvaged.text, tags=tuple(dict.fromkeys((*salvaged.tags, *tags))))
 
 
 def _salvage_leaked_tool_call(text: str, player_ids: set[PlayerId], valid_behaviors: set[str]) -> Commentary | None:
