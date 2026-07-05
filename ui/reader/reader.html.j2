@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>risk-bench · evaluation reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/reader/reader.css">
+</head>
+<body>
+<header class="masthead">
+  <div class="inner">
+    <div><span class="brand">risk-bench</span><small>evaluation reader</small></div>
+    <div class="mastmeta">
+      <span id="mastStatus"></span>
+      <span style="color:#c7c1b3">·</span>
+      <span id="mastWinner"></span>
+      <button class="btn" id="gameControl" style="display:none;font-size:10px;padding:4px 10px">⏸ pause game</button>
+      <button class="btn" onclick="openStats()" style="font-size:10px;padding:4px 10px">📊 stats</button>
+      <a class="mono" href="" id="classicLink" style="color:var(--faint);text-decoration:underline;font-size:10px">classic view ↗</a>
+    </div>
+  </div>
+</header>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="section">
+      <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
+      <div id="railPlayers"></div>
+    </div>
+    <div class="card filters">
+      <div id="axisSection">
+        <div class="flabel">Behaviour axis</div>
+        <div class="axisrow" id="axisRow"></div>
+      </div>
+      <div class="flabel">Min confidence</div>
+      <div class="seg" id="confSeg"></div>
+      <div class="flabel">Annotators</div>
+      <div id="annList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px"></div>
+      <div class="toggle" id="privToggle" style="margin-top:0"><span class="switch"><span class="knob"></span></span>
+        <span class="mono" style="font-size:11.5px">Private layers (thoughts · notes)</span></div>
+      <div class="toggle" id="commToggle"><span class="switch"><span class="knob"></span></span>
+        <span class="mono" style="font-size:11.5px">Live commentary</span></div>
+    </div>
+  </aside>
+
+  <main class="feed">
+    <section class="card boardcard">
+      <div class="boardhead"><span class="eyebrow" id="boardTurnLabel">Board</span>
+        <span class="mono" style="font-size:10px;color:var(--faintest)" id="boardHint"></span></div>
+      <div id="board">{{ board_svg }}<div id="continentLegend"></div></div>
+      <div class="controls">
+        <button class="cbtn" id="first" title="first">⏮</button>
+        <button class="cbtn" id="prevTurn" title="previous turn">«turn</button>
+        <button class="cbtn" id="prev" title="step back">◀</button>
+        <button class="cbtn" id="play">▶ play</button>
+        <button class="cbtn" id="next" title="step forward">▶</button>
+        <button class="cbtn" id="nextTurn" title="next turn">turn»</button>
+        <button class="cbtn" id="last" title="last">⏭</button>
+        <input type="range" id="slider" min="0" value="0">
+        <span id="status"></span>
+      </div>
+      <div class="statstrip" id="statStrip"></div>
+    </section>
+
+    <section class="card ctaCard" id="evalCta" hidden></section>
+    <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+
+    <div class="subbar">
+      <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span class="modeToggle" id="modeToggle"></span>
+        <button class="btn dark" id="newAnno">+ new annotation</button>
+        <button class="btn" id="expandAll">expand</button>
+        <button class="btn" id="collapseAll">collapse</button>
+      </div>
+    </div>
+
+    <div id="timeline"></div>
+  </main>
+</div>
+
+<div id="panelRoot"></div>
+<div id="statsModal" onclick="if(event.target===this)closeStats()">
+  <div class="card statsBox">
+    <div class="statsHead">
+      <span class="serif" style="font-size:17px;font-weight:600">📊 Game statistics</span>
+      <span class="modeToggle" id="statsTabs">
+        <button id="tabOverview" class="on" onclick="showStatsSheet('overview')">overview</button><button id="tabCalls" onclick="showStatsSheet('calls')">API calls</button>
+      </span>
+      <button class="iconbtn" onclick="closeStats()" style="font-size:18px;color:var(--mute-2)">✕</button>
+    </div>
+    <div id="overviewSheet">
+      <div id="statsLegend"></div>
+      <div id="charts"></div>
+      <div id="commentaryStats">
+        <div id="memberToggles"></div>
+        <div id="agreementFilter"></div>
+        <div id="valenceCharts"></div>
+      </div>
+      <div id="tokenSection">
+        <div class="eyebrow">per turn — input (left bar) / output (right bar), stacked</div>
+        <div class="tokenControls">
+          <label>measure
+            <select id="tokMeasure"><option value="tokens">tokens</option><option value="cost">cost ($)</option></select></label>
+          <label>breakdown
+            <select id="tokBreakdown"><option value="all">all (by call type)</option><option value="model">by model</option></select></label>
+        </div>
+        <div id="tokenChart"></div>
+      </div>
+      <div id="tagFilterNote"></div>
+      <table id="statsTable"></table>
+      <div id="usageNote">Costs are estimated from list prices per token; unknown models show no cost.</div>
+    </div>
+    <div id="callsSheet" hidden>
+      <div style="display:flex;gap:12px;align-items:center;margin:10px 0">
+        <label class="mono" style="font-size:11px;color:var(--mute)">caller <select id="callerFilter" style="font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:#fff"></select></label>
+        <span id="callsStatus" class="mono" style="font-size:11px;color:var(--mute-2)"></span>
+      </div>
+      <div id="callsList"></div>
+    </div>
+  </div>
+</div>
+<div class="chartTip" id="chartTip"></div>
+<div id="notesModal" onclick="if(event.target===this)closeNotes()">
+  <div class="card notesBox">
+    <div class="notesHead"><span class="serif" id="notesTitle" style="font-size:16px;font-weight:600"></span>
+      <button class="iconbtn" onclick="closeNotes()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+    <div id="notesBody"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+window.BOOT = {
+  game: {{ game_json }},
+  evaluation: {{ eval_json }},
+  live: {{ live_json }},
+  live_running: {{ live_running_json }},
+  urls: {
+    poll: {{ poll_url_json }},
+    evaluation_poll: {{ eval_poll_url_json }},
+    evaluate: {{ evaluate_url_json }},
+    annotations: {{ annotations_url_json }},
+    trace: {{ trace_url_json }},
+    classic: {{ classic_url_json }},
+  },
+};
+</script>
+<script src="/assets/reader/state.js"></script>
+<script src="/assets/reader/board.js"></script>
+<script src="/assets/reader/timeline.js"></script>
+<script src="/assets/reader/annotations.js"></script>
+<script src="/assets/reader/evaluate.js"></script>
+<script src="/assets/reader/shell.js"></script>
+<script src="/assets/reader/stats.js"></script>
+<script src="/assets/reader/main.js"></script>
+</body>
+</html>

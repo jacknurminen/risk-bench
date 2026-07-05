@@ -12,7 +12,7 @@ _BOARD_SVG_PATH = UI_DIRECTORY / "board.svg"
 # code was loaded with, or the page's JS and the embedded data can skew apart
 _TEMPLATE = jinja2.Template(_TEMPLATE_PATH.read_text(encoding="utf-8"))
 _BOARD_SVG = _BOARD_SVG_PATH.read_text(encoding="utf-8")
-_READER_TEMPLATE = jinja2.Template((UI_DIRECTORY / "reader.html.j2").read_text(encoding="utf-8"))
+_READER_TEMPLATE = jinja2.Template((UI_DIRECTORY / "reader" / "reader.html.j2").read_text(encoding="utf-8"))
 _TOURNAMENT_TEMPLATE = jinja2.Template((UI_DIRECTORY / "tournament.html.j2").read_text(encoding="utf-8"))
 _EVALUATION_TEMPLATE = jinja2.Template((UI_DIRECTORY / "evaluation.html.j2").read_text(encoding="utf-8"))
 
