@@ -24,7 +24,7 @@ The drafted chapters (`03-methods.md`, `05-discussion.md`) are the reference for
 - When editing existing prose, **preserve the author's voice** and remove only the tells; do not
   rewrite passable academic writing into a different style.
 
-## Punctuation: ration the em dash
+## Punctuation: ration the em dash — and the colon
 
 Em dashes are permitted but **rationed** — used where they do work a comma cannot, not as a reflex.
 
@@ -35,6 +35,12 @@ Em dashes are permitted but **rationed** — used where they do work a comma can
 - **NEVER** use an em dash as a mechanical pause generator where a comma or period is correct.
 - **PREFER** the semicolon and colon where they are the better academic choice: a semicolon to join
   related independent clauses, a colon to introduce an elaboration or list.
+- **RATION the pivot colon the same way.** A colon that introduces a list, a definition, or a term
+  gloss is conventional and free; a full sentence turning on `claim: elaboration` is a rhythm
+  device and gets the same budget as the em dash — roughly **one per paragraph**. Do not fix an
+  em-dash overuse by minting colons; recast by varied means instead: split into two sentences,
+  subordinate with *because* / *so that* / *since*, or fold the elaboration into the clause.
+  Three colon-pivot sentences in a row read as mechanical as three dashes.
 
 ## Vocabulary to avoid (the LLM cluster)
 
