@@ -359,7 +359,6 @@ def client_with_evaluated_game(tmp_path: Path) -> tuple[TestClient, str]:
                 note="a panel tag to verify",
             ),
         ),
-        arcs=(),
         syntheses=(),
     )
     journal_path = tmp_path / "games" / game_id / "game.jsonl"

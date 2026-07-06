@@ -3,8 +3,7 @@
 Mirrors ``snapshots.build_view_model``: it reads the journal once into the trace index (so a
 citation handle resolves to its turn, step, and text), reads the ``game.eval.jsonl`` sidecar, and
 **resolves every citation** into ``{span, step, turn, ...}`` so the page can show the cited line and
-jump to it. It also computes the deterministic integrity rate, the cross-member agreement on tags,
-and the per-player arc resolution tallies the report wants.
+jump to it. It also computes the deterministic integrity rate and the cross-member agreement on tags.
 """
 
 from collections import Counter
@@ -13,7 +12,6 @@ from typing import Any
 
 from risk_bench import specs
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
-from risk_bench.runner.evaluation import ARC_OUTCOME_VALENCE
 from risk_bench.runner.evaluation_store import (
     evaluation_header,
     evaluation_path_for_journal,
@@ -47,7 +45,7 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
 
     Returns:
         A JSON-serializable dict with the trace index, the panel roster, each member's
-        resolved tags/arcs/syntheses, and the cross-member aggregates. ``has_evaluation`` is
+        resolved tags/syntheses, and the cross-member aggregates. ``has_evaluation`` is
         False (and members empty) when no sidecar exists yet — the page then shows only the
         configure-and-run controls.
 
@@ -81,7 +79,7 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
         "panel": roster,
         "members": members,
         "annotators": _annotators(roster=roster),
-        "aggregate": _aggregate(members=members, player_names=player_names),
+        "aggregate": _aggregate(members=members),
     }
 
 
@@ -167,11 +165,6 @@ def _members(
                     for record in records
                     if record["type"] == "eval_tag"
                 ],
-                "arcs": [
-                    _arc_view(record=record, span_by_id=span_by_id)
-                    for record in records
-                    if record["type"] == "eval_arc"
-                ],
                 "syntheses": [
                     _synthesis_view(record=record, span_by_id=span_by_id)
                     for record in records
@@ -194,21 +187,6 @@ def _tag_view(
         "note": record["note"],
         "verified": tag_key in verified_keys,
         "evidence": [_evidence_view(evidence=evidence, span_by_id=span_by_id) for evidence in record["evidence"]],
-    }
-
-
-def _arc_view(record: dict[str, Any], span_by_id: dict[int, TraceSpan]) -> dict[str, Any]:
-    return {
-        "kind": record["kind"],
-        "subject": record["subject"],
-        "object": record.get("object"),
-        "outcome": record["outcome"],
-        "valence": ARC_OUTCOME_VALENCE.get(record["outcome"], "other"),
-        "intent": record.get("intent"),
-        "confidence": record["confidence"],
-        "note": record["note"],
-        "antecedent": _evidence_view(evidence=record["antecedent"], span_by_id=span_by_id),
-        "consequent": _evidence_view(evidence=record["consequent"], span_by_id=span_by_id),
     }
 
 
@@ -245,11 +223,10 @@ def _evidence_view(evidence: dict[str, Any], span_by_id: dict[int, TraceSpan]) -
     }
 
 
-def _aggregate(members: list[dict[str, Any]], player_names: list[str]) -> dict[str, Any]:
+def _aggregate(members: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "integrity": _integrity(members=members),
         "agreement": _tag_agreement(members=members),
-        "arc_resolution": _arc_resolution(members=members, player_names=player_names),
     }
 
 
@@ -272,8 +249,6 @@ def _integrity(members: list[dict[str, Any]]) -> dict[str, int]:
 
 def _all_evidence(member: dict[str, Any]) -> list[dict[str, Any]]:
     evidence = [item for tag in member["tags"] for item in tag["evidence"]]
-    for arc in member["arcs"]:
-        evidence += [arc["antecedent"], arc["consequent"]]
     for synthesis in member["syntheses"]:
         evidence += [item for dimension in synthesis["profile"] for item in dimension["evidence"]]
         evidence += synthesis["key_episodes"]
@@ -297,16 +272,3 @@ def _tag_agreement(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
         }
         for (player, behavior, turn), indices in sorted(flaggers.items(), key=lambda item: (item[0][2], item[0][0]))
     ]
-
-
-def _arc_resolution(members: list[dict[str, Any]], player_names: list[str]) -> dict[str, dict[str, int]]:
-    # panel-summed arc outcome tallies per subject, the basis for resolution rates (promise-kept etc.)
-    tallies = {name: {"arcs": 0, "honoured": 0, "broken": 0, "open": 0, "other": 0} for name in player_names}
-    for member in members:
-        for arc in member["arcs"]:
-            subject = arc["subject"]
-            if subject not in tallies:
-                continue
-            tallies[subject]["arcs"] += 1
-            tallies[subject][arc["valence"]] += 1
-    return tallies

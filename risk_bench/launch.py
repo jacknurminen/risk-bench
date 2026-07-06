@@ -144,7 +144,7 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
 
     Reads the journal (which may be a paused game's prefix), builds the trace index the panel
     cites, runs every member offline and concurrently over the same trace, and writes their
-    tags, arcs, and syntheses to ``game.eval.jsonl`` — overwriting any prior run, since the
+    tags and syntheses to ``game.eval.jsonl`` — overwriting any prior run, since the
     evaluation is a re-runnable derived artifact, never part of the canonical journal.
 
     Args:

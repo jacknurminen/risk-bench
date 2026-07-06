@@ -2,7 +2,6 @@ from typing import Any
 
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.runner.evaluation import (
-    Arc,
     Evaluation,
     Evaluator,
     EvaluatorTag,
@@ -40,10 +39,8 @@ class StubAgent:
         return self._response
 
 
-def _evaluate_response(
-    tags: list[dict[str, Any]], arcs: list[dict[str, Any]], syntheses: list[dict[str, Any]]
-) -> Response:
-    call = ToolCall(id="c1", name="evaluate", arguments={"tags": tags, "arcs": arcs, "syntheses": syntheses})
+def _evaluate_response(tags: list[dict[str, Any]], syntheses: list[dict[str, Any]]) -> Response:
+    call = ToolCall(id="c1", name="evaluate", arguments={"tags": tags, "syntheses": syntheses})
     return Response(text=None, tool_calls=(call,))
 
 
@@ -70,7 +67,6 @@ def test_a_tag_records_its_evidence_resolution_and_quote_match():
                     "note": "private thought contradicts the public message",
                 }
             ],
-            arcs=[],
             syntheses=[],
         )
     )
@@ -130,7 +126,6 @@ def test_invalid_players_and_behaviors_and_empty_evidence_are_dropped_confidence
                     "note": "ok",
                 },
             ],
-            arcs=[],
             syntheses=[],
         )
     )
@@ -141,74 +136,6 @@ def test_invalid_players_and_behaviors_and_empty_evidence_are_dropped_confidence
     (tag,) = evaluation.tags  # only the structurally-valid, cited tag survives
     assert tag.player == "bob" and tag.behavior == "turtling"
     assert tag.confidence == 1  # out-of-range confidence coerced to the lowest, not discarded
-
-
-def test_an_arc_links_two_resolvable_ends_and_keeps_the_intent_label():
-    agent = StubAgent(
-        _evaluate_response(
-            tags=[],
-            arcs=[
-                {
-                    "kind": "commitment",
-                    "subject": "alice",
-                    "object": "bob",
-                    "antecedent": {"span": 1},
-                    "consequent": {"span": 2},
-                    "outcome": "broken",
-                    "intent": "strategic_setup",
-                    "confidence": 3,
-                    "note": "promised alliance on turn 1, attacked on turn 3",
-                },
-                {  # an unknown kind is structurally invalid and dropped
-                    "kind": "nonsense",
-                    "subject": "alice",
-                    "antecedent": {"span": 1},
-                    "consequent": {"span": 2},
-                    "outcome": "betrayed",
-                    "confidence": 1,
-                    "note": "x",
-                },
-                {  # ends that do not resolve are KEPT but flagged (the broken-citation rate is a finding)
-                    "kind": "alliance",
-                    "subject": "bob",
-                    "antecedent": {"span": 5},
-                    "consequent": {"span": 6},
-                    "outcome": "betrayed",
-                    "confidence": 1,
-                    "note": "hallucinated ends",
-                },
-            ],
-            syntheses=[],
-        )
-    )
-
-    evaluation = _evaluate(agent)
-
-    assert evaluation is not None
-    assert evaluation.arcs == (
-        Arc(
-            kind="commitment",
-            subject="alice",
-            object="bob",
-            antecedent=Evidence(span=1, quote=None, resolved=True, quote_matched=None),
-            consequent=Evidence(span=2, quote=None, resolved=True, quote_matched=None),
-            outcome="broken",
-            intent="strategic_setup",
-            confidence=3,
-            note="promised alliance on turn 1, attacked on turn 3",
-        ),
-        Arc(
-            kind="alliance",
-            subject="bob",
-            object=None,
-            antecedent=Evidence(span=5, quote=None, resolved=False, quote_matched=None),
-            consequent=Evidence(span=6, quote=None, resolved=False, quote_matched=None),
-            outcome="betrayed",
-            intent=None,
-            confidence=1,
-            note="hallucinated ends",
-        ),
-    )
 
 
 def test_a_response_without_an_evaluate_call_yields_no_evaluation():
@@ -230,7 +157,7 @@ def test_a_provider_failure_yields_no_evaluation_instead_of_crashing():
 
 
 def test_the_prompt_shows_handles_and_the_whole_trace(tmp_path):
-    agent = StubAgent(_evaluate_response(tags=[], arcs=[], syntheses=[]))
+    agent = StubAgent(_evaluate_response(tags=[], syntheses=[]))
     _evaluate(agent)
 
     prompt = agent.conversations[0][1].content
@@ -252,7 +179,6 @@ def test_the_sidecar_round_trips_through_the_store(tmp_path):
                 note="gap",
             ),
         ),
-        arcs=(),
         syntheses=(),
     )
     path = tmp_path / "game.eval.jsonl"

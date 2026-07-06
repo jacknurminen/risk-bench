@@ -4,7 +4,7 @@ The evaluation is a re-runnable *derived* artifact, so it lives next to the game
 journal (like the trace sidecar) rather than inside it: the journal is append-only
 and canonical, while a fresh evaluation simply overwrites this file. The format
 mirrors the journal — a header line then one line per occurrence
-(``eval_tag`` / ``eval_arc`` / ``eval_synthesis``), each stamped with the panel
+(``eval_tag`` / ``eval_synthesis``), each stamped with the panel
 member's index, flushed per line, read back tolerantly.
 
 The header records ``coverage`` (the journal record and span counts the evaluation
@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-from risk_bench.runner.evaluation import Arc, Evaluation, EvaluatorTag, Evidence, PlayerSynthesis
+from risk_bench.runner.evaluation import Evaluation, EvaluatorTag, Evidence, PlayerSynthesis
 
 EVALUATION_SCHEMA_VERSION: Final[int] = 1
 
@@ -74,7 +74,7 @@ class EvaluationWriter:
         )
 
     def write_evaluation(self, evaluator_index: int, evaluation: Evaluation) -> None:
-        """Write one member's tags, arcs, and syntheses as separate stamped lines.
+        """Write one member's tags and syntheses as separate stamped lines.
 
         Args:
             evaluator_index: The member's position in the panel roster (the agreement key).
@@ -83,8 +83,6 @@ class EvaluationWriter:
         stamp = {"evaluator_index": evaluator_index, "evaluator": evaluation.evaluator_spec}
         for tag in evaluation.tags:
             self._write_line(record={"type": "eval_tag", **stamp, **_tag_to_json(tag=tag)})
-        for arc in evaluation.arcs:
-            self._write_line(record={"type": "eval_arc", **stamp, **_arc_to_json(arc=arc)})
         for synthesis in evaluation.syntheses:
             self._write_line(record={"type": "eval_synthesis", **stamp, **_synthesis_to_json(synthesis=synthesis)})
 
@@ -149,20 +147,6 @@ def _tag_to_json(tag: EvaluatorTag) -> dict[str, Any]:
         "evidence": [_evidence_to_json(evidence=evidence) for evidence in tag.evidence],
         "confidence": tag.confidence,
         "note": tag.note,
-    }
-
-
-def _arc_to_json(arc: Arc) -> dict[str, Any]:
-    return {
-        "kind": arc.kind,
-        "subject": arc.subject,
-        "object": arc.object,
-        "antecedent": _evidence_to_json(evidence=arc.antecedent),
-        "consequent": _evidence_to_json(evidence=arc.consequent),
-        "outcome": arc.outcome,
-        "intent": arc.intent,
-        "confidence": arc.confidence,
-        "note": arc.note,
     }
 
 

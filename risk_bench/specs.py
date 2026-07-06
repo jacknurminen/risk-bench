@@ -206,7 +206,7 @@ def build_evaluators(
 
 
 def _build_evaluator(index: int, spec: str, settings: Settings, trace: TraceWriter | None) -> Evaluator:
-    # a member emits every tag, arc, and synthesis for the whole game in one response,
+    # a member emits every tag and synthesis for the whole game in one response,
     # so it gets the evaluator budget rather than the per-move agent budget
     agent = build_agent(spec=spec, settings=settings, max_tokens=settings.max_evaluator_tokens)
     if trace is not None:

@@ -6,7 +6,6 @@ from risk_bench.game.events import TurnStarted
 from risk_bench.game.serialization import action_to_json, event_to_json
 from risk_bench.game.types import Territory
 from risk_bench.runner.evaluation import (
-    Arc,
     DimensionProfile,
     Evaluation,
     EvaluatorTag,
@@ -59,19 +58,6 @@ def _write_evaluation(journal_path: Path) -> None:
                 note="thought contradicts the public stance",
             ),
         ),
-        arcs=(
-            Arc(
-                kind="commitment",
-                subject="alice",
-                object="bob",
-                antecedent=Evidence(span=1, quote=None, resolved=True, quote_matched=None),
-                consequent=Evidence(span=2, quote=None, resolved=True, quote_matched=None),
-                outcome="broken",
-                intent="strategic_setup",
-                confidence=3,
-                note="promised, then moved against bob",
-            ),
-        ),
         syntheses=(
             PlayerSynthesis(
                 player="alice",
@@ -112,16 +98,9 @@ def test_view_model_resolves_citations_and_computes_aggregates(tmp_path: Path):
     assert tag["evidence"][1]["resolved"] is False and tag["evidence"][1]["step"] is None
 
     integrity = view_model["aggregate"]["integrity"]
-    assert integrity["total_citations"] == 5  # 2 tag + 2 arc ends + 1 synthesis dimension
+    assert integrity["total_citations"] == 3  # 2 tag + 1 synthesis dimension
     assert integrity["broken_citations"] == 1
 
-    assert view_model["aggregate"]["arc_resolution"]["alice"] == {
-        "arcs": 1,
-        "honoured": 0,
-        "broken": 1,
-        "open": 0,
-        "other": 0,
-    }
     (agreement,) = view_model["aggregate"]["agreement"]
     assert agreement["player"] == "alice" and agreement["behavior"] == "deception" and agreement["count"] == 1
 

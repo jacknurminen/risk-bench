@@ -83,7 +83,7 @@ uv run python -m risk_bench.main tournament anthropic:hi openai:hi random --game
 ```
 
 Evaluate a stored game with a panel of whole-game **evaluators** — models that read the full trace
-offline (a finished or paused game) and emit cited per-turn tags, cross-turn arcs, and a per-player
+offline (a finished or paused game) and emit cited per-turn tags and a per-player
 synthesis into a re-runnable `game.eval.jsonl` sidecar:
 
 ```bash

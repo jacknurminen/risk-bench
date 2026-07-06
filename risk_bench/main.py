@@ -172,13 +172,13 @@ def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
     total_citations, broken_citations = _citation_integrity(records=records)
     console.print(f"\nPanel: [bold]{', '.join(header.panel)}[/bold]")
     console.print(
-        f"Tags: {counts['eval_tag']}  Arcs: {counts['eval_arc']}  Syntheses: {counts['eval_synthesis']}  "
+        f"Tags: {counts['eval_tag']}  Syntheses: {counts['eval_synthesis']}  "
         f"(covers {header.span_count} spans across {header.record_count} records)"
     )
     console.print(f"Broken citations: {broken_citations}/{total_citations}")
 
 
-_EVAL_RECORD_KINDS = ("eval_tag", "eval_arc", "eval_synthesis")
+_EVAL_RECORD_KINDS = ("eval_tag", "eval_synthesis")
 
 
 def _citation_integrity(records: list[dict[str, Any]]) -> tuple[int, int]:
@@ -194,8 +194,6 @@ def _record_evidence(record: dict[str, Any]) -> list[dict[str, Any]]:
     match record.get("type"):
         case "eval_tag":
             return list(record.get("evidence", []))
-        case "eval_arc":
-            return [record["antecedent"], record["consequent"]]
         case "eval_synthesis":
             from_profile = [item for dimension in record.get("profile", []) for item in dimension.get("evidence", [])]
             return from_profile + list(record.get("key_episodes", []))
