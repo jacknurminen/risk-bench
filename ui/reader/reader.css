@@ -247,3 +247,16 @@
   .noteVersion:first-child { border-top: none; }
   .noteMeta { font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); margin-bottom: 3px; }
   .noteText { white-space: pre-wrap; font-size: 12.5px; line-height: 1.5; color: var(--body); }
+
+  /* image export (select blocks, save as one PNG for reports) */
+  body.exporting .shell, body.exporting .shell *,
+  body.exporting .statsBox, body.exporting .statsBox * { cursor: crosshair !important; }
+  .exportHover { outline: 2px dashed var(--gold); outline-offset: 2px; }
+  .exportSel { outline: 2px solid var(--gold); outline-offset: 2px;
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--gold) 16%, transparent); }
+  #exportBtn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  #exportModal { display: none; position: fixed; inset: 0; background: rgba(27,26,23,.34); z-index: 80; align-items: center; justify-content: center; }
+  #exportModal.open { display: flex; }
+  .exportBox { width: min(420px, 92vw); padding: 18px 20px; }
+  .exportBox input { width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 12.5px;
+    padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }

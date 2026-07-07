@@ -19,6 +19,7 @@
       <span style="color:#c7c1b3">·</span>
       <span id="mastWinner"></span>
       <button class="btn" id="gameControl" style="display:none;font-size:10px;padding:4px 10px">⏸ pause game</button>
+      <button class="btn" id="exportBtn" onclick="toggleExport()" style="font-size:10px;padding:4px 10px">✂ export</button>
       <button class="btn" onclick="openStats()" style="font-size:10px;padding:4px 10px">📊 stats</button>
     </div>
   </div>
@@ -133,6 +134,18 @@
     <div id="notesBody"></div>
   </div>
 </div>
+<div id="exportModal" onclick="if(event.target===this)closeExportModal()">
+  <div class="card exportBox">
+    <div class="notesHead"><span class="serif" style="font-size:16px;font-weight:600">✂ Export as image</span>
+      <button class="iconbtn" onclick="closeExportModal()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+    <div class="mono" id="exportMeta" style="font-size:11px;color:var(--mute-2);margin-bottom:10px"></div>
+    <input id="exportName" spellcheck="false" placeholder="file name">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn" onclick="closeExportModal()">back to selecting</button>
+      <button class="btn dark" id="exportSave" onclick="saveExport()">Save PNG</button>
+    </div>
+  </div>
+</div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -157,6 +170,7 @@ window.BOOT = {
 <script src="/assets/reader/evaluate.js"></script>
 <script src="/assets/reader/shell.js"></script>
 <script src="/assets/reader/stats.js"></script>
+<script src="/assets/reader/export.js"></script>
 <script src="/assets/reader/main.js"></script>
 </body>
 </html>
