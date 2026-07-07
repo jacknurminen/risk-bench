@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from risk_bench import specs
 from risk_bench.agents.base import ReasoningEffort
@@ -41,6 +42,18 @@ _GAME_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _LAUNCH_TIMEOUT_SECONDS = 15.0
 
 
+class _RevalidatingStaticFiles(StaticFiles):
+    # the reader's CSS/JS are edited in place and meant to show on a plain browser reload; the
+    # default StaticFiles sends an etag but no Cache-Control, so browsers serve them from the
+    # heuristic cache without revalidating and stale assets linger. "no-cache" keeps the asset
+    # cacheable but forces a conditional request every time — a cheap 304 when unchanged, fresh
+    # bytes the moment a file is edited.
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path=path, scope=scope)
+        response.headers["cache-control"] = "no-cache"
+        return response
+
+
 class _UsageTotals(NamedTuple):
     input_tokens: int | None
     output_tokens: int | None
@@ -67,7 +80,7 @@ def create_app(games_directory: Path) -> FastAPI:
     app = FastAPI(title="risk-bench")
     manager = GameProcessManager()
     app.add_event_handler("shutdown", manager.shutdown)
-    app.mount("/assets", StaticFiles(directory=UI_DIRECTORY), name="assets")
+    app.mount("/assets", _RevalidatingStaticFiles(directory=UI_DIRECTORY), name="assets")
     # traces can be large and the list is polled; totals are recomputed only when a trace changes
     usage_totals_cache: dict[str, tuple[tuple[float, int], _UsageTotals]] = {}
 
