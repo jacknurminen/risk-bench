@@ -99,6 +99,15 @@ function openExportModal() {
 
 function closeExportModal() { el("exportModal").classList.remove("open"); }
 
+/* leave the save dialog but stay in export mode with the selection intact; the toast makes the
+   return visible, since the modal simply vanishing reads as if the button did nothing */
+function backToSelecting() {
+  closeExportModal();
+  if (exportSelection.size) {
+    toast(`${exportSelection.size} block${exportSelection.size === 1 ? "" : "s"} still selected — click blocks to add or remove`);
+  }
+}
+
 function defaultExportName() {
   const turns = [...exportSelection].map(node => node.closest("[data-turn]")?.dataset.turn).filter(Boolean);
   const unique = [...new Set(turns)];

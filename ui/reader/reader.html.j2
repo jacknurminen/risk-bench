@@ -134,14 +134,14 @@
     <div id="notesBody"></div>
   </div>
 </div>
-<div id="exportModal" onclick="if(event.target===this)closeExportModal()">
+<div id="exportModal" onclick="if(event.target===this)backToSelecting()">
   <div class="card exportBox">
     <div class="notesHead"><span class="serif" style="font-size:16px;font-weight:600">✂ Export as image</span>
-      <button class="iconbtn" onclick="closeExportModal()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
+      <button class="iconbtn" onclick="backToSelecting()" style="font-size:18px;color:var(--mute-2)">✕</button></div>
     <div class="mono" id="exportMeta" style="font-size:11px;color:var(--mute-2);margin-bottom:10px"></div>
     <input id="exportName" spellcheck="false" placeholder="file name">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
-      <button class="btn" onclick="closeExportModal()">back to selecting</button>
+      <button class="btn" onclick="backToSelecting()">back to selecting</button>
       <button class="btn dark" id="exportSave" onclick="saveExport()">Save PNG</button>
     </div>
   </div>

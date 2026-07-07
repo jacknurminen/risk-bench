@@ -251,9 +251,14 @@
   /* image export (select blocks, save as one PNG for reports) */
   body.exporting .shell, body.exporting .shell *,
   body.exporting .statsBox, body.exporting .statsBox * { cursor: crosshair !important; }
-  .exportHover { outline: 2px dashed var(--gold); outline-offset: 2px; }
-  .exportSel { outline: 2px solid var(--gold); outline-offset: 2px;
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--gold) 16%, transparent); }
+  .exportHover:not(.exportSel) { outline: 2px dashed var(--gold); outline-offset: 2px; }
+  .exportSel { position: relative; outline: 3px solid var(--gold); outline-offset: 1px; }
+  /* a gold wash over the whole block so the selection reads at a glance; painted above the
+     block's own content (pointer-events:none keeps the click available for deselecting), and
+     stripped before the export clone so it never lands in the saved figure */
+  .exportSel::after { content: ""; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+    border-radius: inherit; background: color-mix(in srgb, var(--gold) 20%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent); }
   #exportBtn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
   #exportModal { display: none; position: fixed; inset: 0; background: rgba(27,26,23,.34); z-index: 80; align-items: center; justify-content: center; }
   #exportModal.open { display: flex; }
