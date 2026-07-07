@@ -155,9 +155,10 @@ async function renderSelectionToPng(nodes) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
     (fontCss ? `<style>${fontCss}</style>` : "") +
     `<foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
-  const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+  // a data: URI, not a blob URL — Chromium's same-origin check for SVG images with
+  // foreignObject rejects blob-loaded ones, which taints the canvas and blocks toBlob
   const image = new Image();
-  image.src = svgUrl;
+  image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   await image.decode();
 
   const scale = Math.min(2, 16000 / width, 16000 / height);  // stay under the canvas dimension cap
@@ -167,7 +168,6 @@ async function renderSelectionToPng(nodes) {
   const context = canvas.getContext("2d");
   context.scale(scale, scale);
   context.drawImage(image, 0, 0);
-  URL.revokeObjectURL(svgUrl);
   return await new Promise((resolve, reject) =>
     canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("canvas.toBlob produced nothing")), "image/png"));
 }
@@ -189,7 +189,11 @@ function inlineComputedStyle(from, to) {
   let css = "";
   for (let i = 0; i < computed.length; i++) {
     const property = computed[i];
-    css += `${property}:${computed.getPropertyValue(property)};`;
+    const value = computed.getPropertyValue(property);
+    // a url() reference to anything but a data: URI taints the canvas (and would not
+    // load inside an SVG image anyway), so drop such properties from the figure
+    if (value.includes("url(") && !value.includes("data:")) continue;
+    css += `${property}:${value};`;
   }
   to.setAttribute("style", css);
 }
@@ -203,7 +207,7 @@ async function embeddedFontCss() {
     const link = document.querySelector('link[href*="fonts.googleapis.com/css"]');
     if (!link) return (fontCssCache = "");
     let css = await (await fetch(link.href)).text();
-    const urls = [...new Set([...css.matchAll(/url\((https:[^)]+?)\)/g)].map(match => match[1]))];
+    const urls = [...new Set([...css.matchAll(/url\(\s*['"]?(https:[^)'"]+)['"]?\s*\)/g)].map(match => match[1]))];
     const dataUrls = await Promise.all(urls.map(async url => {
       const blob = await (await fetch(url)).blob();
       return await new Promise(resolve => {
@@ -212,8 +216,9 @@ async function embeddedFontCss() {
         reader.readAsDataURL(blob);
       });
     }));
-    urls.forEach((url, index) => { css = css.replaceAll(`url(${url})`, `url(${dataUrls[index]})`); });
-    fontCssCache = css;
+    urls.forEach((url, index) => { css = css.replaceAll(url, dataUrls[index]); });
+    // any external reference that slipped through would taint the canvas; system fonts beat no export
+    fontCssCache = /url\(\s*['"]?http/.test(css) ? "" : css;
   } catch {
     toast("webfonts unavailable — exporting with system fonts");
     fontCssCache = "";
