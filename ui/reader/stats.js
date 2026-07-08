@@ -336,26 +336,26 @@ function usageCells(caller) {
 }
 
 // Per seat, the behavior-tag counts for the table, honoring the same agreement filter as the charts:
-// a tag occurrence counts only when its (turn, player, behavior) instance reached a selected agreement
-// level over the FULL panel. Member toggles do not apply here — the table is a whole-panel aggregate.
+// one count per (turn, player, behavior) instance whose panel agreement is a selected level — behavioral
+// frequency, not annotator observations, so a behavior the whole panel flagged counts once, not once per
+// member. Member toggles do not apply here — the table is a whole-panel aggregate; the agreement chips
+// are how you filter it, and byLevel keeps the per-consensus breakdown for the chip tooltip.
 function filteredTableTags() {
-  const perInstance = GAME.players.map(() => ({}));  // seat -> "behavior turn" -> { members:Set, occ }
+  const membersByInstance = GAME.players.map(() => ({}));  // seat -> "behavior turn" -> Set of members
   GAME.commentary.forEach(comment => comment.tags.forEach(tag => {
     const seat = GAME.players.findIndex(player => player.name === tag.player);
     if (seat < 0) return;  // the commentator occasionally invents player names; drop those
     const key = tag.behavior + " " + comment.turn;
-    const instance = perInstance[seat][key] ?? (perInstance[seat][key] = { members: new Set(), occ: 0 });
-    instance.members.add(comment.commentator_index);
-    instance.occ += 1;
+    (membersByInstance[seat][key] ?? (membersByInstance[seat][key] = new Set())).add(comment.commentator_index);
   }));
   return GAME.players.map((_, seat) => {
     const tags = {};
-    for (const [key, instance] of Object.entries(perInstance[seat])) {
-      if (!selectedAgreement.has(instance.members.size)) continue;
+    for (const [key, members] of Object.entries(membersByInstance[seat])) {
+      if (!selectedAgreement.has(members.size)) continue;
       const behavior = key.split(" ")[0];
       const entry = tags[behavior] ?? (tags[behavior] = { count: 0, byLevel: {} });
-      entry.count += instance.occ;
-      entry.byLevel[instance.members.size] = (entry.byLevel[instance.members.size] ?? 0) + 1;
+      entry.count += 1;
+      entry.byLevel[members.size] = (entry.byLevel[members.size] ?? 0) + 1;
     }
     return tags;
   });

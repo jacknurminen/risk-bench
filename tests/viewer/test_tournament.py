@@ -122,6 +122,40 @@ def test_agreement_pools_per_instance_consensus_across_games(tmp_path: Path):
     assert all(agreement["per_player"][seat]["total"] == 0 for seat in range(1, len(PLAYER_NAMES)))
 
 
+def test_table_tags_count_behavior_instances_not_panel_observations(tmp_path: Path):
+    # both members flag deception each game (unanimous), only member 0 flags betrayal (a split); the
+    # table counts each (turn, player, behavior) instance once per game, so panel size never inflates it
+    commentary = [
+        {
+            "turn": 1,
+            "commentator": "anthropic:hi",
+            "commentator_index": 0,
+            "text": "a",
+            "tags": [
+                {"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"},
+                {"player": PLAYER_NAMES[0], "behavior": "betrayal", "note": "n"},
+            ],
+        },
+        {
+            "turn": 1,
+            "commentator": "google:hi",
+            "commentator_index": 1,
+            "text": "g",
+            "tags": [{"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"}],
+        },
+    ]
+    directory = _commentated_tournament(
+        tmp_path=tmp_path, seeds=[11, 12], commentators=["anthropic:hi", "google:hi"], commentary=commentary
+    )
+
+    table = build_tournament_view_model(tournament_directory=directory)["table"]
+
+    # unanimous deception is still one instance per game: 2 across the two games, not 4. Consensus lives
+    # in the % unanimous column, never folded into the count.
+    assert table[0]["tags"] == {"deception": 2, "betrayal": 2}
+    assert all(not row["tags"] for row in table[1:])
+
+
 def test_agreement_is_absent_without_a_panel(tmp_path: Path):
     directory = tournament_directory_with_games(tmp_path=tmp_path, seeds=[11, 12])
 

@@ -246,15 +246,22 @@ def _build_stats(
     for message in messages:
         message_counts[message["sender"]][f"{message['visibility']}_messages"] += 1
 
-    # per player: tag counts summed across the whole panel (the tournament aggregates these). The
-    # game viewer's per-member and agreement views are derived in the browser from the raw commentary.
-    tag_counts: dict[PlayerId, dict[str, int]] = {name: {} for name in player_names}
+    # per player: one count per distinct (turn, behavior) instance, however many panel members flagged it
+    # (or however many times) — behavioral frequency, not annotator observations, so the count is never
+    # inflated by panel size. Consensus is a separate signal (see tournament._aggregate_agreement and the
+    # reader's agreement filter), never folded in here. The per-member and agreement breakdowns the game
+    # viewer draws are derived in the browser from the raw commentary.
+    instances_by_player: dict[PlayerId, set[tuple[int, str]]] = {name: set() for name in player_names}
     for comment in commentary:
         for tag in comment["tags"]:
-            counts = tag_counts.get(tag["player"])
-            if counts is None:  # the commentator occasionally invents player names; drop those
+            player_instances = instances_by_player.get(tag["player"])
+            if player_instances is None:  # the commentator occasionally invents player names; drop those
                 continue
-            counts[tag["behavior"]] = counts.get(tag["behavior"], 0) + 1
+            player_instances.add((comment["turn"], tag["behavior"]))
+    tag_counts: dict[PlayerId, dict[str, int]] = {name: {} for name in player_names}
+    for name, player_instances in instances_by_player.items():
+        for _turn, behavior in player_instances:
+            tag_counts[name][behavior] = tag_counts[name].get(behavior, 0) + 1
 
     return {
         "series": _end_of_turn_series(

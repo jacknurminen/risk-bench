@@ -59,8 +59,9 @@ def test_commentary_records_appear_in_the_view_model(tmp_path: Path):
     assert len(model["commentary"]) == 1
     assert model["commentary"][0]["text"] == "A cagey opening."
     assert model["commentary"][0]["step"] >= 0
-    # tags roll up into the per-player stats; tags for invented player names are dropped
-    assert model["stats"]["per_player"][0]["tags"] == {"turtling": 2}
+    # tags roll up into the per-player stats as distinct (turn, behavior) instances — the same behavior
+    # tagged twice for one player-turn counts once; tags for invented player names are dropped
+    assert model["stats"]["per_player"][0]["tags"] == {"turtling": 1}
     assert all(not player_stats["tags"] for player_stats in model["stats"]["per_player"][1:])
 
 
@@ -115,10 +116,11 @@ def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
     assert {comment["commentator_index"] for comment in model["commentary"]} == {0, 1}
     assert {comment["commentator"] for comment in model["commentary"]} == {"claude-opus-4-8", "gemini-3.1-pro-preview"}
 
-    # tags sum across the panel; the per-member and agreement breakdowns are derived in the viewer
-    # from the raw commentary (each entry keeps its commentator_index), not precomputed here
+    # tags count distinct (turn, behavior) instances, not per-member observations: both members flag the
+    # same strong move on turn 1, so it counts once. The per-member and agreement breakdowns are derived
+    # in the viewer from the raw commentary (each entry keeps its commentator_index), not precomputed here
     first = model["stats"]["per_player"][0]
-    assert first["tags"] == {"strong_move": 2, "deception": 1}
+    assert first["tags"] == {"strong_move": 1, "deception": 1}
     assert "tags_by_commentator" not in first
 
     # the flat per-valence key is the panel consensus (mean across members); the per-member spread
