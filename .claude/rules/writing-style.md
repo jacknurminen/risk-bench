@@ -1,14 +1,14 @@
 # Academic Writing Style Guidelines
 
-These rules govern **prose written for the report**: `docs/report/thesis/thesis.tex`, the
-`docs/report/thesis-md/` chapters, and the `docs/report/notes/` when a note will be paraphrased into
-the thesis. They do **not** apply to code, commit messages, or the development log.
+These rules govern **prose written for the report**: `docs/report/thesis/thesis.tex` and the
+`docs/report/notes/` when a note will be paraphrased into the thesis. They do **not** apply to code,
+commit messages, or the development log.
 
 Two goals reinforce each other here: prose should read in a proper academic register, and it should
 **not** carry the statistical tells of language-model output. A thesis examiner in 2026 knows those
 tells; writing that trips them invites doubt about authorship regardless of the work's quality.
 
-The drafted chapters (`03-methods.md`, `05-discussion.md`) are the reference for voice. Match them.
+The methods and discussion chapters of `thesis.tex` are the reference for voice. Match them.
 
 ## Register and voice
 
