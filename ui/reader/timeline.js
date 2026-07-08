@@ -94,19 +94,21 @@ function renderTimeline() {
 }
 
 function turnCard(turn) {
+  const setup = isSetupTurn(turn);
   const actor = turnActor(turn) || GAME.players[0].name;
+  const accent = setup ? "var(--mute)" : colorOf(actor);  // setup belongs to no seat — a neutral accent
   const expanded = state.expanded.has(turn);
   const pills = tagsForTurn(turn);
   const hasGap = pills.some(t => valenceOf(t.behavior) === "deceptive");
   // the live-commentary toggle also hides the panel's read (tag pills + deception badge) so a human can read unbiased
   const showTags = state.filters.showCommentary;
   const commentary = state.filters.showCommentary ? GAME.commentary.filter(c => c.turn === turn) : [];
-  return `<article class="tcard" data-turn="${turn}" style="border-left-color:${colorOf(actor)}">
+  return `<article class="tcard" data-turn="${turn}" style="border-left-color:${accent}">
     <button class="thead" onclick="toggleExpand(${turn})">
-      <span class="tbadge" style="background:${colorOf(actor)}">${initialsOf(actor)}</span>
+      <span class="tbadge" style="background:${accent}">${setup ? "⚑" : initialsOf(actor)}</span>
       <span class="tmeta">
         <span class="line1">
-          <span class="ttag" style="color:${colorOf(actor)}">${tagOf(actor)}</span>
+          <span class="ttag" style="color:${accent}">${setup ? "setup placement" : tagOf(actor)}</span>
           <span class="tturn">turn ${String(turn).padStart(2, "0")}</span>
           ${hasGap && showTags ? `<span class="gapbadge">⚡ deception gap</span>` : ""}
         </span>
@@ -164,6 +166,7 @@ function traceLine(turn, s, liveAnno) {
       <span class="kindbar" style="background:${kindColor}"></span>
       <span style="flex:1;min-width:0">
         <span class="kindlabel">${kindLabel}</span>
+        ${s.player ? `<span class="tracewho" style="color:${colorOf(s.player)}">${tagOf(s.player)}</span>` : ""}
         <span class="tracetext ${isMsg ? "msg" : "mono"}" style="color:${bodyColor}">${richText(s.text)}</span>
       </span>
       ${anno.length ? `<button class="iconbtn" onclick="toggleAnno(${turn}, ${s.span})" title="annotations on this line" style="display:flex;align-items:center;gap:6px">

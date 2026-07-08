@@ -100,6 +100,10 @@ function turnActor(turn) {
   const ls = spansByTurn.get(turn) || [];
   return (ls.find(s => s.layer === "action") || ls.find(s => s.player) || {}).player || GAME.players[0].name;
 }
+// turn 0 is the initial army placement, where the engine cycles current_player through every seat to place
+// starting armies — it belongs to no single player (phase "setup_placement"), so the timeline labels it by
+// phase rather than picking the misleading owner actorByTurn's last-write-wins would otherwise land on.
+const isSetupTurn = turn => turn === 0;
 const turnStep = turn => { const ls = spansByTurn.get(turn) || []; return ls.length ? Math.max(...ls.map(s => s.step)) : 0; };
 const turnOfStep = step => (steps[step] || {}).turn ?? turns[0];
 /* a short headline for the collapsed card: prefer a win/elimination, else the actor's first message, else its first action */
