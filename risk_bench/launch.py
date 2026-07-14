@@ -18,6 +18,7 @@ from risk_bench.runner.evaluation_store import (
     evaluation_path_for_journal,
     evaluation_trace_path_for_journal,
 )
+from risk_bench.runner.evaluation_versions import archive_current
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal, restore_game
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index, living_players_by_turn
@@ -171,6 +172,9 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
     # the evaluator sweeps every turn present in the trace and must consider every player alive on it
     turns = sorted({span.turn for span in spans})
     living_by_turn = living_players_by_turn(records=records, player_ids=set(restored.state.players), turns=turns)
+    # keep the previous run: archive it aside before the flat sidecar paths are overwritten, so this
+    # run becomes a new version rather than replacing the old one
+    archive_current(journal_path=journal_path)
     # the panel's API calls go to their own trace sidecar, so a re-run overwrites cleanly rather
     # than appending duplicate evaluator calls into the game's own trace
     trace = TraceWriter(path=evaluation_trace_path_for_journal(journal_path=journal_path), append=False)
