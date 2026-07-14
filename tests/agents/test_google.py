@@ -1,7 +1,7 @@
 from google.genai import types
 
-from risk_bench.agents.base import Message
-from risk_bench.agents.google import _parse_response, _to_content
+from risk_bench.agents.base import Message, Response
+from risk_bench.agents.google import _parse_response, _to_content, _with_usage
 
 
 def gemini_function_call_response(thought_signature: bytes | None) -> types.GenerateContentResponse:
@@ -34,3 +34,20 @@ def test_tool_calls_without_signatures_replay_cleanly():
     replayed = _to_content(message=Message(role="assistant", tool_calls=(call,)))
     assert replayed.parts is not None
     assert replayed.parts[0].thought_signature is None
+
+
+def test_usage_keeps_total_input_extracts_the_cached_share_and_bills_thinking_as_output():
+    # Gemini's prompt_token_count already INCLUDES the implicitly-cached share
+    usage = types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=5_000,
+        cached_content_token_count=4_000,
+        candidates_token_count=200,
+        thoughts_token_count=800,
+    )
+
+    response = _with_usage(parsed=Response(text="ok"), usage=usage)
+
+    assert response.input_tokens == 5_000
+    assert response.cache_read_tokens == 4_000
+    assert response.cache_write_tokens == 0  # implicit caching charges no write premium
+    assert response.output_tokens == 1_000  # hidden thinking is billed as output

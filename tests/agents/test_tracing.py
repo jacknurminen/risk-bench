@@ -5,7 +5,13 @@ import pytest
 
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.agents.models import estimate_cost_usd
-from risk_bench.agents.tracing import TraceWriter, TracingAgent, per_turn_usage, trace_path_for_journal
+from risk_bench.agents.tracing import (
+    TraceWriter,
+    TracingAgent,
+    per_turn_usage,
+    trace_path_for_journal,
+    usage_by_caller,
+)
 
 A_TOOL = Tool(name="wave", description="Wave at someone.", parameters={"type": "object", "properties": {}})
 A_CONVERSATION = [Message(role="system", content="be nice"), Message(role="user", content="hello")]
@@ -35,6 +41,8 @@ def test_every_call_is_recorded_with_context_usage_and_payloads(tmp_path: Path):
         tool_calls=(ToolCall(id="call-1", name="wave", arguments={"at": "gpt-5.4"}),),
         input_tokens=120,
         output_tokens=15,
+        cache_write_tokens=80,
+        cache_read_tokens=20,
     )
     agent = TracingAgent(
         agent=ScriptedAgent(response=response), model="claude-sonnet-4-6", caller="claude-sonnet-4-6", writer=writer
@@ -53,6 +61,7 @@ def test_every_call_is_recorded_with_context_usage_and_payloads(tmp_path: Path):
     assert record["tools"][0]["name"] == "wave"
     assert record["response"]["tool_calls"] == [{"id": "call-1", "name": "wave", "arguments": {"at": "gpt-5.4"}}]
     assert (record["input_tokens"], record["output_tokens"]) == (120, 15)
+    assert (record["cache_write_tokens"], record["cache_read_tokens"]) == (80, 20)
     assert record["error"] is None
     assert record["latency_ms"] >= 0
 
@@ -143,6 +152,47 @@ def test_the_trace_lives_next_to_the_journal():
 
 
 def test_cost_estimates_use_the_pricing_table_and_admit_ignorance():
-    known = estimate_cost_usd(model="claude-sonnet-4-6", input_tokens=1_000_000, output_tokens=200_000)
+    known = estimate_cost_usd(
+        model="claude-sonnet-4-6",
+        input_tokens=1_000_000,
+        cache_write_tokens=0,
+        cache_read_tokens=0,
+        output_tokens=200_000,
+    )
     assert known == pytest.approx(3.00 + 0.2 * 15.00)
-    assert estimate_cost_usd(model="some-custom-model", input_tokens=10, output_tokens=10) is None
+    unknown = estimate_cost_usd(
+        model="some-custom-model", input_tokens=10, cache_write_tokens=0, cache_read_tokens=0, output_tokens=10
+    )
+    assert unknown is None
+
+
+def test_cost_estimates_price_the_cached_shares_at_their_own_rates():
+    # opus: input $5, cache write $6.25 (1.25x), cache read $0.50 (0.1x), output $25 per Mtok.
+    # 1M total input of which 200k written to cache and 700k read from it -> 100k uncached.
+    cached = estimate_cost_usd(
+        model="claude-opus-4-8",
+        input_tokens=1_000_000,
+        cache_write_tokens=200_000,
+        cache_read_tokens=700_000,
+        output_tokens=40_000,
+    )
+    assert cached == pytest.approx(0.1 * 5.00 + 0.2 * 6.25 + 0.7 * 0.50 + 0.04 * 25.00)
+    # the same call priced cache-blind would cost 1M x $5 + 40k x $25: caching cuts it by ~60%
+    assert cached is not None and cached < 5.00 + 1.00
+
+
+def test_usage_by_caller_aggregates_cache_shares_into_the_cost(tmp_path: Path):
+    writer = TraceWriter(path=tmp_path / "game.trace.jsonl", append=False)
+    cached_response = Response(
+        text="x", input_tokens=1_000_000, output_tokens=0, cache_write_tokens=0, cache_read_tokens=1_000_000
+    )
+    agent = TracingAgent(
+        agent=ScriptedAgent(response=cached_response), model="claude-sonnet-4-6", caller="sonnet", writer=writer
+    )
+    agent.respond(messages=A_CONVERSATION, tools=[])
+    writer.close()
+
+    entry = usage_by_caller(trace_path=writer.path)["sonnet"]
+
+    assert entry["input_tokens"] == 1_000_000 and entry["cache_read_tokens"] == 1_000_000
+    assert entry["cost_usd"] == pytest.approx(0.30)  # 1M fully cache-read at $0.30/Mtok, not $3.00

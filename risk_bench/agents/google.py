@@ -50,9 +50,20 @@ class GeminiAgent:
         usage = response.usage_metadata
         if usage is None:
             return parsed
-        # Gemini bills hidden thinking as output, so it counts toward output tokens here
-        output_tokens = (usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0)
-        return dataclasses.replace(parsed, input_tokens=usage.prompt_token_count, output_tokens=output_tokens)
+        return _with_usage(parsed=parsed, usage=usage)
+
+
+def _with_usage(parsed: Response, usage: types.GenerateContentResponseUsageMetadata) -> Response:
+    # prompt_token_count already includes the implicitly-cached share, which is billed at the
+    # discounted cached rate; implicit caching charges no write premium. Gemini bills hidden
+    # thinking as output, so it counts toward output tokens here.
+    return dataclasses.replace(
+        parsed,
+        input_tokens=usage.prompt_token_count,
+        output_tokens=(usage.candidates_token_count or 0) + (usage.thoughts_token_count or 0),
+        cache_write_tokens=0,
+        cache_read_tokens=usage.cached_content_token_count or 0,
+    )
 
 
 def _split_system(messages: list[Message]) -> tuple[str | None, list[types.Content]]:

@@ -46,9 +46,22 @@ class AnthropicAgent:
         ) as stream:
             response = stream.get_final_message()
         parsed = _parse_response(content_blocks=response.content)
-        return dataclasses.replace(
-            parsed, input_tokens=response.usage.input_tokens, output_tokens=response.usage.output_tokens
-        )
+        return _with_usage(parsed=parsed, usage=response.usage)
+
+
+def _with_usage(parsed: Response, usage: anthropic.types.Usage) -> Response:
+    # Anthropic reports cache traffic apart from input_tokens (a cache write at 1.25x the input
+    # rate, a cache read at 0.1x); normalize input_tokens to the call's total prompt tokens so
+    # token counts mean the same thing across providers, and keep the cached shares for pricing
+    cache_write_tokens = usage.cache_creation_input_tokens or 0
+    cache_read_tokens = usage.cache_read_input_tokens or 0
+    return dataclasses.replace(
+        parsed,
+        input_tokens=usage.input_tokens + cache_write_tokens + cache_read_tokens,
+        output_tokens=usage.output_tokens,
+        cache_write_tokens=cache_write_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )
 
 
 def _split_system(messages: list[Message]) -> tuple[str | None, list[anthropic.types.MessageParam]]:

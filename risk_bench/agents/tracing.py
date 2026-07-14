@@ -23,28 +23,44 @@ TOKEN_CATEGORY_ORDER: Final[tuple[str, ...]] = ("negotiation", "decision", "comm
 
 
 def usage_by_caller(trace_path: Path) -> dict[str, dict[str, Any]]:
-    """Aggregate a trace file into per-caller call counts, token totals, and cost.
+    """Aggregate a trace file into per-caller call counts, token totals, and cache-aware cost.
 
     Args:
         trace_path: The ``.trace.jsonl`` file; a missing file yields an empty dict.
 
     Returns:
-        Caller mapped to model, calls, errors, token totals, and estimated cost
-        in USD (None when the model's pricing is unknown).
+        Caller mapped to model, calls, errors, token totals (input totals include the cached
+        shares, reported separately as cache_write/cache_read tokens), and estimated cost in
+        USD (None when the model's pricing is unknown).
     """
     usage: dict[str, dict[str, Any]] = {}
     for record in _iter_trace_records(trace_path=trace_path):
         entry = usage.setdefault(
             record["caller"],
-            {"model": record["model"], "calls": 0, "errors": 0, "input_tokens": 0, "output_tokens": 0},
+            {
+                "model": record["model"],
+                "calls": 0,
+                "errors": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_write_tokens": 0,
+                "cache_read_tokens": 0,
+            },
         )
         entry["calls"] += 1
         entry["errors"] += 1 if record.get("error") else 0
         entry["input_tokens"] += record.get("input_tokens") or 0
         entry["output_tokens"] += record.get("output_tokens") or 0
+        # records from before cache accounting carry no cache fields; they price as uncached
+        entry["cache_write_tokens"] += record.get("cache_write_tokens") or 0
+        entry["cache_read_tokens"] += record.get("cache_read_tokens") or 0
     for entry in usage.values():
         entry["cost_usd"] = estimate_cost_usd(
-            model=entry["model"], input_tokens=entry["input_tokens"], output_tokens=entry["output_tokens"]
+            model=entry["model"],
+            input_tokens=entry["input_tokens"],
+            cache_write_tokens=entry["cache_write_tokens"],
+            cache_read_tokens=entry["cache_read_tokens"],
+            output_tokens=entry["output_tokens"],
         )
     return usage
 
@@ -76,10 +92,12 @@ def per_turn_usage(trace_path: Path) -> dict[str, Any]:
         bucket = (
             counts.setdefault(int(record.get("turn", 0)), {})
             .setdefault(caller, {})
-            .setdefault(category, {"input": 0, "output": 0})
+            .setdefault(category, {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0})
         )
         bucket["input"] += record.get("input_tokens") or 0
         bucket["output"] += record.get("output_tokens") or 0
+        bucket["cache_write"] += record.get("cache_write_tokens") or 0
+        bucket["cache_read"] += record.get("cache_read_tokens") or 0
     turns = sorted(counts)
     categories = [
         category
@@ -181,9 +199,12 @@ class TraceWriter:
             ],
             "response": _response_to_json(response=response) if response is not None else None,
             "error": error,
-            # usage duplicated at the top level so aggregation can skip parsing bodies
+            # usage duplicated at the top level so aggregation can skip parsing bodies; the cache
+            # shares let cost estimates price cached input at its real (discounted/premium) rates
             "input_tokens": response.input_tokens if response is not None else None,
             "output_tokens": response.output_tokens if response is not None else None,
+            "cache_write_tokens": response.cache_write_tokens if response is not None else None,
+            "cache_read_tokens": response.cache_read_tokens if response is not None else None,
             "latency_ms": latency_ms,
         }
         line = json.dumps(record) + "\n"
@@ -280,8 +301,26 @@ def _usage_series(
                 model = models[current_caller]
                 tokens_in += bucket["input"]
                 tokens_out += bucket["output"]
-                cost_in += estimate_cost_usd(model=model, input_tokens=bucket["input"], output_tokens=0) or 0.0
-                cost_out += estimate_cost_usd(model=model, input_tokens=0, output_tokens=bucket["output"]) or 0.0
+                cost_in += (
+                    estimate_cost_usd(
+                        model=model,
+                        input_tokens=bucket["input"],
+                        cache_write_tokens=bucket["cache_write"],
+                        cache_read_tokens=bucket["cache_read"],
+                        output_tokens=0,
+                    )
+                    or 0.0
+                )
+                cost_out += (
+                    estimate_cost_usd(
+                        model=model,
+                        input_tokens=0,
+                        cache_write_tokens=0,
+                        cache_read_tokens=0,
+                        output_tokens=bucket["output"],
+                    )
+                    or 0.0
+                )
         input_tokens.append(tokens_in)
         output_tokens.append(tokens_out)
         input_cost.append(round(cost_in, 4))

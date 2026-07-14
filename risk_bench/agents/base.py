@@ -69,14 +69,19 @@ class Message:
 class Response:
     """The model's reply: free text, tool calls, or both.
 
-    Token counts are as reported by the provider (None when not reported);
-    output tokens include any hidden reasoning tokens the provider bills for.
+    Token counts are normalized across providers (None when not reported):
+    ``input_tokens`` is the call's TOTAL prompt tokens — including the cached share, which the
+    providers report differently — of which ``cache_write_tokens`` were written to the provider's
+    prompt cache (billed at a premium) and ``cache_read_tokens`` were served from it (billed at a
+    discount). Output tokens include any hidden reasoning tokens the provider bills for.
     """
 
     text: str | None
     tool_calls: tuple[ToolCall, ...] = field(default_factory=tuple)
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    cache_read_tokens: int | None = None
 
 
 @runtime_checkable

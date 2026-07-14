@@ -3,9 +3,11 @@ from types import SimpleNamespace
 import httpx
 import openai
 import pytest
+from openai.types import CompletionUsage
+from openai.types.completion_usage import PromptTokensDetails
 
-from risk_bench.agents.base import Message, ReasoningEffort, ToolCall
-from risk_bench.agents.openai import OpenAIAgent, _rejects_reasoning_effort, _to_openai_message
+from risk_bench.agents.base import Message, ReasoningEffort, Response, ToolCall
+from risk_bench.agents.openai import OpenAIAgent, _rejects_reasoning_effort, _to_openai_message, _with_usage
 
 
 def _bad_request(message: str, param: str) -> openai.BadRequestError:
@@ -74,3 +76,28 @@ def test_assistant_turn_with_only_tool_calls_omits_content():
             "function": {"name": "attack", "arguments": '{"from": "peru", "to": "brazil"}'},
         }
     ]
+
+
+def test_usage_keeps_total_input_and_extracts_the_cached_share():
+    # OpenAI's prompt_tokens already INCLUDES the cached share, which is billed at a discount
+    usage = CompletionUsage(
+        prompt_tokens=10_000,
+        completion_tokens=300,
+        total_tokens=10_300,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=9_000),
+    )
+
+    response = _with_usage(parsed=Response(text="ok"), usage=usage)
+
+    assert response.input_tokens == 10_000
+    assert response.cache_read_tokens == 9_000
+    assert response.cache_write_tokens == 0  # OpenAI charges no premium for cache writes
+    assert response.output_tokens == 300
+
+
+def test_usage_without_prompt_details_reports_no_cached_share():
+    usage = CompletionUsage(prompt_tokens=100, completion_tokens=10, total_tokens=110)
+
+    response = _with_usage(parsed=Response(text="ok"), usage=usage)
+
+    assert response.input_tokens == 100 and response.cache_read_tokens == 0

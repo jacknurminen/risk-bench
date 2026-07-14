@@ -37,7 +37,7 @@ class OpenAIAgent:
         usage = response.usage
         if usage is None:
             return parsed
-        return dataclasses.replace(parsed, input_tokens=usage.prompt_tokens, output_tokens=usage.completion_tokens)
+        return _with_usage(parsed=parsed, usage=usage)
 
     def _create_chat_completion(
         self,
@@ -61,6 +61,19 @@ class OpenAIAgent:
             # still run (just at the provider's default reasoning depth).
             self._reasoning_effort_supported = False
             return self._create_chat_completion(messages=messages, tools=tools)
+
+
+def _with_usage(parsed: Response, usage: openai.types.CompletionUsage) -> Response:
+    # prompt_tokens already includes the cached share, which is billed at the discounted
+    # cached-input rate; OpenAI charges no premium for cache writes
+    details = usage.prompt_tokens_details
+    return dataclasses.replace(
+        parsed,
+        input_tokens=usage.prompt_tokens,
+        output_tokens=usage.completion_tokens,
+        cache_write_tokens=0,
+        cache_read_tokens=(details.cached_tokens if details is not None else None) or 0,
+    )
 
 
 def _rejects_reasoning_effort(error: openai.BadRequestError) -> bool:
