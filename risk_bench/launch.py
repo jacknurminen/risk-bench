@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
-from risk_bench import specs
+from risk_bench import analysis, specs
 from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
 from risk_bench.config import Settings
 from risk_bench.game.rules import reinforcement_count
@@ -202,7 +202,24 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
                     writer.write_coverage(evaluator_index=index, coverage=coverage)
     finally:
         writer.close()
+
+    # the analysis reads the sidecar we just closed and writes its own derived artifact; a UI-run
+    # evaluation therefore also produces the analysis dump
+    _write_analysis_dump(journal_path=journal_path)
     return writer.path
+
+
+def _write_analysis_dump(journal_path: Path) -> None:
+    # the analysis is a derived convenience computed after the fact; a failure here must never
+    # discard the evaluation that was just written successfully
+    try:
+        analysis.write_analysis(
+            journal_path=journal_path,
+            eval_path=evaluation_path_for_journal(journal_path=journal_path),
+            analysis_path=analysis.analysis_path_for_journal(journal_path=journal_path),
+        )
+    except Exception as error:  # noqa: BLE001 - the analysis must never break a good evaluation run
+        print(f"[analysis-error] {error}", file=sys.stderr)
 
 
 def _gather_evaluations(
