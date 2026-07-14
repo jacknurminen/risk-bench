@@ -12,11 +12,15 @@ from risk_bench.config import Settings
 from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.players.rendering import render_board_text
-from risk_bench.runner.evaluation import Evaluation, Evaluator
-from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
+from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
+from risk_bench.runner.evaluation_store import (
+    EvaluationWriter,
+    evaluation_path_for_journal,
+    evaluation_trace_path_for_journal,
+)
 from risk_bench.runner.game_runner import GameRecord, GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal, restore_game
-from risk_bench.runner.trace_index import TraceSpan, build_trace_index
+from risk_bench.runner.trace_index import TraceSpan, build_trace_index, living_players_by_turn
 
 
 def run_new_game(
@@ -164,11 +168,12 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
     restored = restore_game(path=journal_path)
     spans = build_trace_index(records=records)
     overview = _render_game_overview(state=restored.state)
+    # the evaluator sweeps every turn present in the trace and must consider every player alive on it
+    turns = sorted({span.turn for span in spans})
+    living_by_turn = living_players_by_turn(records=records, player_ids=set(restored.state.players), turns=turns)
     # the panel's API calls go to their own trace sidecar, so a re-run overwrites cleanly rather
     # than appending duplicate evaluator calls into the game's own trace
-    trace = TraceWriter(
-        path=evaluation_path_for_journal(journal_path=journal_path).with_suffix(".trace.jsonl"), append=False
-    )
+    trace = TraceWriter(path=evaluation_trace_path_for_journal(journal_path=journal_path), append=False)
     trace.set_context(turn=restored.state.turn_number, kind="evaluation")
     try:
         evaluators = specs.build_evaluators(evaluator_specs=evaluator_specs, settings=settings, trace=trace)
@@ -177,6 +182,7 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
             players=set(restored.state.players),
             spans=spans,
             overview=overview,
+            living_by_turn=living_by_turn,
             max_workers=min(settings.max_concurrent_commentators, len(evaluators)),
         )
     finally:
@@ -185,9 +191,11 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
     try:
         writer.write_header(panel=evaluator_specs, record_count=len(records), span_count=len(spans))
-        for index, evaluation in enumerate(evaluations):
-            if evaluation is not None:
-                writer.write_evaluation(evaluator_index=index, evaluation=evaluation)
+        for index, result in enumerate(evaluations):
+            if result is not None:
+                writer.write_evaluation(evaluator_index=index, evaluation=result.evaluation)
+                for coverage in result.coverage:
+                    writer.write_coverage(evaluator_index=index, coverage=coverage)
     finally:
         writer.close()
     return writer.path
@@ -198,15 +206,22 @@ def _gather_evaluations(
     players: set[str],
     spans: tuple[TraceSpan, ...],
     overview: str,
+    living_by_turn: dict[int, frozenset[str]],
     max_workers: int,
-) -> list[Evaluation | None]:
+) -> list[EvaluatedGame | None]:
     if not evaluators:
         return []
     # written in panel order regardless of which provider answered first, so the sidecar is stable
-    results: list[Evaluation | None] = [None] * len(evaluators)
+    results: list[EvaluatedGame | None] = [None] * len(evaluators)
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
         futures = {
-            pool.submit(evaluator.evaluate_game, players=players, spans=spans, game_overview=overview): index
+            pool.submit(
+                evaluator.evaluate_game,
+                players=players,
+                spans=spans,
+                game_overview=overview,
+                living_by_turn=living_by_turn,
+            ): index
             for index, evaluator in enumerate(evaluators)
         }
         for future in as_completed(futures):

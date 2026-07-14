@@ -19,9 +19,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
-from risk_bench.runner.evaluation import Evaluation, EvaluatorTag, Evidence, PlayerSynthesis
+from risk_bench.runner.evaluation import Evaluation, EvaluatorTag, Evidence, PlayerSynthesis, TurnCoverage
 
-EVALUATION_SCHEMA_VERSION: Final[int] = 1
+EVALUATION_SCHEMA_VERSION: Final[int] = 2  # v2 adds per-member per-turn eval_coverage records
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,7 @@ class EvaluationHeader:
     """The first line of an evaluation sidecar: the panel and what it was computed against."""
 
     schema_version: int
+    run_id: str  # this run's stable id; the versioning key when several runs are kept side by side
     panel: list[str]  # one model spec per member, in panel order
     record_count: int  # journal records the evaluation covered
     span_count: int  # trace-index spans the evaluation covered
@@ -47,6 +48,22 @@ def evaluation_path_for_journal(journal_path: Path) -> Path:
     return journal_path.with_suffix(".eval.jsonl")
 
 
+def evaluation_trace_path_for_journal(journal_path: Path) -> Path:
+    """Derive the evaluator panel's API-trace sidecar path that belongs to a game journal.
+
+    The panel's provider calls are traced apart from the game's own trace, so a re-run
+    overwrites cleanly; the file appears (and grows per call) as soon as a run starts, which
+    also makes it the progress signal for an evaluation in flight.
+
+    Args:
+        journal_path: The game's ``.jsonl`` journal path.
+
+    Returns:
+        The ``.eval.trace.jsonl`` path next to the journal.
+    """
+    return journal_path.with_suffix(".eval.trace.jsonl")
+
+
 class EvaluationWriter:
     """Writes one evaluation sidecar, overwriting any prior run (latest panel wins)."""
 
@@ -63,13 +80,16 @@ class EvaluationWriter:
             record_count: The number of journal records this evaluation covered.
             span_count: The number of trace-index spans this evaluation covered.
         """
+        created_at = datetime.now(tz=UTC)
         self._write_line(
             record={
                 "type": "eval_header",
                 "schema_version": EVALUATION_SCHEMA_VERSION,
+                # a per-second timestamp is a legible, sortable run id; the writer dedupes collisions
+                "run_id": created_at.strftime("%Y%m%d-%H%M%S"),
                 "panel": panel,
                 "coverage": {"record_count": record_count, "span_count": span_count},
-                "created_at": datetime.now(tz=UTC).isoformat(),
+                "created_at": created_at.isoformat(),
             }
         )
 
@@ -85,6 +105,28 @@ class EvaluationWriter:
             self._write_line(record={"type": "eval_tag", **stamp, **_tag_to_json(tag=tag)})
         for synthesis in evaluation.syntheses:
             self._write_line(record={"type": "eval_synthesis", **stamp, **_synthesis_to_json(synthesis=synthesis)})
+
+    def write_coverage(self, evaluator_index: int, coverage: TurnCoverage) -> None:
+        """Write one member's forced-consideration bookkeeping for one turn.
+
+        The record is the consideration-coverage denominator: which living players the member
+        tagged, marked as an explicit no-op, or (the integrity signal) failed to consider at all.
+
+        Args:
+            evaluator_index: The member's position in the panel roster.
+            coverage: The turn's living / tagged / no-op / missing player sets.
+        """
+        self._write_line(
+            record={
+                "type": "eval_coverage",
+                "evaluator_index": evaluator_index,
+                "turn": coverage.turn,
+                "living": list(coverage.living),
+                "tagged": list(coverage.tagged),
+                "no_behaviour": list(coverage.no_behaviour),
+                "missing": list(coverage.missing),
+            }
+        )
 
     def close(self) -> None:
         """Close the underlying file."""
@@ -132,6 +174,8 @@ def evaluation_header(records: list[dict[str, Any]]) -> EvaluationHeader | None:
     coverage = data.get("coverage", {})
     return EvaluationHeader(
         schema_version=int(data.get("schema_version", EVALUATION_SCHEMA_VERSION)),
+        # runs written before versioning carried no run id; the caller derives one from created_at
+        run_id=str(data.get("run_id", "")),
         panel=[str(spec) for spec in data.get("panel", [])],
         record_count=int(coverage.get("record_count", 0)),
         span_count=int(coverage.get("span_count", 0)),
