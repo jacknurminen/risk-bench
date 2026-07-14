@@ -76,10 +76,12 @@ def _to_openai_message(message: Message) -> openai.types.chat.ChatCompletionMess
 
     if message.role == "assistant":
         assistant: openai.types.chat.ChatCompletionAssistantMessageParam = {"role": "assistant"}
-        if message.content:
-            assistant["content"] = message.content
         if message.tool_calls:
             assistant["tool_calls"] = [_to_openai_tool_call(call=call) for call in message.tool_calls]
+        # the API rejects an assistant turn carrying neither content nor tool_calls, so an
+        # empty turn (e.g. the model spent its whole budget on reasoning) must send "" text
+        if message.content or not message.tool_calls:
+            assistant["content"] = message.content or ""
         return assistant
 
     return {"role": "user", "content": message.content or ""}

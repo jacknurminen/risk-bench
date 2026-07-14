@@ -4,8 +4,8 @@ import httpx
 import openai
 import pytest
 
-from risk_bench.agents.base import Message, ReasoningEffort
-from risk_bench.agents.openai import OpenAIAgent, _rejects_reasoning_effort
+from risk_bench.agents.base import Message, ReasoningEffort, ToolCall
+from risk_bench.agents.openai import OpenAIAgent, _rejects_reasoning_effort, _to_openai_message
 
 
 def _bad_request(message: str, param: str) -> openai.BadRequestError:
@@ -52,3 +52,25 @@ def test_agent_drops_reasoning_effort_and_retries_when_the_model_rejects_it(monk
     assert completions.efforts_seen[0] == "low"  # first attempt sent the effort
     assert isinstance(completions.efforts_seen[1], openai.Omit)  # retry dropped it
     assert agent._reasoning_effort_supported is False  # and it stays off for later calls
+
+
+def test_empty_assistant_turn_converts_with_empty_content_not_a_bare_message():
+    # A replayed assistant turn can be empty (the model spent its whole budget on reasoning);
+    # the API 400s on an assistant message that has neither content nor tool_calls
+    assert _to_openai_message(message=Message(role="assistant", content="")) == {"role": "assistant", "content": ""}
+    assert _to_openai_message(message=Message(role="assistant", content=None)) == {"role": "assistant", "content": ""}
+
+
+def test_assistant_turn_with_only_tool_calls_omits_content():
+    call = ToolCall(id="call_1", name="attack", arguments={"from": "peru", "to": "brazil"})
+
+    converted = _to_openai_message(message=Message(role="assistant", content=None, tool_calls=(call,)))
+
+    assert "content" not in converted
+    assert converted["tool_calls"] == [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "attack", "arguments": '{"from": "peru", "to": "brazil"}'},
+        }
+    ]
