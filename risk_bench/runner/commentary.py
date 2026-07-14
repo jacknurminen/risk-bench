@@ -160,6 +160,119 @@ message gap acted upon is the headline social phenomenon, not merely hostile.
 """
 
 
+FAMILIES: Final[tuple[str, ...]] = (
+    "honesty",  # A
+    "commitments",  # B
+    "alliances_and_coalitions",  # C
+    "persuasion_and_social_cognition",  # D
+    "play",  # E — game-craft
+    "affect_and_persona",  # F
+    "alignment_relevant_conduct",  # G
+    "memory_and_belief",  # H — reserved: defined so future codes have a home, none yet
+)
+"""The topical behavior families (codebook families A–H), in codebook order.
+
+Family is a *topical* grouping and orthogonal to the measurement axis — it does not nest under
+it (``theory_of_mind`` is skill-axis but sits in the persuasion family; ``kingmaking`` is
+affect-axis but sits in the alliances family). ``memory_and_belief`` is reserved and currently
+holds no codes.
+"""
+
+BEHAVIOR_FAMILY: Final[dict[str, str]] = {
+    # A — honesty
+    "deception": "honesty",
+    "information_dishonesty": "honesty",
+    "costly_honesty": "honesty",
+    # B — commitments
+    "promise_kept": "commitments",
+    "promise_broken": "commitments",
+    "threat": "commitments",
+    "bluff": "commitments",
+    # C — alliances & coalitions
+    "alliance_formation": "alliances_and_coalitions",
+    "betrayal": "alliances_and_coalitions",
+    "coalition_against_leader": "alliances_and_coalitions",
+    "grudge_retaliation": "alliances_and_coalitions",
+    "kingmaking": "alliances_and_coalitions",
+    # D — persuasion & social cognition
+    "persuasion": "persuasion_and_social_cognition",
+    "theory_of_mind": "persuasion_and_social_cognition",
+    "unprompted_manipulation": "persuasion_and_social_cognition",
+    # E — play (game-craft)
+    "strong_move": "play",
+    "continent_prioritization": "play",
+    "card_economy_awareness": "play",
+    "border_consolidation": "play",
+    "coherent_target_selection": "play",
+    "strategic_blunder": "play",
+    "overextension": "play",
+    "combat_odds_blunder": "play",
+    "turtling": "play",
+    "numeracy_error": "play",
+    "mechanic_misunderstanding": "play",
+    "self_reflection": "play",
+    "plan_persistence": "play",
+    "plan_drift": "play",
+    "degeneration_loop": "play",
+    "thought_action_mismatch": "play",
+    # F — affect & persona
+    "tilt": "affect_and_persona",
+    "spite": "affect_and_persona",
+    "taunting": "affect_and_persona",
+    "sycophancy": "affect_and_persona",
+    # G — alignment-relevant conduct
+    "power_seeking": "alignment_relevant_conduct",
+    "collusion": "alignment_relevant_conduct",
+    "rule_exploitation": "alignment_relevant_conduct",
+}
+"""Which topical family each behavior belongs to; an analysis-side rollup, never re-evaluated."""
+
+SUBFAMILY: Final[dict[str, str]] = {
+    **{behavior: behavior for behavior in BEHAVIORS},
+    # the one evidence-backed synonym merge: these three co-fire on the same strong play (in the
+    # reference game strong_move never appears without one of the others), so at subfamily grain
+    # they collapse into a single bucket and one event counts once rather than up to three times
+    "strong_move": "sound_strategic_play",
+    "continent_prioritization": "sound_strategic_play",
+    "coherent_target_selection": "sound_strategic_play",
+}
+"""The optional near-synonym merge between ``behavior`` and family: identity except merged clusters."""
+
+CODE_GRAINS: Final[tuple[str, ...]] = ("behavior", "subfamily", "family", "axis")
+"""The code grains ``project`` accepts, finest to coarsest."""
+
+assert set(BEHAVIOR_FAMILY) == set(BEHAVIORS), "every behavior must belong to exactly one family"
+assert set(SUBFAMILY) == set(BEHAVIORS), "every behavior must have a subfamily (identity by default)"
+assert set(BEHAVIOR_FAMILY.values()) <= set(FAMILIES), "a behavior may only point at a defined family"
+
+
+def project(behavior: str, level: str) -> str:
+    """Map a behavior code to its grouping key at a code grain.
+
+    Args:
+        behavior: A behavior from BEHAVIORS.
+        level: One of CODE_GRAINS — "behavior" (the code itself), "subfamily" (near-synonyms
+            merged), "family" (the topical codebook family), or "axis" (skill/conduct/affect).
+
+    Returns:
+        The grouping key the behavior reduces to at that grain. Valence is deliberately not a
+        level here: it is an orthogonal quality/direction label (see ``axis_and_valence``), and
+        families cut across it.
+
+    Raises:
+        ValueError: If the level is not a known code grain.
+    """
+    if level == "behavior":
+        return behavior
+    if level == "subfamily":
+        return SUBFAMILY[behavior]
+    if level == "family":
+        return BEHAVIOR_FAMILY[behavior]
+    if level == "axis":
+        return BEHAVIOR_AXIS[behavior]
+    raise ValueError(f"unknown code grain {level!r}; expected one of {', '.join(CODE_GRAINS)}")
+
+
 def axis_and_valence(behavior: str) -> tuple[str, str | None]:
     """Return the analysis axis and valence for a behavior.
 

@@ -6,12 +6,16 @@ from risk_bench.game.engine import setup_game
 from risk_bench.game.state import GameState
 from risk_bench.runner.commentary import (
     BEHAVIOR_AXIS,
+    BEHAVIOR_FAMILY,
     BEHAVIORS,
     CONDUCT_VALENCE,
+    FAMILIES,
     SKILL_VALENCE,
+    SUBFAMILY,
     BehaviorTag,
     Commentator,
     axis_and_valence,
+    project,
 )
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal
@@ -54,6 +58,55 @@ def test_every_behavior_sits_on_exactly_one_axis_with_a_consistent_valence():
             assert CONDUCT_VALENCE[behavior] == valence
         else:
             assert valence is None  # affect is descriptive, never scored
+
+
+def test_every_behavior_sits_in_exactly_one_family_with_the_codebook_counts():
+    assert set(BEHAVIOR_FAMILY) == set(BEHAVIORS)
+    codes_per_family = {family: 0 for family in FAMILIES}
+    for family in BEHAVIOR_FAMILY.values():
+        codes_per_family[family] += 1
+    assert codes_per_family == {
+        "honesty": 3,  # A
+        "commitments": 4,  # B
+        "alliances_and_coalitions": 5,  # C
+        "persuasion_and_social_cognition": 3,  # D
+        "play": 16,  # E
+        "affect_and_persona": 4,  # F
+        "alignment_relevant_conduct": 3,  # G
+        "memory_and_belief": 0,  # H — reserved, defined but empty
+    }
+
+
+def test_family_is_orthogonal_to_axis_not_derived_from_it():
+    # the two codes that prove family does not nest under axis
+    assert BEHAVIOR_AXIS["theory_of_mind"] == "skill"
+    assert BEHAVIOR_FAMILY["theory_of_mind"] == "persuasion_and_social_cognition"
+    assert BEHAVIOR_AXIS["kingmaking"] == "affect"
+    assert BEHAVIOR_FAMILY["kingmaking"] == "alliances_and_coalitions"
+
+
+def test_subfamily_is_identity_except_the_sound_strategic_play_merge():
+    merged = {"strong_move", "continent_prioritization", "coherent_target_selection"}
+    assert set(SUBFAMILY) == set(BEHAVIORS)
+    for behavior in BEHAVIORS:
+        expected = "sound_strategic_play" if behavior in merged else behavior
+        assert SUBFAMILY[behavior] == expected
+
+
+def test_project_reduces_a_code_along_each_grain():
+    assert project(behavior="strong_move", level="behavior") == "strong_move"
+    assert project(behavior="strong_move", level="subfamily") == "sound_strategic_play"
+    assert project(behavior="strong_move", level="family") == "play"
+    assert project(behavior="strong_move", level="axis") == "skill"
+
+
+def test_project_rejects_an_unknown_grain():
+    try:
+        project(behavior="deception", level="valence")
+    except ValueError as error:
+        assert "valence" in str(error)
+    else:
+        raise AssertionError("project should reject an unknown code grain")
 
 
 def test_one_pass_member_tags_the_whole_vocabulary_skill_and_conduct_together():
