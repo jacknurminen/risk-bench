@@ -25,6 +25,7 @@ def render_reader_html(
     evaluate_url: str,
     verifications_url: str,
     trace_url: str,
+    analysis_url: str,
 ) -> str:
     """Render the unified evaluation reader: the game timeline with the panel's read merged in.
 
@@ -41,6 +42,8 @@ def render_reader_html(
         evaluate_url: The URL the page POSTs an evaluator panel to, to start a run.
         verifications_url: The URL human tag-verifications are PUT to.
         trace_url: The URL serving the game's API call trace (feeds the stats modal's call inspector).
+        analysis_url: The URL serving the evaluation-analysis artifact (feeds the stats modal's
+            evaluation sheet).
 
     Returns:
         A complete HTML document with the game data, evaluation, and board map embedded.
@@ -55,6 +58,7 @@ def render_reader_html(
         evaluate_url_json=json.dumps(evaluate_url),
         verifications_url_json=json.dumps(verifications_url),
         trace_url_json=json.dumps(trace_url),
+        analysis_url_json=json.dumps(analysis_url),
         board_svg=_BOARD_SVG,
     )
 
@@ -85,6 +89,7 @@ def render_reader_export_html(game_view_model: dict[str, Any], evaluation_view_m
         evaluate_url="",
         verifications_url="",
         trace_url="",
+        analysis_url="",
     )
     return _inline_assets(html=html)
 

@@ -11,8 +11,10 @@ from risk_bench.runner.evaluation import (
     EvaluatorTag,
     Evidence,
     PlayerSynthesis,
+    TurnCoverage,
 )
 from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
+from risk_bench.runner.evaluation_versions import version_for
 from risk_bench.runner.verification_store import verifications_path_for_journal, write_verification
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 
@@ -76,6 +78,12 @@ def _write_evaluation(journal_path: Path) -> None:
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
     writer.write_header(panel=["anthropic:hi"], record_count=5, span_count=4)
     writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
+    writer.write_coverage(
+        evaluator_index=0,
+        coverage=TurnCoverage(
+            turn=1, living=("alice", "bob", "carla"), tagged=("alice",), no_behaviour=("bob", "carla"), missing=()
+        ),
+    )
     writer.close()
 
 
@@ -84,11 +92,18 @@ def test_view_model_resolves_citations_and_computes_aggregates(tmp_path: Path):
     _write_journal(path=journal_path)
     _write_evaluation(journal_path=journal_path)
 
-    view_model = build_evaluation_view_model(journal_path=journal_path)
+    view_model = build_evaluation_view_model(
+        journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+    )
 
     assert view_model["has_evaluation"] is True
     assert [player["name"] for player in view_model["players"]] == ["alice", "bob", "carla"]
     assert len(view_model["spans"]) == 4
+
+    # the vocabulary ships every code-grain projection so the client can re-group tags without a round-trip
+    strong_move = next(entry for entry in view_model["vocabulary"] if entry["behavior"] == "strong_move")
+    assert strong_move["subfamily"] == "sound_strategic_play"
+    assert strong_move["family"] == "play" and strong_move["axis"] == "skill"
 
     (member,) = view_model["members"]
     (tag,) = member["tags"]
@@ -103,6 +118,12 @@ def test_view_model_resolves_citations_and_computes_aggregates(tmp_path: Path):
 
     (agreement,) = view_model["aggregate"]["agreement"]
     assert agreement["player"] == "alice" and agreement["behavior"] == "deception" and agreement["count"] == 1
+
+    # the per-(member, turn) consideration bookkeeping rides along for the stats coverage grid
+    (consideration,) = view_model["consideration"]
+    assert consideration["evaluator_index"] == 0 and consideration["turn"] == 1
+    assert consideration["tagged"] == ["alice"] and consideration["no_behaviour"] == ["bob", "carla"]
+    assert consideration["missing"] == []
 
 
 def test_view_model_stamps_human_verified_tags(tmp_path: Path):
@@ -133,7 +154,9 @@ def test_view_model_stamps_human_verified_tags(tmp_path: Path):
         },
     )
 
-    view_model = build_evaluation_view_model(journal_path=journal_path)
+    view_model = build_evaluation_view_model(
+        journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+    )
 
     (member,) = view_model["members"]
     (tag,) = member["tags"]
@@ -148,9 +171,12 @@ def test_view_model_without_a_sidecar_offers_only_the_run_controls(tmp_path: Pat
     journal_path = tmp_path / "game.jsonl"
     _write_journal(path=journal_path)
 
-    view_model = build_evaluation_view_model(journal_path=journal_path)
+    view_model = build_evaluation_view_model(
+        journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+    )
 
     assert view_model["has_evaluation"] is False
     assert view_model["members"] == []
     assert view_model["coverage"] is None
+    assert view_model["consideration"] == []
     assert len(view_model["spans"]) == 4  # the trace still renders so the page can show the game

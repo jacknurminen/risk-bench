@@ -26,8 +26,9 @@ class GameProcessManager:
         self._context = multiprocessing.get_context("spawn")
         self._processes: dict[str, BaseProcess] = {}
         # evaluation workers are tracked apart from game workers: a game may be evaluated while
-        # it is itself paused, so the two must not collide on the same game id
-        self._evaluations: dict[str, BaseProcess] = {}
+        # it is itself paused, so the two must not collide on the same game id. Each worker is
+        # kept with its panel specs so progress reporting knows how many calls to expect.
+        self._evaluations: dict[str, tuple[BaseProcess, list[str]]] = {}
 
     def launch_game(
         self,
@@ -80,7 +81,7 @@ class GameProcessManager:
         arguments = (str(log_path), str(journal_path), evaluator_specs)
         process = self._context.Process(target=_run_evaluation_in_worker, args=arguments, daemon=True)
         process.start()
-        self._evaluations[game_id] = process
+        self._evaluations[game_id] = (process, list(evaluator_specs))
 
     def is_running(self, game_id: str) -> bool:
         """Tell whether the game's worker process is currently alive.
@@ -108,13 +109,26 @@ class GameProcessManager:
         Returns:
             True while an evaluation runs; exited workers are reaped on the way.
         """
-        process = self._evaluations.get(game_id)
-        if process is None:
+        entry = self._evaluations.get(game_id)
+        if entry is None:
             return False
-        if process.is_alive():
+        if entry[0].is_alive():
             return True
         del self._evaluations[game_id]
         return False
+
+    def evaluating_panel(self, game_id: str) -> list[str] | None:
+        """The panel specs of the game's running evaluation, in panel order.
+
+        Args:
+            game_id: The game to check.
+
+        Returns:
+            One model spec per member while an evaluation runs, else None.
+        """
+        if not self.is_evaluating(game_id=game_id):
+            return None
+        return self._evaluations[game_id][1]
 
     def pause_game(self, game_id: str) -> bool:
         """Terminate the game's worker; the per-line-flushed journal keeps it resumable.

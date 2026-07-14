@@ -7,47 +7,54 @@ jump to it. It also computes the deterministic integrity rate and the cross-memb
 """
 
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from risk_bench import specs
-from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
-from risk_bench.runner.evaluation_store import (
-    evaluation_header,
-    evaluation_path_for_journal,
-    read_evaluation,
-)
+from risk_bench.analysis import metrics
+from risk_bench.runner.commentary import BEHAVIOR_FAMILY, BEHAVIORS, SUBFAMILY, axis_and_valence
+from risk_bench.runner.evaluation_store import evaluation_header, read_evaluation
+from risk_bench.runner.evaluation_versions import EvaluationVersion, list_versions
 from risk_bench.runner.journal import read_journal
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index
-from risk_bench.runner.verification_store import read_verifications, verifications_path_for_journal
+from risk_bench.runner.verification_store import read_verifications
 
 _VALENCE_BY_BEHAVIOR: dict[str, str | None] = {
     behavior: axis_and_valence(behavior=behavior)[1] for behavior in BEHAVIORS
 }
 
-# the full behaviour vocabulary, in canonical order, so the axis filters
-# can offer exactly what the LLM panel uses — grouped by axis, coloured by valence, on the client
+# the full behaviour vocabulary, in canonical order, so the axis filters can offer exactly what
+# the LLM panel uses — grouped by axis, coloured by valence, on the client. Each entry also
+# carries the behavior's projection to every code grain (subfamily, family), so the stats page
+# can re-group tags at a coarser grain client-side without a server round-trip.
 _VOCABULARY: list[dict[str, str | None]] = [
     {
         "behavior": behavior,
         "axis": axis_and_valence(behavior=behavior)[0],
         "valence": axis_and_valence(behavior=behavior)[1],
+        "subfamily": SUBFAMILY[behavior],
+        "family": BEHAVIOR_FAMILY[behavior],
     }
     for behavior in BEHAVIORS
 ]
 
 
-def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
-    """Build the evaluation page's view model from a game journal and its eval sidecar.
+def build_evaluation_view_model(journal_path: Path, version: EvaluationVersion | None) -> dict[str, Any]:
+    """Build the evaluation page's view model for one evaluation version of a game.
 
     Args:
         journal_path: The game journal to evaluate against.
+        version: The evaluation run to render (its own eval + verifications sidecars), or None to
+            render no evaluation (the page then shows only the configure-and-run controls). The
+            caller resolves this via ``evaluation_versions.version_for``; pass the current run for
+            the default view.
 
     Returns:
         A JSON-serializable dict with the trace index, the panel roster, each member's
-        resolved tags/syntheses, and the cross-member aggregates. ``has_evaluation`` is
-        False (and members empty) when no sidecar exists yet — the page then shows only the
-        configure-and-run controls.
+        resolved tags/syntheses, the cross-member aggregates, and the list of available
+        evaluation versions (``version`` names the one rendered). ``has_evaluation`` is
+        False (and members empty) when no evaluation exists yet.
 
     Raises:
         ValueError: If the file is not a game journal.
@@ -60,10 +67,10 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
     spans = build_trace_index(records=records)
     span_by_id = {span.span: span for span in spans}
 
-    eval_records = read_evaluation(path=evaluation_path_for_journal(journal_path=journal_path))
+    eval_records = read_evaluation(path=version.eval_path) if version is not None else []
     eval_header = evaluation_header(records=eval_records)
     roster = _roster(panel_specs=eval_header.panel if eval_header else [], eval_records=eval_records)
-    verified_keys = _verified_tag_keys(journal_path=journal_path)
+    verified_keys = _verified_tag_keys(path=version.verifications_path) if version is not None else set()
     members = _members(eval_records=eval_records, roster=roster, span_by_id=span_by_id, verified_keys=verified_keys)
 
     return {
@@ -76,11 +83,28 @@ def build_evaluation_view_model(journal_path: Path) -> dict[str, Any]:
         "tag_valence": _VALENCE_BY_BEHAVIOR,
         "vocabulary": _VOCABULARY,
         "coverage": _coverage(eval_header=eval_header, journal_span_count=len(spans)),
+        "consideration": _consideration_records(eval_records=eval_records),
         "panel": roster,
         "members": members,
         "annotators": _annotators(roster=roster),
         "aggregate": _aggregate(members=members),
+        # the runs the user can switch between; ``version`` is the one rendered here
+        "versions": _versions(journal_path=journal_path),
+        "version": version.run_id if version is not None else None,
     }
+
+
+def _versions(journal_path: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "run_id": version.run_id,
+            "created_at": version.created_at,
+            "is_current": version.is_current,
+            "panel": version.panel,
+            "labels": _member_labels(member_specs=version.panel),
+        }
+        for version in list_versions(journal_path=journal_path)
+    ]
 
 
 def _span_view(span: TraceSpan) -> dict[str, Any]:
@@ -92,6 +116,23 @@ def _span_view(span: TraceSpan) -> dict[str, Any]:
         "player": span.player,
         "text": span.text,
     }
+
+
+def _consideration_records(eval_records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # the per-(member, turn) forced-consideration bookkeeping, passed through for the stats
+    # modal's coverage grid; empty for pre-v2 sidecars (no per-turn sweep ran)
+    return [
+        {
+            "evaluator_index": record["evaluator_index"],
+            "turn": record["turn"],
+            "living": record.get("living", []),
+            "tagged": record.get("tagged", []),
+            "no_behaviour": record.get("no_behaviour", []),
+            "missing": record.get("missing", []),
+        }
+        for record in eval_records
+        if record.get("type") == "eval_coverage"
+    ]
 
 
 def _coverage(eval_header: Any, journal_span_count: int) -> dict[str, Any] | None:
@@ -120,7 +161,7 @@ def _roster(panel_specs: list[str], eval_records: list[dict[str, Any]]) -> list[
     return [{"index": index, "spec": spec, "label": label} for (index, spec), label in zip(members, labels)]
 
 
-def _member_labels(member_specs: list[str | None]) -> list[str]:
+def _member_labels(member_specs: Sequence[str | None]) -> list[str]:
     resolved = [_resolve_member_label(spec=spec) for spec in member_specs]
     base_counts = Counter(resolved)
     # the same model run at two efforts shares a base label; append its index to keep members distinct
@@ -141,8 +182,8 @@ def _annotators(roster: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [{"index": member["index"], "label": member["label"], "spec": member["spec"]} for member in roster]
 
 
-def _verified_tag_keys(journal_path: Path) -> set[tuple[int, str, str, int]]:
-    records = read_verifications(path=verifications_path_for_journal(journal_path=journal_path))
+def _verified_tag_keys(path: Path) -> set[tuple[int, str, str, int]]:
+    records = read_verifications(path=path)
     return {(record["evaluator_index"], record["player"], record["behavior"], record["turn"]) for record in records}
 
 
@@ -224,51 +265,10 @@ def _evidence_view(evidence: dict[str, Any], span_by_id: dict[int, TraceSpan]) -
 
 
 def _aggregate(members: list[dict[str, Any]]) -> dict[str, Any]:
+    # the integrity rate and cross-member agreement live in analysis.metrics, so the reader and the
+    # post-eval analysis dump report the same numbers from one implementation. Agreement is matched
+    # at (behavior, turn) — the 1:1 grain; coarser code grains over-credit matching (see metrics)
     return {
-        "integrity": _integrity(members=members),
-        "agreement": _tag_agreement(members=members),
+        "integrity": metrics.integrity(members=members),
+        "agreement": metrics.tag_agreement(members=members, code_grain="behavior", locus_grain="turn"),
     }
-
-
-def _integrity(members: list[dict[str, Any]]) -> dict[str, int]:
-    total, broken, quotes, quote_mismatches = 0, 0, 0, 0
-    for member in members:
-        for evidence in _all_evidence(member=member):
-            total += 1
-            broken += 0 if evidence["resolved"] else 1
-            if evidence["quote"] is not None:
-                quotes += 1
-                quote_mismatches += 0 if evidence["quote_matched"] else 1
-    return {
-        "total_citations": total,
-        "broken_citations": broken,
-        "quotes": quotes,
-        "quote_mismatches": quote_mismatches,
-    }
-
-
-def _all_evidence(member: dict[str, Any]) -> list[dict[str, Any]]:
-    evidence = [item for tag in member["tags"] for item in tag["evidence"]]
-    for synthesis in member["syntheses"]:
-        evidence += [item for dimension in synthesis["profile"] for item in dimension["evidence"]]
-        evidence += synthesis["key_episodes"]
-    return evidence
-
-
-def _tag_agreement(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    # for each (player, behavior, turn) tagged by anyone, which members flagged it — the agreement signal
-    flaggers: dict[tuple[str, str, int], set[int]] = {}
-    for member in members:
-        for tag in member["tags"]:
-            key = (tag["player"], tag["behavior"], tag["turn"])
-            flaggers.setdefault(key, set()).add(member["index"])
-    return [
-        {
-            "player": player,
-            "behavior": behavior,
-            "turn": turn,
-            "members": sorted(indices),
-            "count": len(indices),
-        }
-        for (player, behavior, turn), indices in sorted(flaggers.items(), key=lambda item: (item[0][2], item[0][0]))
-    ]

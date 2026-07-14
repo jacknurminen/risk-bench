@@ -10,6 +10,7 @@ from risk_bench import launch, specs
 from risk_bench.api.app import create_app
 from risk_bench.config import load_settings
 from risk_bench.players.llm import ProviderUnavailableError
+from risk_bench.runner import evaluation_versions
 from risk_bench.runner.evaluation_store import evaluation_header, read_evaluation
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import TournamentRunner
@@ -123,7 +124,10 @@ def view(
     """Render a game journal into a self-contained HTML reader, panel tags and annotations included."""
     html = render_reader_export_html(
         game_view_model=build_view_model(journal_path=journal),
-        evaluation_view_model=build_evaluation_view_model(journal_path=journal),
+        # the export renders the current (newest) evaluation run
+        evaluation_view_model=build_evaluation_view_model(
+            journal_path=journal, version=evaluation_versions.version_for(journal_path=journal, run_id=None)
+        ),
     )
     destination = output if output is not None else journal.with_suffix(".html")
     destination.write_text(html, encoding="utf-8")

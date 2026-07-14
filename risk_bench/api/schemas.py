@@ -75,6 +75,8 @@ class TagVerificationBody(BaseModel):
 
     The first four fields identify the tag — the same ``(evaluator_index, player, behavior,
     turn)`` key the agreement aggregate groups on — and ``verified`` is the state to set.
+    ``version`` is the evaluation run whose verifications the verdict belongs to (None = current),
+    since verifications are kept per version.
     """
 
     evaluator_index: int
@@ -82,6 +84,7 @@ class TagVerificationBody(BaseModel):
     behavior: str
     turn: int
     verified: bool
+    version: str | None = None
 
 
 class ModelCatalogResponse(BaseModel):

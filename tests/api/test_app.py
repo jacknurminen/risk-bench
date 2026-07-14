@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from risk_bench.api.app import create_app
+from risk_bench.api.processes import GameProcessManager
 from risk_bench.runner.evaluation import Evaluation, EvaluatorTag
 from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
@@ -396,3 +397,217 @@ def test_verifying_a_tag_the_evaluation_does_not_hold_is_not_found(tmp_path: Pat
     response = client.put(f"/api/games/{game_id}/verifications", json={**wrong_turn, "verified": True})
 
     assert response.status_code == 404
+
+
+def _write_raw_eval(path: Path, run_id: str, panel: list[str], behavior: str) -> None:
+    header = {
+        "type": "eval_header",
+        "schema_version": 2,
+        "run_id": run_id,
+        "panel": panel,
+        "coverage": {"record_count": 1, "span_count": 1},
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    tag = {
+        "type": "eval_tag",
+        "evaluator_index": 0,
+        "evaluator": panel[0],
+        "player": PLAYER_NAMES[0],
+        "behavior": behavior,
+        "turn": 1,
+        "evidence": [],
+        "confidence": 2,
+        "note": "",
+    }
+    path.write_text(json.dumps(header) + "\n" + json.dumps(tag) + "\n", encoding="utf-8")
+
+
+def client_with_two_evaluation_versions(tmp_path: Path) -> tuple[TestClient, str]:
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    game_directory = tmp_path / "games" / game_id
+    # the current (newest) run and one archived run, each its own panel + tag
+    _write_raw_eval(
+        path=game_directory / "game.eval.jsonl", run_id="20260102-000000", panel=["openai:hi"], behavior="deception"
+    )
+    _write_raw_eval(
+        path=game_directory / "game.eval.20260101-000000.jsonl",
+        run_id="20260101-000000",
+        panel=["anthropic:hi"],
+        behavior="betrayal",
+    )
+    return client, game_id
+
+
+def test_the_evaluation_view_model_lists_versions_and_defaults_to_current(tmp_path: Path):
+    client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
+
+    current = client.get(f"/api/games/{game_id}/evaluation").json()
+    assert [version["run_id"] for version in current["versions"]] == ["20260102-000000", "20260101-000000"]
+    assert current["version"] == "20260102-000000" and current["versions"][0]["is_current"] is True
+    (current_tag,) = current["members"][0]["tags"]
+    assert current_tag["behavior"] == "deception"
+
+
+def test_an_older_version_can_be_selected_by_run_id(tmp_path: Path):
+    client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
+
+    archived = client.get(f"/api/games/{game_id}/evaluation?version=20260101-000000").json()
+    assert archived["version"] == "20260101-000000"
+    (archived_tag,) = archived["members"][0]["tags"]
+    assert archived_tag["behavior"] == "betrayal"
+
+
+def test_verifications_are_kept_per_version(tmp_path: Path):
+    client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
+    archived_key = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "betrayal", "turn": 1}
+
+    # verify a tag that only the archived version holds, scoped to that version
+    set_response = client.put(
+        f"/api/games/{game_id}/verifications", json={**archived_key, "verified": True, "version": "20260101-000000"}
+    )
+    assert set_response.status_code == 204
+
+    # it shows verified only when viewing that version; the current run is untouched
+    (archived_tag,) = client.get(f"/api/games/{game_id}/evaluation?version=20260101-000000").json()["members"][0][
+        "tags"
+    ]
+    assert archived_tag["verified"] is True
+    (current_tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    assert current_tag["verified"] is False
+
+    # the archived tag does not exist in the current run, so verifying it there is a 404
+    conflict = client.put(f"/api/games/{game_id}/verifications", json={**archived_key, "verified": True})
+    assert conflict.status_code == 404
+
+
+def _write_evaluator_trace(path: Path, callers: list[str]) -> None:
+    records = [
+        {
+            "seq": sequence,
+            "time": "2026-06-12T10:00:00+00:00",
+            "turn": 5,
+            "kind": "evaluation",
+            "caller": caller,
+            "model": "claude-sonnet-4-6",
+            "messages": [{"role": "user", "content": "tag this turn"}],
+            "tools": [],
+            "response": {"text": "ok", "tool_calls": []},
+            "error": None,
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+            "latency_ms": 500,
+        }
+        for sequence, caller in enumerate(callers, start=1)
+    ]
+    path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+
+_CALL_COST_USD = (1_000 * 3.00 + 100 * 15.00) / 1_000_000  # one traced call at sonnet list prices
+
+
+def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Path, monkeypatch):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    _write_evaluator_trace(
+        path=tmp_path / "games" / game_id / "game.eval.trace.jsonl",
+        callers=["evaluator[0]", "evaluator[0]", "evaluator[1]"],
+    )
+    monkeypatch.setattr(GameProcessManager, "is_evaluating", lambda self, game_id: True)
+    monkeypatch.setattr(GameProcessManager, "evaluating_panel", lambda self, game_id: ["anthropic:hi", "openai:hi"])
+
+    payload = client.get(f"/api/games/{game_id}/evaluation").json()
+
+    assert payload["running"] is True
+    progress = payload["progress"]
+    assert progress["state"] == "running"
+    assert progress["completed_calls"] == 3 and progress["failed_calls"] == 0
+    assert progress["cost_usd"] == round(3 * _CALL_COST_USD, 4)
+    # each member is expected to make one call per turn plus the synthesis call
+    assert [(member["calls"], member["spec"]) for member in progress["members"]] == [
+        (2, "anthropic:hi"),
+        (1, "openai:hi"),
+    ]
+    assert progress["expected_calls"] == 2 * progress["members"][0]["expected_calls"]
+
+
+def test_a_trace_without_its_sidecar_is_reported_as_an_interrupted_run(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    # a flat eval trace with no game.eval.jsonl: the worker died mid-run (e.g. a server shutdown)
+    _write_evaluator_trace(
+        path=tmp_path / "games" / game_id / "game.eval.trace.jsonl",
+        callers=["evaluator[0]", "evaluator[1]", "evaluator[2]"],
+    )
+
+    progress = client.get(f"/api/games/{game_id}/evaluation").json()["progress"]
+
+    assert progress["state"] == "interrupted"
+    assert progress["completed_calls"] == 3
+    assert progress["cost_usd"] == round(3 * _CALL_COST_USD, 4)
+    assert progress["last_call_at"]
+
+
+def test_a_completed_run_reports_no_progress(tmp_path: Path):
+    client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
+    _write_evaluator_trace(path=tmp_path / "games" / game_id / "game.eval.trace.jsonl", callers=["evaluator[0]"])
+
+    payload = client.get(f"/api/games/{game_id}/evaluation").json()
+
+    assert payload["running"] is False and payload["progress"] is None
+
+
+def test_evaluation_usage_reports_per_member_tokens_and_cost(tmp_path: Path):
+    client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
+    _write_evaluator_trace(
+        path=tmp_path / "games" / game_id / "game.eval.trace.jsonl",
+        callers=["evaluator[0]", "evaluator[1]", "evaluator[0]"],
+    )
+
+    usage = client.get(f"/api/games/{game_id}/evaluation/usage").json()
+
+    assert [(member["index"], member["calls"]) for member in usage["members"]] == [(0, 2), (1, 1)]
+    assert usage["members"][0]["input_tokens"] == 2_000
+    assert usage["total"]["calls"] == 3 and usage["total"]["output_tokens"] == 300
+    assert usage["total"]["cost_usd"] == round(3 * _CALL_COST_USD, 4)
+
+
+def test_evaluation_usage_of_an_unevaluated_game_is_not_found(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    assert client.get(f"/api/games/{game_id}/evaluation/usage").status_code == 404
+
+
+def test_the_trace_inspector_serves_the_evaluator_panel_source_per_version(tmp_path: Path):
+    client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
+    game_directory = tmp_path / "games" / game_id
+    _write_evaluator_trace(path=game_directory / "game.eval.trace.jsonl", callers=["evaluator[0]"])
+    _write_evaluator_trace(
+        path=game_directory / "game.eval.20260101-000000.trace.jsonl", callers=["evaluator[0]", "evaluator[0]"]
+    )
+
+    current = client.get(f"/api/games/{game_id}/trace?source=evaluation").json()["calls"]
+    assert len(current) == 1 and current[0]["caller"] == "evaluator[0]"
+    archived = client.get(f"/api/games/{game_id}/trace?source=evaluation&version=20260101-000000").json()["calls"]
+    assert len(archived) == 2
+    detail = client.get(f"/api/games/{game_id}/trace/1?source=evaluation")
+    assert detail.status_code == 200 and detail.json()["messages"][0]["content"] == "tag this turn"
+    # the default source stays the game's own trace, which this game does not have
+    assert client.get(f"/api/games/{game_id}/trace").json() == {"calls": []}
+
+
+def test_the_analysis_artifact_is_computed_on_demand_per_version(tmp_path: Path):
+    client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
+    game_directory = tmp_path / "games" / game_id
+
+    current = client.get(f"/api/games/{game_id}/analysis")
+    assert current.status_code == 200
+    assert current.json()["source"]["panel"] == ["openai:hi"]
+    assert (game_directory / "game.analysis.json").is_file()  # persisted, so the next request just reads it
+
+    archived = client.get(f"/api/games/{game_id}/analysis?version=20260101-000000")
+    assert archived.json()["source"]["panel"] == ["anthropic:hi"]
+    assert (game_directory / "game.analysis.20260101-000000.json").is_file()
+
+
+def test_the_analysis_of_an_unevaluated_game_is_not_found(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+
+    assert client.get(f"/api/games/{game_id}/analysis").status_code == 404

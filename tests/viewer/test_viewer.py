@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from risk_bench.game.types import Territory
+from risk_bench.runner.evaluation_versions import version_for
 from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import render_reader_export_html, render_reader_html
@@ -282,7 +283,10 @@ def test_exported_reader_html_is_self_contained(tmp_path: Path):
     model = build_view_model(journal_path=journal_path)
 
     html = render_reader_export_html(
-        game_view_model=model, evaluation_view_model=build_evaluation_view_model(journal_path=journal_path)
+        game_view_model=model,
+        evaluation_view_model=build_evaluation_view_model(
+            journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+        ),
     )
 
     assert html.startswith("<!DOCTYPE html>")
@@ -299,7 +303,9 @@ def test_exported_reader_html_embeds_the_board_map_with_every_territory(tmp_path
 
     html = render_reader_export_html(
         game_view_model=build_view_model(journal_path=journal_path),
-        evaluation_view_model=build_evaluation_view_model(journal_path=journal_path),
+        evaluation_view_model=build_evaluation_view_model(
+            journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+        ),
     )
 
     assert "<svg" in html
@@ -312,7 +318,9 @@ def test_reader_rendering_polls_the_given_url(tmp_path: Path):
 
     html = render_reader_html(
         game_view_model=build_view_model(journal_path=journal_path),
-        evaluation_view_model=build_evaluation_view_model(journal_path=journal_path),
+        evaluation_view_model=build_evaluation_view_model(
+            journal_path=journal_path, version=version_for(journal_path=journal_path, run_id=None)
+        ),
         live=True,
         live_running=True,
         poll_url="/api/games/some-game",
@@ -320,6 +328,7 @@ def test_reader_rendering_polls_the_given_url(tmp_path: Path):
         evaluate_url="/api/games/some-game/evaluate",
         verifications_url="/api/games/some-game/verifications",
         trace_url="/api/games/some-game/trace",
+        analysis_url="/api/games/some-game/analysis",
     )
 
     assert "live: true" in html
