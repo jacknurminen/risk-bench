@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     google_api_key: str | None = None
     xai_api_key: str | None = None
 
-    # agent limits
-    max_agent_tokens: int = 4096
+    # agent limits; the budget covers hidden reasoning tokens too, so it must leave room for
+    # a reasoning model to think AND still emit its tool call (4096 proved too tight for GPT)
+    max_agent_tokens: int = 8192
     # the evaluator panel writes a whole game's tags + syntheses in one response, so it needs a far
     # larger output budget than the per-move game agents and per-turn commentators
     max_evaluator_tokens: int = 32000
