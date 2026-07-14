@@ -13,7 +13,8 @@ function closeDrawer() { state.drawer = null; renderPanels(); }
 /* Humans no longer author their own tags; they verify the panel's. One PUT sets or clears the
    human-verified mark on a tag, keyed the same way the agreement aggregate groups tags. */
 async function setTagVerified(annotatorIndex, behavior, player, turn, verified) {
-  const body = { evaluator_index: annotatorIndex, player, behavior, turn, verified };
+  // verifications are per version, so tie the verdict to the run currently being viewed
+  const body = { evaluator_index: annotatorIndex, player, behavior, turn, verified, version: viewedVersionRunId() };
   const res = await fetch(VERIFICATIONS_URL, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });

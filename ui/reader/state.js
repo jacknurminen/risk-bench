@@ -9,7 +9,12 @@ const EVAL_POLL_URL = window.BOOT.urls.evaluation_poll;
 const EVALUATE_URL = window.BOOT.urls.evaluate;
 const VERIFICATIONS_URL = window.BOOT.urls.verifications;
 const TRACE_URL = window.BOOT.urls.trace;
+const ANALYSIS_URL = window.BOOT.urls.analysis;
 let gameRunning = window.BOOT.live_running;  // whether the game's worker is currently playing (live games only)
+// which evaluation run is being viewed: "" follows the current (newest) run — so a re-run or a live
+// game's fresh evaluation shows automatically — while a specific run id pins an older archived run.
+let selectedVersion = "";
+const viewedVersionRunId = () => selectedVersion || null;
 
 
 // seat identity colors — hues chosen (and chroma-tuned) to pass the categorical checks on a white
@@ -54,13 +59,32 @@ const axisOf = b => VOCAB[b]?.axis ?? "conduct";
 const valenceOf = b => EVAL.tag_valence?.[b] ?? null;
 const AXES = [["skill", "Game skill", "var(--axis-skill)"], ["conduct", "Social conduct", "var(--axis-conduct)"], ["affect", "Affect", "var(--axis-affect)"]];
 const AXIS_COLOR = { skill: "var(--axis-skill)", conduct: "var(--axis-conduct)", affect: "var(--axis-affect)" };
-function valenceStyle(behavior) {
-  const v = valenceOf(behavior);
-  const map = { cooperative: ["var(--coop)", "var(--coop-tint)"], strong: ["var(--coop)", "var(--coop-tint)"],
-    adversarial: ["var(--adversarial)", "var(--adversarial-tint)"], weak: ["var(--gold)", "#f6eede"],
-    deceptive: ["var(--deceptive)", "var(--deceptive-tint)"] };
-  return map[v] ?? ["var(--neutral)", "var(--neutral-tint)"];
-}
+const VALENCE_COLORS = { cooperative: ["var(--coop)", "var(--coop-tint)"], strong: ["var(--coop)", "var(--coop-tint)"],
+  adversarial: ["var(--adversarial)", "var(--adversarial-tint)"], weak: ["var(--gold)", "#f6eede"],
+  deceptive: ["var(--deceptive)", "var(--deceptive-tint)"] };
+function valenceStyle(behavior) { return VALENCE_COLORS[valenceOf(behavior)] ?? ["var(--neutral)", "var(--neutral-tint)"]; }
+
+/* ---- code-grain projection: roll a behavior code up the taxonomy, entirely client-side ----
+   The vocabulary ships each code's subfamily and family alongside its axis, so re-grouping the
+   same tags at a coarser grain is a lookup, never a server round-trip or a re-evaluation. */
+const CODE_GRAINS = ["behavior", "subfamily", "family", "axis"];
+const LOCUS_GRAINS = ["span", "turn", "game"];
+const projectCode = (behavior, grain) => grain === "behavior" ? behavior : (VOCAB[behavior]?.[grain] ?? behavior);
+/* per grain, each grouping key's axis and valence — null when the key's codes mix (a mixed key
+   is a frequency bucket: charted as a count, never scored or valence-coloured) */
+const GRAIN_KEY_INFO = {};
+CODE_GRAINS.forEach(grain => {
+  const byKey = GRAIN_KEY_INFO[grain] = {};
+  Object.values(VOCAB).forEach(v => {
+    const info = byKey[projectCode(v.behavior, grain)] ??= { axis: v.axis, valence: v.valence };
+    if (info.axis !== v.axis) info.axis = null;
+    if (info.valence !== v.valence) info.valence = null;
+  });
+});
+const axisAtGrain = (key, grain) => grain === "behavior" ? axisOf(key) : (GRAIN_KEY_INFO[grain]?.[key]?.axis ?? null);
+const valenceAtGrain = (key, grain) => grain === "behavior" ? valenceOf(key) : (GRAIN_KEY_INFO[grain]?.[key]?.valence ?? null);
+const valenceStyleAtGrain = (key, grain) =>
+  VALENCE_COLORS[valenceAtGrain(key, grain)] ?? ["var(--neutral)", "var(--neutral-tint)"];
 
 /* ---- annotators (the LLM panel; humans verify its tags rather than authoring their own) ---- */
 const annotators = () => EVAL.annotators || [];

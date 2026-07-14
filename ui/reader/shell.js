@@ -40,7 +40,8 @@ function closeNotes() { el("notesModal").classList.remove("open"); }
 
 /* ================= EVALUATION REFRESH ================= */
 async function refreshEvaluation() {
-  const res = await fetch(EVAL_POLL_URL, { cache: "no-store" });
+  const url = selectedVersion ? `${EVAL_POLL_URL}?version=${encodeURIComponent(selectedVersion)}` : EVAL_POLL_URL;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return;
   EVAL = await res.json();
   annotators().forEach(a => {

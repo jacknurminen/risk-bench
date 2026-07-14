@@ -298,14 +298,22 @@ el("expandAll").onclick = () => { turns.forEach(t => state.expanded.add(t)); ren
 el("collapseAll").onclick = () => { state.expanded.clear(); renderTimeline(); };
 
 /* ================= COMPARE (agreement matrix) ================= */
+/* the matrix only offers the 1:1 code grains: family/axis cells stack several distinct codes per
+   turn, so matching there would over-credit agreement — those grains live on the stats sheet's
+   frequency views instead. Subfamily merges near-synonym codes into one row, so two members who
+   read the same event under different synonyms line up as a co-detection. */
+let compareGrain = "behavior";
 function renderCompare() {
   const container = el("timeline");
   const active = annotators().filter(a => state.filters.annotators.has(a.index));
   const groups = new Map();
   allTags().filter(tagVisible).forEach(t => {
-    const key = t.turn + "|" + t.player + "|" + t.behavior;
-    if (!groups.has(key)) groups.set(key, { turn: t.turn, player: t.player, behavior: t.behavior, byAnn: {} });
-    groups.get(key).byAnn[t.annotator] = t.confidence;
+    const code = projectCode(t.behavior, compareGrain);
+    const key = t.turn + "|" + t.player + "|" + code;
+    if (!groups.has(key)) groups.set(key, { turn: t.turn, player: t.player, behavior: code, byAnn: {} });
+    const group = groups.get(key);
+    // merged synonym tags from one annotator collapse into the cell; show the strongest read
+    group.byAnn[t.annotator] = Math.max(group.byAnn[t.annotator] ?? 0, t.confidence);
   });
   const rows = [...groups.values()].sort((a, b) => a.turn - b.turn || a.player.localeCompare(b.player));
   const head = `<div class="mhead"><span style="flex:1" class="eyebrow">behaviour · player · turn</span>${active.map(a =>
@@ -313,10 +321,10 @@ function renderCompare() {
   const body = rows.map(r => {
     const n = active.filter(a => r.byAnn[a.index] != null).length;
     const consensus = n >= 2;
-    const [vc] = valenceStyle(r.behavior);
+    const [vc] = valenceStyleAtGrain(r.behavior, compareGrain);
     return `<div class="mrow" style="background:${consensus ? "#fafcfa" : "#fff"}">
       <span style="flex:1;display:flex;align-items:center;gap:7px;min-width:0">
-        <span class="swatch" style="background:${AXIS_COLOR[axisOf(r.behavior)]}"></span>
+        <span class="swatch" style="background:${AXIS_COLOR[axisAtGrain(r.behavior, compareGrain)] ?? "var(--neutral)"}"></span>
         <span class="mono" style="font-size:10.5px;color:${vc};font-weight:500">${r.behavior}</span>
         <span class="mono" style="font-size:9px;color:var(--mute-2)">${tagOf(r.player)} · t${r.turn}</span>
         <span class="mono" style="font-size:8.5px;padding:1px 6px;border-radius:999px;background:${consensus ? "#e2f0e9" : "#f6eede"};color:${consensus ? "var(--coop)" : "var(--gold)"}">${consensus ? "consensus" : "lone"}</span>
@@ -325,7 +333,13 @@ function renderCompare() {
         return `<span class="mcell">${c != null ? `<span class="mmark" style="background:${annotatorColor(a.index)}">${c}</span>` : `<span class="mono" style="color:#d2ccbe">·</span>`}</span>`; }).join("")}
     </div>`;
   }).join("");
-  container.innerHTML = `<div class="matrix">${head}${body || '<div class="empty" style="padding:14px">No tags match the current filters.</div>'}</div>`;
+  const grainToggle = `<div class="grainControls" style="margin:0 0 8px"><span>group by:</span>` +
+    ["behavior", "subfamily"].map(grain =>
+      `<button data-grain="${grain}" class="${compareGrain === grain ? "on" : ""}">${grain}</button>`).join("") + `</div>`;
+  container.innerHTML = grainToggle +
+    `<div class="matrix">${head}${body || '<div class="empty" style="padding:14px">No tags match the current filters.</div>'}</div>`;
+  container.querySelectorAll("button[data-grain]").forEach(button =>
+    button.onclick = () => { compareGrain = button.dataset.grain; renderCompare(); });
   updateSubBar();
 }
 

@@ -11,11 +11,31 @@ const VALENCE_CHARTS = [
   ["deceptive", "conduct: deception, cumulative"],
 ];
 const memberColor = commentatorIndex => MEMBER_COLORS[commentatorIndex % MEMBER_COLORS.length];
-const panelSize = () => GAME.commentators.length;
-// the members currently included in the chart consensus; all of them until the viewer toggles some off
-let visibleMembers = new Set(GAME.commentators.map(member => member.index));
-// which per-instance agreement levels (k of the full panel) the charts count; all of them by default
-let selectedAgreement = new Set(GAME.commentators.map((_, level) => level + 1));
+
+/* A tag-panel context: a member roster plus a per-(turn, member) tag stream, with the viewer's
+   member/agreement selections and the aggregation grains (code: how far up the taxonomy a tag is
+   rolled; locus: how coarsely it is placed in the game). The commentary and the evaluator panel
+   (evalstats.js) share all chart machinery through this shape; stream entries are
+   { turn, member, tags: [{player, behavior, spans?}] } — spans only where evidence exists. */
+function panelContext(ids) {
+  return { ids, members: [], stream: [], visible: new Set(), agreement: new Set(), sizeSeen: -1,
+           codeGrain: "behavior", locusGrain: "turn" };
+}
+/* agreement is only ever matched at a 1:1 grain: family/axis cells stack several distinct codes
+   per turn and would over-credit matching, so those grains regroup counts while matching clamps
+   back to behavior; only the subfamily synonym-merge is a legitimate coarser match key */
+const matchGrainOf = context => context.codeGrain === "subfamily" ? "subfamily" : "behavior";
+function syncPanel(context, members, stream) {
+  context.members = members;
+  context.stream = stream;
+  if (context.sizeSeen !== members.length) {  // a new (or first-seen) panel: default to everything visible
+    context.sizeSeen = members.length;
+    context.visible = new Set(members.map(member => member.index));
+    context.agreement = new Set(members.map((_, level) => level + 1));
+  }
+}
+const commentaryPanel = panelContext({ toggles: "memberToggles", filter: "agreementFilter", charts: "valenceCharts" });
+const commentaryStream = () => GAME.commentary.map(c => ({ turn: c.turn, member: c.commentator_index, tags: c.tags }));
 
 function openStats() {
   renderStats();
@@ -38,89 +58,121 @@ function renderStats() {
     charts.appendChild(buildChart("income per turn", seriesByPlayer.map(s => s.income), v => Math.round(v)));
     charts.appendChild(buildChart("cards in hand", seriesByPlayer.map(s => s.cards), v => Math.round(v)));
   }
-  renderMemberToggles();
-  renderAgreementFilter();
-  renderValenceCharts();
+  syncPanel(commentaryPanel, GAME.commentators.map(m => ({ index: m.index, label: m.label })), commentaryStream());
+  renderPanelToggles(commentaryPanel, "commentator panel — line is the mean, band is the spread:",
+    () => renderPanelValenceCharts(commentaryPanel));
+  renderPanelAgreementFilter(commentaryPanel, () => {
+    renderPanelValenceCharts(commentaryPanel);
+    renderStatsTable();  // the agreement filter drives the behavior-tags column too
+  });
+  renderPanelValenceCharts(commentaryPanel);
   renderTokenChart();
   renderStatsTable();
+  if (!el("evalSheet").hidden) renderEvalStats();
 }
 
 // The cumulative-valence charts are per-member: each player's line is the mean across the chosen
 // members and the band is their spread, so no annotator's trajectory is hidden. The checkboxes pick
 // which members feed the consensus (all by default); they only appear for a real panel.
-function renderMemberToggles() {
-  const container = el("memberToggles");
-  if (panelSize() < 2) { container.innerHTML = ""; return; }
-  container.innerHTML = '<span>commentator panel — line is the mean, band is the spread:</span>' +
-    GAME.commentators.map(member =>
-      `<label><input type="checkbox" data-member="${member.index}" ${visibleMembers.has(member.index) ? "checked" : ""}>` +
+function renderPanelToggles(context, note, onChange) {
+  const container = el(context.ids.toggles);
+  if (context.members.length < 2) { container.innerHTML = ""; return; }
+  container.innerHTML = `<span>${note}</span>` +
+    context.members.map(member =>
+      `<label><input type="checkbox" data-member="${member.index}" ${context.visible.has(member.index) ? "checked" : ""}>` +
       `<span class="swatch" style="background:${memberColor(member.index)}"></span>${escapeHtml(member.label)}</label>`
     ).join("");
   container.querySelectorAll("input[data-member]").forEach(box => box.onchange = () => {
     const member = Number(box.dataset.member);
-    if (box.checked) visibleMembers.add(member); else visibleMembers.delete(member);
-    renderValenceCharts();
+    if (box.checked) context.visible.add(member); else context.visible.delete(member);
+    onChange();
   });
 }
 
 // The agreement filter counts a tag only when the chosen number of members flagged that exact
 // (turn, player, behavior) — measured over the FULL panel, independent of the member checkboxes.
-function renderAgreementFilter() {
-  const container = el("agreementFilter");
-  const members = panelSize();
+function renderPanelAgreementFilter(context, onChange) {
+  const container = el(context.ids.filter);
+  const members = context.members.length;
   if (members < 2) { container.innerHTML = ""; return; }
   const chips = Array.from({ length: members }, (_, i) => i + 1).map(level =>
-    `<button data-level="${level}" class="${selectedAgreement.has(level) ? "on" : ""}">${level}/${members}</button>`
+    `<button data-level="${level}" class="${context.agreement.has(level) ? "on" : ""}">${level}/${members}</button>`
   ).join("");
   container.innerHTML = '<span>agreement filter — count a tag only when this many members flagged it:</span>' + chips;
   container.querySelectorAll("button[data-level]").forEach(button => button.onclick = () => {
     const level = Number(button.dataset.level);
-    if (selectedAgreement.has(level)) selectedAgreement.delete(level); else selectedAgreement.add(level);
+    if (context.agreement.has(level)) context.agreement.delete(level); else context.agreement.add(level);
     button.classList.toggle("on");
-    renderValenceCharts();
-    renderStatsTable();  // the agreement filter drives the behavior-tags column too
+    onChange();
   });
 }
 
-function renderValenceCharts() {
-  const container = el("valenceCharts");
-  if (!GAME.commentary.length) { container.innerHTML = ""; return; }
-  const members = GAME.commentators.map(member => member.index).filter(member => visibleMembers.has(member));
-  const agreement = tagInstanceAgreement();
+function renderPanelValenceCharts(context) {
+  const container = el(context.ids.charts);
+  if (!context.stream.length) { container.innerHTML = ""; return; }
+  const members = context.members.map(member => member.index).filter(member => context.visible.has(member));
+  const agreement = panelTagAgreement(context);
   container.innerHTML = "";
+  if (context.codeGrain === "family" || context.codeGrain === "axis") {
+    // a family or axis mixes valences, so its chart counts frequency and is never a score
+    for (const key of streamGrainKeys(context)) {
+      container.appendChild(buildBandChart(`${context.codeGrain}: ${pretty(key)} — frequency, cumulative (not a score)`,
+        members, panelFilteredCumulatives(context, members, { key }, agreement)));
+    }
+    return;
+  }
   for (const [valence, title] of VALENCE_CHARTS) {
-    container.appendChild(buildBandChart(title, members, filteredCumulatives(members, valence, agreement)));
+    container.appendChild(buildBandChart(title, members, panelFilteredCumulatives(context, members, { valence }, agreement)));
   }
 }
 
-// How many distinct members flagged each (turn, player, behavior) — the per-instance agreement,
-// over the whole panel. Built from the raw per-member tags the journal kept separately.
-function tagInstanceAgreement() {
+// the grouping keys the stream's tags reduce to at the context's code grain, for the frequency charts
+function streamGrainKeys(context) {
+  const keys = new Set();
+  context.stream.forEach(entry => entry.tags.forEach(tag => keys.add(projectCode(tag.behavior, context.codeGrain))));
+  return [...keys].sort();
+}
+
+// How many distinct members flagged each (turn, player, code) — the per-instance agreement, over
+// the whole panel. Built from the raw per-member tags the sidecars keep separately; the code is
+// matched at the clamped 1:1 grain (see matchGrainOf), so the subfamily merge pulls synonym
+// co-detections together while family/axis grouping leaves matching untouched.
+function panelTagAgreement(context) {
+  const grain = matchGrainOf(context);
   const agreement = new Map();
-  GAME.commentary.forEach(comment => comment.tags.forEach(tag => {
-    const key = `${comment.turn}|${tag.player}|${tag.behavior}`;
-    (agreement.get(key) ?? agreement.set(key, new Set()).get(key)).add(comment.commentator_index);
+  context.stream.forEach(entry => entry.tags.forEach(tag => {
+    const key = `${entry.turn}|${tag.player}|${projectCode(tag.behavior, grain)}`;
+    (agreement.get(key) ?? agreement.set(key, new Set()).get(key)).add(entry.member);
   }));
   return agreement;
 }
 
-// Per seat, per visible member, the cumulative count of that member's tags of this valence — counting
-// a tag only when its panel agreement is among the selected levels.
-function filteredCumulatives(members, valence, agreement) {
+// Per seat, per visible member, the cumulative count of that member's tags in the bucket — a
+// valence ({valence}) on the scored charts, or one grain key ({key}) on the frequency charts —
+// counting a tag only when its panel agreement is among the selected levels. At grains coarser
+// than behavior, one member's synonym codes on the same (player, key) in a turn count once.
+function panelFilteredCumulatives(context, members, bucket, agreement) {
   const chartTurns = GAME.stats.series.turns;
   const turnPosition = new Map(chartTurns.map((turn, position) => [turn, position]));
-  const chartValenceOf = GAME.stats.tag_valence ?? {};
+  const matchGrain = matchGrainOf(context);
   const counts = GAME.players.map(() => members.map(() => chartTurns.map(() => 0)));
-  GAME.commentary.forEach(comment => {
-    const memberPosition = members.indexOf(comment.commentator_index);
-    const position = turnPosition.get(comment.turn);
+  context.stream.forEach(entry => {
+    const memberPosition = members.indexOf(entry.member);
+    const position = turnPosition.get(entry.turn);
     if (memberPosition < 0 || position === undefined) return;  // a hidden member, or a turn off the axis
-    comment.tags.forEach(tag => {
-      if (chartValenceOf[tag.behavior] !== valence) return;
+    const counted = new Set();
+    entry.tags.forEach(tag => {
+      const key = projectCode(tag.behavior, context.codeGrain);
+      if (bucket.key !== undefined ? key !== bucket.key : valenceAtGrain(key, context.codeGrain) !== bucket.valence) return;
       const seat = GAME.players.findIndex(player => player.name === tag.player);
-      if (seat < 0) return;  // the commentator occasionally invents player names; drop those
-      const agreed = agreement.get(`${comment.turn}|${tag.player}|${tag.behavior}`)?.size ?? 0;
-      if (selectedAgreement.has(agreed)) counts[seat][memberPosition][position] += 1;
+      if (seat < 0) return;  // annotators occasionally invent player names; drop those
+      if (context.codeGrain !== "behavior") {
+        const instance = `${tag.player}|${key}`;
+        if (counted.has(instance)) return;
+        counted.add(instance);
+      }
+      const agreed = agreement.get(`${entry.turn}|${tag.player}|${projectCode(tag.behavior, matchGrain)}`)?.size ?? 0;
+      if (context.agreement.has(agreed)) counts[seat][memberPosition][position] += 1;
     });
   });
   return counts.map(perSeat => perSeat.map(perMember => {
@@ -335,25 +387,28 @@ function usageCells(caller) {
     <td class="mono" style="font-size:11px">${cost}</td>`;
 }
 
-// Per seat, the behavior-tag counts for the table, honoring the same agreement filter as the charts:
-// one count per (turn, player, behavior) instance whose panel agreement is a selected level — behavioral
-// frequency, not annotator observations, so a behavior the whole panel flagged counts once, not once per
-// member. Member toggles do not apply here — the table is a whole-panel aggregate; the agreement chips
-// are how you filter it, and byLevel keeps the per-consensus breakdown for the chip tooltip.
-function filteredTableTags() {
-  const membersByInstance = GAME.players.map(() => ({}));  // seat -> "behavior turn" -> Set of members
-  GAME.commentary.forEach(comment => comment.tags.forEach(tag => {
+// Per seat, the tag counts for the table at the context's grains, honoring the same agreement
+// filter as the charts: one count per distinct (projected code, locus) instance whose panel
+// agreement is a selected level — behavioral frequency, not annotator observations, so an event
+// the whole panel flagged counts once, not once per member. At span locus, instances form by
+// cited-span overlap (tags citing intersecting spans are reads of the same event) rather than key
+// equality. Member toggles do not apply here — the table is a whole-panel aggregate; the
+// agreement chips are how you filter it, and byLevel keeps the per-consensus breakdown.
+function panelFilteredTableTags(context) {
+  if (context.locusGrain === "span") return panelTableTagsBySpanOverlap(context);
+  const membersByInstance = GAME.players.map(() => ({}));  // seat -> "code locus" -> Set of members
+  context.stream.forEach(entry => entry.tags.forEach(tag => {
     const seat = GAME.players.findIndex(player => player.name === tag.player);
-    if (seat < 0) return;  // the commentator occasionally invents player names; drop those
-    const key = tag.behavior + " " + comment.turn;
-    (membersByInstance[seat][key] ?? (membersByInstance[seat][key] = new Set())).add(comment.commentator_index);
+    if (seat < 0) return;  // annotators occasionally invent player names; drop those
+    const key = projectCode(tag.behavior, context.codeGrain) + " " + (context.locusGrain === "game" ? "" : entry.turn);
+    (membersByInstance[seat][key] ?? (membersByInstance[seat][key] = new Set())).add(entry.member);
   }));
   return GAME.players.map((_, seat) => {
     const tags = {};
     for (const [key, members] of Object.entries(membersByInstance[seat])) {
-      if (!selectedAgreement.has(members.size)) continue;
-      const behavior = key.split(" ")[0];
-      const entry = tags[behavior] ?? (tags[behavior] = { count: 0, byLevel: {} });
+      if (!context.agreement.has(members.size)) continue;
+      const code = key.split(" ")[0];
+      const entry = tags[code] ?? (tags[code] = { count: 0, byLevel: {} });
       entry.count += 1;
       entry.byLevel[members.size] = (entry.byLevel[members.size] ?? 0) + 1;
     }
@@ -361,32 +416,71 @@ function filteredTableTags() {
   });
 }
 
-function tagChips(tags) {
-  const members = panelSize();
-  return Object.entries(tags).sort((a, b) => b[1].count - a[1].count).map(([behavior, info]) => {
+function panelTableTagsBySpanOverlap(context) {
+  const taggedBySeat = GAME.players.map(() => ({}));  // seat -> code -> [{spans, member}]
+  context.stream.forEach(entry => entry.tags.forEach(tag => {
+    const seat = GAME.players.findIndex(player => player.name === tag.player);
+    if (seat < 0) return;
+    const code = projectCode(tag.behavior, context.codeGrain);
+    (taggedBySeat[seat][code] ?? (taggedBySeat[seat][code] = [])).push({ spans: new Set(tag.spans ?? []), member: entry.member });
+  }));
+  return taggedBySeat.map(byCode => {
+    const tags = {};
+    for (const [code, tagged] of Object.entries(byCode)) {
+      for (const cluster of spanOverlapClusters(tagged)) {
+        if (!context.agreement.has(cluster.members.size)) continue;
+        const entry = tags[code] ?? (tags[code] = { count: 0, byLevel: {} });
+        entry.count += 1;
+        entry.byLevel[cluster.members.size] = (entry.byLevel[cluster.members.size] ?? 0) + 1;
+      }
+    }
+    return tags;
+  });
+}
+
+// connected components over span-set intersection: a member joins an instance by citing any of
+// its spans; a tag with no resolved citation is its own instance (it can match nothing)
+function spanOverlapClusters(tagged) {
+  let clusters = [];  // [{spans: Set, members: Set}]
+  tagged.forEach(({ spans, member }) => {
+    const merged = { spans: new Set(spans), members: new Set([member]) };
+    const untouched = [];
+    clusters.forEach(cluster => {
+      if (spans.size && [...spans].some(span => cluster.spans.has(span))) {
+        cluster.spans.forEach(span => merged.spans.add(span));
+        cluster.members.forEach(m => merged.members.add(m));
+      } else untouched.push(cluster);
+    });
+    clusters = [...untouched, merged];
+  });
+  return clusters;
+}
+
+function tagChips(tags, members, codeGrain) {
+  return Object.entries(tags).sort((a, b) => b[1].count - a[1].count).map(([code, info]) => {
     const breakdown = members > 1
       ? " · agreement " + Object.keys(info.byLevel).map(Number).sort((a, b) => b - a)
           .map(level => `${level}/${members}×${info.byLevel[level]}`).join(", ")
       : "";
     const title = `${info.count} tag${info.count === 1 ? "" : "s"}${breakdown}`;
-    const [vc, vt] = valenceStyle(behavior);
+    const [vc, vt] = valenceStyleAtGrain(code, codeGrain);
     return `<span class="tagchip" style="color:${vc};background:${vt}" title="${escapeHtml(title)}">` +
-      `${behavior}${info.count > 1 ? ` ×${info.count}` : ""}</span>`;
+      `${code}${info.count > 1 ? ` ×${info.count}` : ""}</span>`;
   }).join("");
 }
 
-function tagFilterNote() {
-  const members = panelSize();
+function panelTagFilterNote(context) {
+  const members = context.members.length;
   if (members < 2) return "";
-  const levels = [...selectedAgreement].sort((a, b) => a - b);
+  const levels = [...context.agreement].sort((a, b) => a - b);
   if (!levels.length) return "Behaviour tags: no agreement level is selected above, so nothing counts.";
   if (levels.length === members) return "Behaviour tags count every annotation — use the agreement chips above to filter by panel consensus.";
   return `Behaviour tags count only annotations at ${levels.map(level => `${level}/${members}`).join(", ")} panel agreement (set above).`;
 }
 
 function renderStatsTable() {
-  const tagsBySeat = filteredTableTags();
-  el("tagFilterNote").textContent = tagFilterNote();
+  const tagsBySeat = panelFilteredTableTags(commentaryPanel);
+  el("tagFilterNote").textContent = panelTagFilterNote(commentaryPanel);
   const rows = GAME.players.map((player, seat) => {
     const playerStats = GAME.stats.per_player[seat];
     return `<tr><td style="color:${COLORS[seat]};font-weight:600" class="mono">${tagOf(player.name)}</td>
@@ -394,7 +488,7 @@ function renderStatsTable() {
       <td class="mono" style="font-size:11px">${playerStats.armies_destroyed} / ${playerStats.armies_lost}</td>
       <td class="mono" style="font-size:11px">${playerStats.public_messages} 📢 &nbsp;${playerStats.private_messages} 🔒</td>
       ${usageCells(player.name)}
-      <td>${tagChips(tagsBySeat[seat]) || "—"}</td></tr>`;
+      <td>${tagChips(tagsBySeat[seat], commentaryPanel.members.length, commentaryPanel.codeGrain) || "—"}</td></tr>`;
   });
   GAME.commentators.forEach(member => {
     rows.push(`<tr><td style="color:${memberColor(member.index)};font-weight:600" class="mono">🎙️ ${escapeHtml(member.label)}</td>
@@ -413,18 +507,34 @@ let traceCalls = null;
 
 function showStatsSheet(name) {
   el("overviewSheet").hidden = name !== "overview";
+  el("evalSheet").hidden = name !== "evaluation";
   el("callsSheet").hidden = name !== "calls";
   el("tabOverview").classList.toggle("on", name === "overview");
+  el("tabEval").classList.toggle("on", name === "evaluation");
   el("tabCalls").classList.toggle("on", name === "calls");
   if (name === "calls") loadCalls();
+  if (name === "evaluation") renderEvalStats();
+}
+
+// the calls sheet reads whichever trace the source picker names: the game's own calls, or the
+// viewed evaluation run's panel calls (versioned with the selector like everything else)
+function callsQuery() {
+  const source = el("callSource").value;
+  const params = new URLSearchParams({ source });
+  if (source === "evaluation" && EVAL.version) params.set("version", EVAL.version);
+  return params.toString();
 }
 
 async function loadCalls() {
   const container = el("callsList");
   if (!TRACE_URL) { el("callsStatus").textContent = "no trace in a static export"; container.innerHTML = ""; return; }
   el("callsStatus").textContent = "loading…";
-  const response = await fetch(TRACE_URL, { cache: "no-store" });
-  if (!response.ok) { el("callsStatus").textContent = "could not load the trace"; return; }
+  const response = await fetch(`${TRACE_URL}?${callsQuery()}`, { cache: "no-store" });
+  if (!response.ok) {
+    el("callsStatus").textContent = response.status === 404 ? "no trace for this source" : "could not load the trace";
+    container.innerHTML = "";
+    return;
+  }
   traceCalls = (await response.json()).calls;
   el("callsStatus").textContent = traceCalls.length
     ? `${traceCalls.length} calls` : "no API calls recorded for this game";
@@ -458,7 +568,7 @@ async function toggleCallDetail(seq) {
   if (!detail.hidden) { detail.hidden = true; return; }
   if (!detail.innerHTML) {
     detail.innerHTML = '<div class="empty">loading…</div>';
-    const record = await (await fetch(`${TRACE_URL}/${seq}`)).json();
+    const record = await (await fetch(`${TRACE_URL}/${seq}?${callsQuery()}`)).json();
     detail.innerHTML = renderCallDetail(record);
   }
   detail.hidden = false;
@@ -483,4 +593,5 @@ function renderCallDetail(record) {
   return messages + response + tools;
 }
 el("callerFilter").onchange = renderCalls;
+el("callSource").onchange = loadCalls;
 

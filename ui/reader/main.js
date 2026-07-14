@@ -18,14 +18,15 @@ async function refreshFromJournal() {
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
   el("slider").max = steps.length - 1;
-  renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderSynthesis(); renderTimeline();
+  renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
   if (statsOpen()) renderStats();
   show(following ? steps.length - 1 : index);
 }
 
 /* ================= INIT ================= */
 buildBoard(); buildContinentLegend();
-renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderSynthesis(); renderTimeline();
+renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
+if (EVAL.running) pollEvaluation();  // a run already in flight (started before this page load)
 if (location.hash === "#stats") openStats();  // deep link (kept from when stats lived only in the classic view)

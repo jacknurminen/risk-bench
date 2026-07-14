@@ -90,6 +90,11 @@
   .evalConfig.open { display: block; }
   .evalRow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
   .evalRow select { font-family: var(--font-mono); font-size: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: #fff; }
+  /* the version bar shown once a game is evaluated: switch runs and re-run the panel */
+  .evalBar { padding: 11px 16px; margin-bottom: 14px; }
+  .evalBarRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .versionSelect { font-family: var(--font-mono); font-size: 12px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 5px; background: #fff; max-width: 360px; }
+  .versionMeta { font-size: 11px; color: var(--mute); }
 
   .synthGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
   .synthCard { border: 1px solid var(--line-2); border-radius: 6px; padding: 13px; border-top: 3px solid var(--line); }
@@ -187,7 +192,7 @@
                  font-size: 11px; color: var(--body); margin: 10px 0 2px; }
   #statsLegend .key { display: inline-flex; align-items: center; gap: 5px; }
   #statsLegend .markerKey { margin-left: auto; color: var(--mute-2); font-size: 10px; }
-  #charts, #valenceCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
+  #charts, #valenceCharts, #evalValenceCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px; }
   .chart h4 { margin: 0 0 5px; font-family: var(--font-mono); font-weight: 500; font-size: 10px;
               text-transform: uppercase; letter-spacing: .12em; color: var(--mute-2); }
   .chart svg { width: 100%; height: auto; background: var(--subtle-warm); border: 1px solid var(--line-2);
@@ -195,12 +200,15 @@
   .chart text.axis { font: 9px var(--font-mono); fill: var(--mute-2); }
   .chart text.marker { font: 9px var(--font-sans); cursor: default; }
   #commentaryStats { margin-top: 16px; }
-  #memberToggles, #agreementFilter { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
+  #memberToggles, #agreementFilter, #evalMemberToggles, #evalAgreementFilter, .grainControls {
+                 display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
                  font-family: var(--font-mono); font-size: 10.5px; color: var(--mute); margin-bottom: 7px; }
-  #memberToggles label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--body); }
-  #agreementFilter button { font-family: var(--font-mono); font-size: 10px; padding: 2px 9px; border-radius: 999px;
+  #memberToggles label, #evalMemberToggles label, .grainControls label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--body); }
+  #agreementFilter button, #evalAgreementFilter button, .grainControls button { font-family: var(--font-mono); font-size: 10px; padding: 2px 9px; border-radius: 999px;
                  border: 1px solid var(--line); background: #fff; color: var(--faint); cursor: pointer; }
-  #agreementFilter button.on { border-color: var(--ink); background: var(--ink); color: #fff; }
+  #agreementFilter button.on, #evalAgreementFilter button.on, .grainControls button.on { border-color: var(--ink); background: var(--ink); color: #fff; }
+  .grainControls select { font-family: var(--font-mono); font-size: 11px; padding: 3px 6px; border: 1px solid var(--line);
+                 border-radius: 5px; background: #fff; }
   #tokenSection { margin-top: 16px; }
   .tokenControls { display: flex; gap: 14px; margin: 7px 0; }
   .tokenControls label { font-family: var(--font-mono); font-size: 10.5px; color: var(--mute); }
@@ -209,14 +217,48 @@
   .tokenLegend { display: flex; gap: 4px 14px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10.5px;
                  color: var(--body); margin: 0 0 5px; }
   .tokenLegend .key { display: inline-flex; align-items: center; gap: 5px; }
-  #statsTable { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
-  #statsTable th { text-align: left; font-family: var(--font-mono); font-weight: 500; font-size: 9px;
+  #statsTable, .statsTable { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 12px; }
+  #statsTable th, .statsTable th { text-align: left; font-family: var(--font-mono); font-weight: 500; font-size: 9px;
                  text-transform: uppercase; letter-spacing: .1em; color: var(--mute-2); padding: 5px 8px;
                  border-bottom: 1px solid var(--line); }
-  #statsTable td { padding: 6px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
-  #statsTable .tagchip { display: inline-block; font-family: var(--font-mono); font-size: 9.5px; border-radius: 3px;
+  #statsTable td, .statsTable td { padding: 6px 8px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+  #statsTable .tagchip, #evalSheet .tagchip { display: inline-block; font-family: var(--font-mono); font-size: 9.5px; border-radius: 3px;
                  padding: 1px 6px; margin: 1px 3px 1px 0; }
-  #usageNote, #tagFilterNote { font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); margin-top: 8px; }
+  #usageNote, #tagFilterNote, #evalTagFilterNote, .statNote { font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); margin-top: 8px; }
+  .statsTable td.sibling { outline: 1.5px solid var(--gold); outline-offset: -3px; border-radius: 4px; }
+
+  /* the evaluation sheet's analysis visuals: headline cards, coverage grid, mini bars, divergences */
+  .statCards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .statCard { flex: 1; min-width: 150px; background: var(--subtle-warm); border: 1px solid var(--line-2);
+              border-radius: 6px; padding: 10px 12px; }
+  .statCard .statVal { font-family: var(--font-mono); font-size: 20px; font-weight: 600; color: var(--ink); }
+  .statCard .statLabel { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase;
+              letter-spacing: .1em; color: var(--mute-2); margin-top: 2px; }
+  .statCard .statSub { font-family: var(--font-mono); font-size: 10px; color: var(--mute); margin-top: 3px; }
+  .covRow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .covLabel { font-size: 10.5px; width: 130px; flex: none; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .covCells { display: flex; gap: 2px; flex-wrap: wrap; }
+  .covCell { display: inline-block; width: 14px; height: 14px; border-radius: 3px; }
+  .covCell.tag { background: var(--gold); }
+  .covCell.noop { background: var(--line); }
+  .covCell.miss { background: var(--adversarial); }
+  .covCell.none { background: var(--adversarial-tint); border: 1px dashed var(--adversarial); box-sizing: border-box; }
+  .covLegend { font-size: 10px; color: var(--mute-2); margin-top: 6px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .analysisCols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .miniBarRow { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .miniBarLabel { font-size: 10.5px; width: 130px; flex: none; text-align: right; }
+  .miniBar { flex: 1; height: 12px; background: var(--subtle-warm); border: 1px solid var(--line-2); border-radius: 3px; overflow: hidden; }
+  .miniBar span { display: block; height: 100%; background: var(--gold); }
+  .miniBarValue { font-size: 10.5px; width: 34px; flex: none; }
+  .divergence { border-bottom: 1px solid var(--line-2); padding: 5px 0; }
+  .divergence summary { cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .divergence summary .meta { font-size: 10px; color: var(--mute-2); }
+  .divergence .divLayer { margin: 6px 0 6px 18px; }
+  .divergence .divLayer .role { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase;
+              letter-spacing: .1em; color: var(--mute-2); font-weight: 600; }
+  .divergence .divLayer pre { margin: 2px 0; padding: 6px 9px; background: var(--subtle-warm); border: 1px solid var(--line-2);
+              border-radius: 5px; white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto;
+              font-family: var(--font-mono); font-size: 11px; }
   .call { border-bottom: 1px solid var(--line-2); }
   .callrow { padding: 6px 8px; cursor: pointer; font-size: 12px; border-radius: 5px; }
   .callrow:hover { background: var(--subtle); }
