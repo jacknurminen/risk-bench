@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
-from risk_bench.game.events import TurnStarted
+from risk_bench.game.events import PlayerEliminated, TurnStarted
 from risk_bench.game.serialization import action_from_json, chat_message_from_json, event_from_json
 from risk_bench.game.types import PlayerId
 from risk_bench.players.rendering import describe_action, narrate_event
@@ -120,6 +120,47 @@ def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
                 )
             # 'header', 'result', and 'commentary' are not citable and contribute no span
     return tuple(spans)
+
+
+def living_players_by_turn(
+    records: list[dict[str, Any]], player_ids: set[PlayerId], turns: list[int]
+) -> dict[int, frozenset[PlayerId]]:
+    """Map each requested turn to the players still alive on it.
+
+    A player is alive on turn K until the turn it is eliminated on (inclusive: it acted and was
+    acted upon during that turn), and gone thereafter. This is the per-turn denominator the
+    evaluator's forced consideration enumerates.
+
+    Args:
+        records: The journal records in file order, as ``read_journal`` returns them.
+        player_ids: Every player that played the game.
+        turns: The turns to report living rosters for.
+
+    Returns:
+        Each requested turn mapped to the frozenset of players alive on it.
+    """
+    elimination_turn = _elimination_turns(records=records)
+    return {
+        turn: frozenset(
+            player for player in player_ids if elimination_turn.get(player) is None or elimination_turn[player] >= turn
+        )
+        for turn in turns
+    }
+
+
+def _elimination_turns(records: list[dict[str, Any]]) -> dict[PlayerId, int]:
+    current_turn = 0
+    elimination_turn: dict[PlayerId, int] = {}
+    for record in records:
+        if record.get("type") != "events":
+            continue
+        for event_data in record["events"]:
+            event = event_from_json(event_data)
+            if isinstance(event, TurnStarted):
+                current_turn = event.turn_number
+            elif isinstance(event, PlayerEliminated):
+                elimination_turn[event.eliminated_player] = current_turn
+    return elimination_turn
 
 
 def _append(spans: list[TraceSpan], turn: int, step: int, layer: str, player: PlayerId | None, text: str) -> None:

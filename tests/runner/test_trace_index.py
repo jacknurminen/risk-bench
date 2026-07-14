@@ -2,10 +2,10 @@ from typing import Any
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
 from risk_bench.game.actions import PlaceArmies
-from risk_bench.game.events import ArmiesPlaced, TurnStarted
+from risk_bench.game.events import ArmiesPlaced, PlayerEliminated, TurnStarted
 from risk_bench.game.serialization import action_to_json, chat_message_to_json, event_to_json
 from risk_bench.game.types import Territory
-from risk_bench.runner.trace_index import build_trace_index
+from risk_bench.runner.trace_index import build_trace_index, living_players_by_turn
 
 
 def _records() -> list[dict[str, Any]]:
@@ -76,3 +76,23 @@ def test_appending_records_leaves_earlier_span_handles_unchanged():
     full_spans = build_trace_index(records=records)
 
     assert full_spans[: len(prefix_spans)] == prefix_spans
+
+
+def test_living_players_by_turn_drops_a_player_the_turn_after_elimination():
+    records = [
+        {"type": "header", "seed": 1},
+        {"type": "events", "events": [event_to_json(TurnStarted(player_id="alice", turn_number=1))]},
+        {"type": "events", "events": [event_to_json(TurnStarted(player_id="alice", turn_number=2))]},
+        # bob loses their last territory during turn 2; they are still "alive on turn 2", gone from turn 3
+        {
+            "type": "events",
+            "events": [event_to_json(PlayerEliminated(eliminated_player="bob", eliminated_by="alice"))],
+        },
+        {"type": "events", "events": [event_to_json(TurnStarted(player_id="alice", turn_number=3))]},
+    ]
+
+    living = living_players_by_turn(records=records, player_ids={"alice", "bob", "carla"}, turns=[1, 2, 3])
+
+    assert living[1] == frozenset({"alice", "bob", "carla"})
+    assert living[2] == frozenset({"alice", "bob", "carla"})  # eliminated during turn 2, still counted that turn
+    assert living[3] == frozenset({"alice", "carla"})  # gone from the next turn on
