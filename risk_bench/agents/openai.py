@@ -2,26 +2,25 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections.abc import Iterator, Sequence
 
 import openai
-import openai.types.chat
+import openai.types.responses
 
 from risk_bench.agents.base import Message, ReasoningEffort, Response, Tool, ToolCall
 
 
 class OpenAIAgent:
-    """Provider-agnostic chat model backed by the OpenAI chat completions API."""
+    """Provider-agnostic chat model backed by the OpenAI responses API."""
 
     def __init__(self, model: str, api_key: str, max_tokens: int, reasoning_effort: ReasoningEffort) -> None:
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
-        # Some models reject reasoning_effort (see _create_chat_completion); flipped off on first refusal.
-        self._reasoning_effort_supported = True
         self._client = openai.OpenAI(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
-        """Generate the next assistant turn via the chat completions API.
+        """Generate the next assistant turn via the OpenAI responses API.
 
         Args:
             messages: Full conversation history, oldest first.
@@ -30,97 +29,97 @@ class OpenAIAgent:
         Returns:
             The assistant's reply, with text and/or tool calls populated.
         """
-        converted_messages = [_to_openai_message(message=message) for message in messages]
-        converted_tools = [_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit
-        response = self._create_chat_completion(messages=converted_messages, tools=converted_tools)
-        parsed = _parse_response(message=response.choices[0].message)
+        # The responses endpoint, not chat completions: the GPT-5.6 models reject reasoning_effort
+        # outright when function tools are present on /v1/chat/completions, and the only accepted
+        # value there is 'none'. Reasoning effort is the dial this benchmark compares models on, so
+        # the endpoint that supports both is the only one that keeps OpenAI players comparable.
+        response = self._client.responses.create(
+            model=self._model,
+            input=list(_to_input_items(messages=messages)),
+            tools=[_to_openai_tool(tool=tool) for tool in tools] if tools else openai.omit,
+            reasoning={"effort": self._reasoning_effort.value},
+            max_output_tokens=self._max_tokens,
+            # The caller replays the whole conversation on every call, so there is no server-side
+            # state worth keeping; not storing also keeps game transcripts off OpenAI's servers.
+            store=False,
+        )
+        parsed = _parse_response(output=response.output)
         usage = response.usage
         if usage is None:
             return parsed
         return _with_usage(parsed=parsed, usage=usage)
 
-    def _create_chat_completion(
-        self,
-        messages: list[openai.types.chat.ChatCompletionMessageParam],
-        tools: list[openai.types.chat.ChatCompletionToolParam] | openai.Omit,
-    ) -> openai.types.chat.ChatCompletion:
-        try:
-            return self._client.chat.completions.create(
-                model=self._model,
-                # newer OpenAI models reject 'max_tokens' in favor of 'max_completion_tokens'
-                max_completion_tokens=self._max_tokens,
-                reasoning_effort=self._reasoning_effort.value if self._reasoning_effort_supported else openai.omit,
-                messages=messages,
-                tools=tools,
-            )
-        except openai.BadRequestError as error:
-            if not self._reasoning_effort_supported or not _rejects_reasoning_effort(error=error):
-                raise
-            # The cheap 'mini' tiers reject reasoning_effort when tools are present on chat
-            # completions; drop it for this agent's remaining calls and retry, so those models
-            # still run (just at the provider's default reasoning depth).
-            self._reasoning_effort_supported = False
-            return self._create_chat_completion(messages=messages, tools=tools)
 
-
-def _with_usage(parsed: Response, usage: openai.types.CompletionUsage) -> Response:
-    # prompt_tokens already includes the cached share, which is billed at the discounted
+def _with_usage(parsed: Response, usage: openai.types.responses.ResponseUsage) -> Response:
+    # input_tokens already includes the cached share, which is billed at the discounted
     # cached-input rate; OpenAI charges no premium for cache writes
-    details = usage.prompt_tokens_details
+    details = usage.input_tokens_details
     return dataclasses.replace(
         parsed,
-        input_tokens=usage.prompt_tokens,
-        output_tokens=usage.completion_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
         cache_write_tokens=0,
         cache_read_tokens=(details.cached_tokens if details is not None else None) or 0,
     )
 
 
-def _rejects_reasoning_effort(error: openai.BadRequestError) -> bool:
-    return getattr(error, "param", None) == "reasoning_effort" or "reasoning_effort" in str(error)
+def _to_input_items(messages: list[Message]) -> Iterator[openai.types.responses.ResponseInputItemParam]:
+    for message in messages:
+        yield from _to_input_items_for_message(message=message)
 
 
-def _to_openai_message(message: Message) -> openai.types.chat.ChatCompletionMessageParam:
-    if message.role == "system":
-        return {"role": "system", "content": message.content or ""}
-
+def _to_input_items_for_message(
+    message: Message,
+) -> Iterator[openai.types.responses.ResponseInputItemParam]:
     if message.role == "tool":
-        return {"role": "tool", "tool_call_id": message.tool_call_id or "", "content": message.content or ""}
+        yield {
+            "type": "function_call_output",
+            "call_id": message.tool_call_id or "",
+            "output": message.content or "",
+        }
+        return
 
     if message.role == "assistant":
-        assistant: openai.types.chat.ChatCompletionAssistantMessageParam = {"role": "assistant"}
-        if message.tool_calls:
-            assistant["tool_calls"] = [_to_openai_tool_call(call=call) for call in message.tool_calls]
-        # the API rejects an assistant turn carrying neither content nor tool_calls, so an
-        # empty turn (e.g. the model spent its whole budget on reasoning) must send "" text
+        # A tool-calling turn replays as one function_call item per call, alongside any text the
+        # model said. An assistant turn with neither (the model spent its whole budget on hidden
+        # reasoning) still has to replay as empty text, or the turn vanishes from the history.
         if message.content or not message.tool_calls:
-            assistant["content"] = message.content or ""
-        return assistant
+            yield {"role": "assistant", "content": message.content or ""}
+        for call in message.tool_calls:
+            yield {
+                "type": "function_call",
+                "call_id": call.id,
+                "name": call.name,
+                "arguments": json.dumps(call.arguments),
+            }
+        return
 
-    return {"role": "user", "content": message.content or ""}
+    role = "system" if message.role == "system" else "user"
+    yield {"role": role, "content": message.content or ""}
 
 
-def _to_openai_tool_call(call: ToolCall) -> openai.types.chat.ChatCompletionMessageFunctionToolCallParam:
+def _to_openai_tool(tool: Tool) -> openai.types.responses.ToolParam:
     return {
-        "id": call.id,
         "type": "function",
-        "function": {"name": call.name, "arguments": json.dumps(call.arguments)},
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": tool.parameters,
+        "strict": False,
     }
 
 
-def _to_openai_tool(tool: Tool) -> openai.types.chat.ChatCompletionToolParam:
-    return {
-        "type": "function",
-        "function": {"name": tool.name, "description": tool.description, "parameters": tool.parameters},
-    }
-
-
-def _parse_response(message: openai.types.chat.ChatCompletionMessage) -> Response:
+def _parse_response(output: Sequence[openai.types.responses.ResponseOutputItem]) -> Response:
+    text_parts: list[str] = []
     tool_calls: list[ToolCall] = []
-    for call in message.tool_calls or []:
-        if not isinstance(call, openai.types.chat.ChatCompletionMessageFunctionToolCall):
-            continue
-        arguments = json.loads(call.function.arguments) if call.function.arguments else {}
-        tool_calls.append(ToolCall(id=call.id, name=call.function.name, arguments=arguments))
+    for item in output:
+        if isinstance(item, openai.types.responses.ResponseOutputMessage):
+            text_parts.extend(
+                block.text for block in item.content if isinstance(block, openai.types.responses.ResponseOutputText)
+            )
+        elif isinstance(item, openai.types.responses.ResponseFunctionToolCall):
+            # call_id, not id: call_id is what a function_call_output must reference on replay
+            arguments = json.loads(item.arguments) if item.arguments else {}
+            tool_calls.append(ToolCall(id=item.call_id, name=item.name, arguments=arguments))
 
-    return Response(text=message.content, tool_calls=tuple(tool_calls))
+    text = "".join(text_parts) or None
+    return Response(text=text, tool_calls=tuple(tool_calls))
