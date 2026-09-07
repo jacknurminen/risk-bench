@@ -473,7 +473,7 @@ def _build_system_prompt() -> str:
         f"analysis:\n{_render_vocabulary()}\n"
         "Tag only what this turn clearly evidences and cite the evidence in the note; an empty list is "
         "common and correct.\n"
-        "Always refer to players by their exact ids (e.g. 'gemini-3.5-flash', never 'Gemini'), and to "
+        "Always refer to players by their exact ids (e.g. 'gemini-3.8-flash', never 'Gemini'), and to "
         "territories and continents by their exact ids (e.g. 'middle_east', 'north_america')."
     )
 
