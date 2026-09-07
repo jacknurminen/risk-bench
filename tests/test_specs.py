@@ -10,8 +10,8 @@ from risk_bench.specs import _split_effort
 
 def test_tier_specs_resolve_to_concrete_model_ids():
     assert specs.resolve_model(spec="anthropic:lo") == AnthropicModel.LO
-    assert specs.resolve_model(spec="anthropic:mid") == "claude-sonnet-4-6"
-    assert specs.resolve_model(spec="anthropic:hi") == "claude-opus-4-8"
+    assert specs.resolve_model(spec="anthropic:mid") == "claude-sonnet-5"
+    assert specs.resolve_model(spec="anthropic:hi") == "claude-opus-5"
     assert specs.resolve_model(spec="google:hi") == GoogleModel.HI
     assert specs.resolve_model(spec="openai:lo") == OpenAIModel.LO
 
@@ -37,7 +37,7 @@ def test_split_effort_only_treats_effort_words_as_a_suffix():
 
 
 def test_effort_suffix_is_stripped_when_resolving_the_model():
-    assert specs.resolve_model(spec="anthropic:hi:low") == "claude-opus-4-8"
+    assert specs.resolve_model(spec="anthropic:hi:low") == "claude-opus-5"
     assert specs.resolve_model(spec="openai:gpt-5.4-nano:high") == "gpt-5.4-nano"
 
 

@@ -2,7 +2,7 @@
 
 Tiers pick comparable price-capability points across providers so cross-provider
 matchups are meaningful. Prices are input/output USD per million tokens,
-checked 2026-06-10 against the providers' pricing pages:
+checked 2026-09-07 against the providers' pricing pages:
 https://platform.claude.com/docs/en/about-claude/pricing
 https://ai.google.dev/gemini-api/docs/pricing
 https://developers.openai.com/api/docs/pricing
@@ -15,20 +15,20 @@ from typing import Final
 
 class AnthropicModel(StrEnum):
     LO = "claude-haiku-4-5"
-    MID = "claude-sonnet-4-6"
-    HI = "claude-opus-4-8"
+    MID = "claude-sonnet-5"
+    HI = "claude-opus-5"
 
 
 class GoogleModel(StrEnum):
-    LO = "gemini-3.1-flash-lite"
-    MID = "gemini-3.5-flash"
+    LO = "gemini-3.5-flash-lite"
+    MID = "gemini-3.8-flash"
     HI = "gemini-3.1-pro-preview"
 
 
 class OpenAIModel(StrEnum):
-    LO = "gpt-5.4-mini"
-    MID = "gpt-5.4"
-    HI = "gpt-5.5"
+    LO = "gpt-5.6-luna"
+    MID = "gpt-5.6-terra"
+    HI = "gpt-5.6-sol"
 
 
 @dataclass(frozen=True)
@@ -37,8 +37,8 @@ class ModelPricing:
 
     The cache rates price the cached share of input tokens: Anthropic bills 5-minute cache
     writes at 1.25x the input rate and cache reads at 0.1x; OpenAI and Google charge no write
-    premium (their write rate equals the input rate) and discount cached reads to ~10% and ~25%
-    of the input rate respectively.
+    premium (their write rate equals the input rate) and both discount cached reads to 10% of
+    the input rate.
     """
 
     input_usd_per_million: float
@@ -59,17 +59,18 @@ def _pricing(input_usd: float, cache_write_usd: float, cache_read_usd: float, ou
 MODEL_PRICING: Final[dict[str, ModelPricing]] = {
     # anthropic (cache write 1.25x input, cache read 0.1x)
     AnthropicModel.LO: _pricing(input_usd=1.00, cache_write_usd=1.25, cache_read_usd=0.10, output_usd=5.00),
-    AnthropicModel.MID: _pricing(input_usd=3.00, cache_write_usd=3.75, cache_read_usd=0.30, output_usd=15.00),
+    AnthropicModel.MID: _pricing(input_usd=2.00, cache_write_usd=2.50, cache_read_usd=0.20, output_usd=10.00),
     AnthropicModel.HI: _pricing(input_usd=5.00, cache_write_usd=6.25, cache_read_usd=0.50, output_usd=25.00),
     # google ('hi' uses the <=200k-token prompt rate; $4.00 / $18.00 above that); implicit
-    # caching has no write premium and bills cached reads at 25% of the input rate
-    GoogleModel.LO: _pricing(input_usd=0.25, cache_write_usd=0.25, cache_read_usd=0.0625, output_usd=1.50),
-    GoogleModel.MID: _pricing(input_usd=1.50, cache_write_usd=1.50, cache_read_usd=0.375, output_usd=9.00),
-    GoogleModel.HI: _pricing(input_usd=2.00, cache_write_usd=2.00, cache_read_usd=0.50, output_usd=12.00),
+    # caching has no write premium and bills cached reads at 10% of the input rate. 'mid' is on
+    # introductory pricing through 2026-12-31 and doubles to $1.50 / $7.50 on 2027-01-01.
+    GoogleModel.LO: _pricing(input_usd=0.30, cache_write_usd=0.30, cache_read_usd=0.03, output_usd=2.50),
+    GoogleModel.MID: _pricing(input_usd=0.75, cache_write_usd=0.75, cache_read_usd=0.075, output_usd=3.75),
+    GoogleModel.HI: _pricing(input_usd=2.00, cache_write_usd=2.00, cache_read_usd=0.20, output_usd=12.00),
     # openai (no write premium; cached input at 10% of the input rate)
-    OpenAIModel.LO: _pricing(input_usd=0.75, cache_write_usd=0.75, cache_read_usd=0.075, output_usd=4.50),
-    OpenAIModel.MID: _pricing(input_usd=2.50, cache_write_usd=2.50, cache_read_usd=0.25, output_usd=15.00),
-    OpenAIModel.HI: _pricing(input_usd=5.00, cache_write_usd=5.00, cache_read_usd=0.50, output_usd=30.00),
+    OpenAIModel.LO: _pricing(input_usd=0.20, cache_write_usd=0.20, cache_read_usd=0.02, output_usd=1.20),
+    OpenAIModel.MID: _pricing(input_usd=2.00, cache_write_usd=2.00, cache_read_usd=0.20, output_usd=12.00),
+    OpenAIModel.HI: _pricing(input_usd=4.00, cache_write_usd=4.00, cache_read_usd=0.40, output_usd=20.00),
 }
 
 

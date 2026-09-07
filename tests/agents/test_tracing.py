@@ -38,14 +38,14 @@ def test_every_call_is_recorded_with_context_usage_and_payloads(tmp_path: Path):
     writer = TraceWriter(path=tmp_path / "game.trace.jsonl", append=False)
     response = Response(
         text="waving now",
-        tool_calls=(ToolCall(id="call-1", name="wave", arguments={"at": "gpt-5.4"}),),
+        tool_calls=(ToolCall(id="call-1", name="wave", arguments={"at": "gpt-5.6-terra"}),),
         input_tokens=120,
         output_tokens=15,
         cache_write_tokens=80,
         cache_read_tokens=20,
     )
     agent = TracingAgent(
-        agent=ScriptedAgent(response=response), model="claude-sonnet-4-6", caller="claude-sonnet-4-6", writer=writer
+        agent=ScriptedAgent(response=response), model="claude-sonnet-5", caller="claude-sonnet-5", writer=writer
     )
 
     writer.set_context(turn=3, kind="decision")
@@ -56,10 +56,10 @@ def test_every_call_is_recorded_with_context_usage_and_payloads(tmp_path: Path):
     [record] = read_trace(path=writer.path)
     assert record["seq"] == 1
     assert (record["turn"], record["kind"]) == (3, "decision")
-    assert (record["caller"], record["model"]) == ("claude-sonnet-4-6", "claude-sonnet-4-6")
+    assert (record["caller"], record["model"]) == ("claude-sonnet-5", "claude-sonnet-5")
     assert [message["role"] for message in record["messages"]] == ["system", "user"]
     assert record["tools"][0]["name"] == "wave"
-    assert record["response"]["tool_calls"] == [{"id": "call-1", "name": "wave", "arguments": {"at": "gpt-5.4"}}]
+    assert record["response"]["tool_calls"] == [{"id": "call-1", "name": "wave", "arguments": {"at": "gpt-5.6-terra"}}]
     assert (record["input_tokens"], record["output_tokens"]) == (120, 15)
     assert (record["cache_write_tokens"], record["cache_read_tokens"]) == (80, 20)
     assert record["error"] is None
@@ -68,7 +68,7 @@ def test_every_call_is_recorded_with_context_usage_and_payloads(tmp_path: Path):
 
 def test_a_failing_call_is_recorded_and_the_exception_passes_through(tmp_path: Path):
     writer = TraceWriter(path=tmp_path / "game.trace.jsonl", append=False)
-    agent = TracingAgent(agent=FailingAgent(), model="gpt-5.4", caller="gpt-5.4", writer=writer)
+    agent = TracingAgent(agent=FailingAgent(), model="gpt-5.6-terra", caller="gpt-5.6-terra", writer=writer)
 
     with pytest.raises(RuntimeError, match="the provider is down"):
         agent.respond(messages=A_CONVERSATION, tools=[])
@@ -107,11 +107,11 @@ def test_per_turn_usage_breaks_down_by_category_and_caller_in_tokens_and_cost(tm
         writer.set_context(turn=turn, kind=kind)
         agent.respond(messages=A_CONVERSATION, tools=[])
 
-    # sonnet is priced $3/$15 per Mtok, haiku $1/$5; one million-token unit makes the cost arithmetic exact
-    record(1, "negotiation", "sonnet", "claude-sonnet-4-6", 1_000_000, 0)
-    record(1, "decision", "sonnet", "claude-sonnet-4-6", 0, 100_000)
+    # sonnet is priced $2/$10 per Mtok, haiku $1/$5; one million-token unit makes the cost arithmetic exact
+    record(1, "negotiation", "sonnet", "claude-sonnet-5", 1_000_000, 0)
+    record(1, "decision", "sonnet", "claude-sonnet-5", 0, 100_000)
     record(1, "decision", "haiku", "claude-haiku-4-5", 500_000, 0)
-    record(2, "commentary:skill", "commentator:skill", "claude-sonnet-4-6", 200_000, 0)
+    record(2, "commentary:skill", "commentator:skill", "claude-sonnet-5", 200_000, 0)
     writer.close()
 
     usage = per_turn_usage(trace_path=writer.path)
@@ -125,14 +125,14 @@ def test_per_turn_usage_breaks_down_by_category_and_caller_in_tokens_and_cost(tm
     assert decision["input_tokens"] == [500_000, 0]
     assert decision["output_tokens"] == [100_000, 0]
     assert decision["input_cost"] == [0.5, 0.0]  # haiku 500k * $1/Mtok
-    assert decision["output_cost"] == [1.5, 0.0]  # sonnet 100k * $15/Mtok
+    assert decision["output_cost"] == [1.0, 0.0]  # sonnet 100k * $10/Mtok
 
     # by caller: sonnet turn-1 sums across its categories (1M negotiation in, 100k decision out)
     sonnet = usage["by_caller"]["sonnet"]
     assert sonnet["input_tokens"] == [1_000_000, 0]
     assert sonnet["output_tokens"] == [100_000, 0]
-    assert sonnet["input_cost"] == [3.0, 0.0]  # 1M * $3/Mtok
-    assert sonnet["output_cost"] == [1.5, 0.0]  # 100k * $15/Mtok
+    assert sonnet["input_cost"] == [2.0, 0.0]  # 1M * $2/Mtok
+    assert sonnet["output_cost"] == [1.0, 0.0]  # 100k * $10/Mtok
 
 
 def test_per_turn_usage_of_a_missing_trace_is_empty(tmp_path: Path):
@@ -153,13 +153,13 @@ def test_the_trace_lives_next_to_the_journal():
 
 def test_cost_estimates_use_the_pricing_table_and_admit_ignorance():
     known = estimate_cost_usd(
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-5",
         input_tokens=1_000_000,
         cache_write_tokens=0,
         cache_read_tokens=0,
         output_tokens=200_000,
     )
-    assert known == pytest.approx(3.00 + 0.2 * 15.00)
+    assert known == pytest.approx(2.00 + 0.2 * 10.00)
     unknown = estimate_cost_usd(
         model="some-custom-model", input_tokens=10, cache_write_tokens=0, cache_read_tokens=0, output_tokens=10
     )
@@ -170,7 +170,7 @@ def test_cost_estimates_price_the_cached_shares_at_their_own_rates():
     # opus: input $5, cache write $6.25 (1.25x), cache read $0.50 (0.1x), output $25 per Mtok.
     # 1M total input of which 200k written to cache and 700k read from it -> 100k uncached.
     cached = estimate_cost_usd(
-        model="claude-opus-4-8",
+        model="claude-opus-5",
         input_tokens=1_000_000,
         cache_write_tokens=200_000,
         cache_read_tokens=700_000,
@@ -187,7 +187,7 @@ def test_usage_by_caller_aggregates_cache_shares_into_the_cost(tmp_path: Path):
         text="x", input_tokens=1_000_000, output_tokens=0, cache_write_tokens=0, cache_read_tokens=1_000_000
     )
     agent = TracingAgent(
-        agent=ScriptedAgent(response=cached_response), model="claude-sonnet-4-6", caller="sonnet", writer=writer
+        agent=ScriptedAgent(response=cached_response), model="claude-sonnet-5", caller="sonnet", writer=writer
     )
     agent.respond(messages=A_CONVERSATION, tools=[])
     writer.close()
@@ -195,4 +195,4 @@ def test_usage_by_caller_aggregates_cache_shares_into_the_cost(tmp_path: Path):
     entry = usage_by_caller(trace_path=writer.path)["sonnet"]
 
     assert entry["input_tokens"] == 1_000_000 and entry["cache_read_tokens"] == 1_000_000
-    assert entry["cost_usd"] == pytest.approx(0.30)  # 1M fully cache-read at $0.30/Mtok, not $3.00
+    assert entry["cost_usd"] == pytest.approx(0.20)  # 1M fully cache-read at $0.20/Mtok, not $2.00

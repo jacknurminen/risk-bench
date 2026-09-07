@@ -234,7 +234,7 @@ def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
         "turn": 2,
         "kind": "decision",
         "caller": PLAYER_NAMES[0],
-        "model": "claude-sonnet-4-6",
+        "model": "claude-sonnet-5",
         "messages": [{"role": "system", "content": "rules"}, {"role": "user", "content": "a very long prompt"}],
         "tools": [{"name": "attack", "description": "Attack.", "parameters": {"type": "object"}}],
         "response": {"text": None, "tool_calls": [{"id": "c1", "name": "attack", "arguments": {}}]},
@@ -262,7 +262,7 @@ def test_trace_endpoints_serve_summaries_and_full_records(tmp_path: Path):
     # the game listing rolls the trace up into token and cost totals
     [game] = client.get("/api/games").json()["games"]
     assert (game["input_tokens"], game["output_tokens"]) == (2_341, 89)
-    assert game["cost_usd"] == (2_341 * 3.00 + 89 * 15.00) / 1_000_000
+    assert game["cost_usd"] == (2_341 * 2.00 + 89 * 10.00) / 1_000_000
 
 
 def test_a_game_without_a_trace_lists_no_calls(tmp_path: Path):
@@ -488,7 +488,7 @@ def _write_evaluator_trace(path: Path, callers: list[str]) -> None:
             "turn": 5,
             "kind": "evaluation",
             "caller": caller,
-            "model": "claude-sonnet-4-6",
+            "model": "claude-sonnet-5",
             "messages": [{"role": "user", "content": "tag this turn"}],
             "tools": [],
             "response": {"text": "ok", "tool_calls": []},
@@ -502,7 +502,7 @@ def _write_evaluator_trace(path: Path, callers: list[str]) -> None:
     path.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
 
 
-_CALL_COST_USD = (1_000 * 3.00 + 100 * 15.00) / 1_000_000  # one traced call at sonnet list prices
+_CALL_COST_USD = (1_000 * 2.00 + 100 * 10.00) / 1_000_000  # one traced call at sonnet list prices
 
 
 def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Path, monkeypatch):

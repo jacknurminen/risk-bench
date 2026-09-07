@@ -85,7 +85,7 @@ def test_the_panel_roster_resolves_member_labels_in_order(tmp_path: Path):
 
     assert [member["index"] for member in roster] == [0, 1]
     assert [member["spec"] for member in roster] == ["anthropic:hi", "google:hi"]
-    assert [member["label"] for member in roster] == ["claude-opus-4-8", "gemini-3.1-pro-preview"]
+    assert [member["label"] for member in roster] == ["claude-opus-5", "gemini-3.1-pro-preview"]
 
 
 def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
@@ -115,7 +115,7 @@ def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
 
     # each member's records survive separately, labelled by member
     assert {comment["commentator_index"] for comment in model["commentary"]} == {0, 1}
-    assert {comment["commentator"] for comment in model["commentary"]} == {"claude-opus-4-8", "gemini-3.1-pro-preview"}
+    assert {comment["commentator"] for comment in model["commentary"]} == {"claude-opus-5", "gemini-3.1-pro-preview"}
 
     # tags count distinct (turn, behavior) instances, not per-member observations: both members flag the
     # same strong move on turn 1, so it counts once. The per-member and agreement breakdowns are derived
@@ -237,7 +237,7 @@ def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):
         {
             "seq": 1,
             "caller": PLAYER_NAMES[0],
-            "model": "claude-sonnet-4-6",
+            "model": "claude-sonnet-5",
             "input_tokens": 1_000,
             "output_tokens": 100,
             "error": None,
@@ -245,7 +245,7 @@ def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):
         {
             "seq": 2,
             "caller": PLAYER_NAMES[0],
-            "model": "claude-sonnet-4-6",
+            "model": "claude-sonnet-5",
             "input_tokens": 2_000,
             "output_tokens": 200,
             "error": None,
@@ -267,7 +267,7 @@ def test_usage_and_cost_aggregate_from_the_trace_sidecar(tmp_path: Path):
     player_usage = usage[PLAYER_NAMES[0]]
     assert (player_usage["calls"], player_usage["errors"]) == (2, 0)
     assert (player_usage["input_tokens"], player_usage["output_tokens"]) == (3_000, 300)
-    assert player_usage["cost_usd"] == pytest.approx((3_000 * 3.00 + 300 * 15.00) / 1_000_000)
+    assert player_usage["cost_usd"] == pytest.approx((3_000 * 2.00 + 300 * 10.00) / 1_000_000)
     assert usage["commentator"]["errors"] == 1
     assert usage["commentator"]["cost_usd"] is None  # unknown model: no price invented
 
