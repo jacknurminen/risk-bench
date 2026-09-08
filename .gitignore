@@ -9,8 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# Runtime data
-data/
+# Runtime data, except one committed reference game (journal, traces, evaluation, analysis)
+data/*
+!data/games/
+data/games/*
+!data/games/20260908-092609-seed0/
 
 # Local design scratch: UI prototypes and screenshots, kept out of history (heavy binaries)
 designs/
