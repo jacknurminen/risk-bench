@@ -37,7 +37,8 @@ def request_for_phase(phase: Phase, hand: list[TerritoryCard], private_messages_
         eliminated_by={ALICE: None, BOB: None},
     )
     state.phase = phase
-    state.armies_to_place = 5
+    # only the reinforce phase carries armies to place; a leftover count during attack would read as a forced placement
+    state.armies_to_place = 5 if phase is Phase.REINFORCE else 0
     state.players[ALICE].cards = hand
     view = build_player_view(
         state=state,

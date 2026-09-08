@@ -14,7 +14,7 @@ from risk_bench.game.events import (
     TerritoryConquered,
     TurnStarted,
 )
-from risk_bench.game.rules import legal_actions, reinforcement_count
+from risk_bench.game.rules import legal_actions, must_trade_cards, reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 from tests.game.builders import PLACEHOLDER_MISSION, make_state, split_board_between
@@ -234,6 +234,35 @@ def test_eliminating_a_player_transfers_their_cards():
     assert carla_card in result.state.players[ALICE].cards
     assert PlayerEliminated(eliminated_player=CARLA, eliminated_by=ALICE) in result.events
     assert result.state.winner is None  # bob is still alive
+
+
+def test_eliminating_a_player_into_six_cards_forces_a_trade_before_attacking_resumes():
+    state = alaska_attack_state(alaska_armies=4)
+    state.players[ALICE].cards = [
+        TerritoryCard(design=CardDesign.INFANTRY, territory=territory)
+        for territory in (Territory.JAPAN, Territory.EGYPT, Territory.PERU, Territory.URAL)
+    ]
+    state.players[CARLA].cards = [
+        TerritoryCard(design=CardDesign.CAVALRY, territory=Territory.SIAM),
+        TerritoryCard(design=CardDesign.WILD, territory=None),
+    ]
+
+    conquered = apply_action(state=state, action=ATTACK_NORTHWEST, rng=ScriptedRandom(list(CONQUERING_ROLLS))).state
+    assert len(conquered.players[ALICE].cards) == 6
+    assert conquered.phase is Phase.ATTACK
+    assert must_trade_cards(state=conquered)
+    assert all(isinstance(action, TradeCards) for action in legal_actions(state=conquered))
+
+    traded = apply_action(state=conquered, action=legal_actions(state=conquered)[0], rng=random.Random(0)).state
+    assert traded.phase is Phase.ATTACK
+    assert traded.armies_to_place > 0
+    assert all(isinstance(action, PlaceArmies) for action in legal_actions(state=traded))
+
+    placement = PlaceArmies(territory=Territory.NORTHWEST_TERRITORY, count=traded.armies_to_place)
+    placed = apply_action(state=traded, action=placement, rng=random.Random(0)).state
+    assert placed.phase is Phase.ATTACK
+    assert placed.armies_to_place == 0
+    assert any(isinstance(action, Attack) for action in legal_actions(state=placed))
 
 
 def test_completing_a_mission_by_conquest_wins_the_game():

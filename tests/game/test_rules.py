@@ -55,16 +55,66 @@ def test_reinforcement_count_includes_continent_bonuses():
     assert reinforcement_count(state=state, player_id=ALICE) == 3 + 2
 
 
-def test_must_trade_cards_at_five_or_more():
+def infantry_cards(count: int) -> list[TerritoryCard]:
+    territories = (Territory.PERU, Territory.JAPAN, Territory.EGYPT, Territory.URAL, Territory.SIAM, Territory.CONGO)
+    return [TerritoryCard(design=CardDesign.INFANTRY, territory=territory) for territory in territories[:count]]
+
+
+def attack_phase_state(card_count: int, armies_to_place: int) -> GameState:
+    state = alaska_corner_state(alaska_armies=4)
+    state.phase = Phase.ATTACK
+    state.players[ALICE].cards = infantry_cards(count=card_count)
+    state.armies_to_place = armies_to_place
+    return state
+
+
+def test_must_trade_cards_at_five_or_more_during_reinforce():
     state = alaska_corner_state(alaska_armies=1)
-    state.players[ALICE].cards = [
-        TerritoryCard(design=CardDesign.INFANTRY, territory=territory)
-        for territory in (Territory.PERU, Territory.JAPAN, Territory.EGYPT, Territory.URAL)
-    ]
-    assert not must_trade_cards(state=state, player_id=ALICE)
+    state.players[ALICE].cards = infantry_cards(count=4)
+    assert not must_trade_cards(state=state)
 
     state.players[ALICE].cards.append(TerritoryCard(design=CardDesign.WILD, territory=None))
-    assert must_trade_cards(state=state, player_id=ALICE)
+    assert must_trade_cards(state=state)
+
+
+def test_must_trade_cards_at_six_or_more_during_attack():
+    assert not must_trade_cards(state=attack_phase_state(card_count=5, armies_to_place=0))
+    assert must_trade_cards(state=attack_phase_state(card_count=6, armies_to_place=0))
+
+
+def test_forced_attack_phase_trades_continue_at_five_cards_while_bonus_armies_are_pending():
+    # eight cards trade down to five with the bonus still unplaced: the chain is not finished
+    assert must_trade_cards(state=attack_phase_state(card_count=5, armies_to_place=4))
+    assert not must_trade_cards(state=attack_phase_state(card_count=4, armies_to_place=4))
+
+
+def test_forced_attack_phase_trade_offers_only_trades_then_only_placements():
+    forced = attack_phase_state(card_count=6, armies_to_place=0)
+    assert all(isinstance(action, TradeCards) for action in legal_actions(state=forced))
+    rejection = validate_action(state=forced, action=EndAttackPhase())
+    assert rejection is not None and "must trade" in rejection
+
+    traded = attack_phase_state(card_count=3, armies_to_place=4)
+    assert legal_actions(state=traded) == [
+        PlaceArmies(territory=Territory.ALASKA, count=4),
+        PlaceArmies(territory=Territory.ALBERTA, count=4),
+    ]
+    attack = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.KAMCHATKA,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=1,
+    )
+    rejection = validate_action(state=traded, action=attack)
+    assert rejection is not None and "must place" in rejection
+
+
+def test_voluntary_trades_and_placements_are_rejected_during_attack():
+    state = attack_phase_state(card_count=3, armies_to_place=0)
+    card_set = tuple(state.players[ALICE].cards)
+    assert validate_action(state=state, action=TradeCards(cards=(card_set[0], card_set[1], card_set[2]))) is not None
+    assert validate_action(state=state, action=PlaceArmies(territory=Territory.ALASKA, count=1)) is not None
 
 
 def test_reinforce_offers_placements_on_every_owned_territory():

@@ -44,7 +44,9 @@ end of it.
 - Cards: trade sets of three (all the same design or one of each; wilds substitute for any design). \
 Bonuses: 3 infantry = 4 armies, 3 cavalry = 6, 3 artillery = 8, one of each = 10, plus 2 extra armies \
 on each pictured territory you own. Holding 5 or more cards forces a trade.
-- Eliminating a player transfers their cards to you. If only one player remains, they win regardless of missions.
+- Eliminating a player transfers their cards to you; if that leaves you holding 6 or more, you must at once \
+trade sets down to 4 or fewer and place the armies before attacking again. If only one player remains, they \
+win regardless of missions.
 - Eliminate-player missions fall back to 'conquer 24 territories' if the target is you or someone else \
 eliminates them."""
 
@@ -112,7 +114,7 @@ def render_decision_prompt(request: DecisionRequest) -> str:
         _render_board(view=view),
         _render_hand(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
-        _phase_instruction(view=view),
+        _phase_instruction(request=request),
         "You may optionally include ONE message tool call alongside your action tool call to address the "
         "other players; most actions need no message.",
     ]
@@ -310,7 +312,8 @@ def _render_hand(view: PlayerView) -> str:
     return f"Your cards: {labels}"
 
 
-def _phase_instruction(view: PlayerView) -> str:
+def _phase_instruction(request: DecisionRequest) -> str:
+    view = request.view
     match view.phase:
         case Phase.SETUP_PLACEMENT:
             return (
@@ -324,6 +327,16 @@ def _phase_instruction(view: PlayerView) -> str:
                 f"in one call. Trade cards first if you wish."
             )
         case Phase.ATTACK:
+            if any(isinstance(action, TradeCards) for action in request.legal_actions):
+                return (
+                    f"Attack phase, but you now hold {len(view.own_cards)} cards after taking an eliminated "
+                    f"player's hand: you must trade in a set before you can attack again."
+                )
+            if any(isinstance(action, PlaceArmies) for action in request.legal_actions):
+                return (
+                    f"Attack phase: place the {view.armies_to_place} armies from your forced card trade on your "
+                    f"territories (splittable across territories in one call), then you can continue attacking."
+                )
             return (
                 "Attack: launch one or more attacks on adjacent enemy territories (you can repeat against a "
                 "target until it falls), or end the attack phase."
