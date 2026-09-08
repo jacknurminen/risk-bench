@@ -79,12 +79,14 @@ def _journal_with_panel(tmp_path: Path, commentators: list[str], commentary: lis
 
 
 def test_the_panel_roster_resolves_member_labels_in_order(tmp_path: Path):
-    path = _journal_with_panel(tmp_path=tmp_path, commentators=["anthropic:hi", "google:hi"], commentary=[])
+    path = _journal_with_panel(
+        tmp_path=tmp_path, commentators=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"], commentary=[]
+    )
 
     roster = build_view_model(journal_path=path)["commentators"]
 
     assert [member["index"] for member in roster] == [0, 1]
-    assert [member["spec"] for member in roster] == ["anthropic:hi", "google:hi"]
+    assert [member["spec"] for member in roster] == ["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"]
     assert [member["label"] for member in roster] == ["claude-opus-5", "gemini-3.1-pro-preview"]
 
 
@@ -93,7 +95,7 @@ def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
     commentary = [
         {
             "turn": 1,
-            "commentator": "anthropic:hi",
+            "commentator": "anthropic:claude-opus-5",
             "commentator_index": 0,
             "text": "anthropic's read.",
             "tags": [
@@ -103,13 +105,17 @@ def test_every_members_tags_are_kept_with_a_consensus_series(tmp_path: Path):
         },
         {
             "turn": 1,
-            "commentator": "google:hi",
+            "commentator": "google:gemini-3.1-pro-preview",
             "commentator_index": 1,
             "text": "google's read.",
             "tags": [{"player": PLAYER_NAMES[0], "behavior": "strong_move", "note": "agreed: strong"}],
         },
     ]
-    path = _journal_with_panel(tmp_path=tmp_path, commentators=["anthropic:hi", "google:hi"], commentary=commentary)
+    path = _journal_with_panel(
+        tmp_path=tmp_path,
+        commentators=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"],
+        commentary=commentary,
+    )
 
     model = build_view_model(journal_path=path)
 

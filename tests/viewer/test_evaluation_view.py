@@ -46,7 +46,7 @@ def _write_journal(path: Path) -> None:
 def _write_evaluation(journal_path: Path) -> None:
     # span 0 = the TurnStarted event, 1 = alice's thought, 2 = the place action, 3 = alice's note
     evaluation = Evaluation(
-        evaluator_spec="anthropic:hi",
+        evaluator_spec="anthropic:claude-opus-5",
         tags=(
             EvaluatorTag(
                 player="alice",
@@ -76,7 +76,7 @@ def _write_evaluation(journal_path: Path) -> None:
         ),
     )
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
-    writer.write_header(panel=["anthropic:hi"], record_count=5, span_count=4)
+    writer.write_header(panel=["anthropic:claude-opus-5"], record_count=5, span_count=4)
     writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
     writer.write_coverage(
         evaluator_index=0,

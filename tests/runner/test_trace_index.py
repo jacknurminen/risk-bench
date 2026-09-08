@@ -29,7 +29,7 @@ def _records() -> list[dict[str, Any]]:
         {
             "type": "commentary",
             "turn": 1,
-            "commentator": "anthropic:hi",
+            "commentator": "anthropic:claude-opus-5",
             "commentator_index": 0,
             "text": "x",
             "tags": [],
@@ -66,7 +66,7 @@ def test_every_citable_layer_becomes_a_span_in_order_with_turn_and_step():
 def test_inline_commentary_is_never_indexed():
     spans = build_trace_index(records=_records())
     assert all(span.layer != "commentary" for span in spans)
-    assert all("anthropic:hi" not in span.text for span in spans)
+    assert all("anthropic:claude-opus-5" not in span.text for span in spans)
 
 
 def test_appending_records_leaves_earlier_span_handles_unchanged():

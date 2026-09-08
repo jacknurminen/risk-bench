@@ -112,13 +112,19 @@ def test_the_index_page_is_served_at_the_root(tmp_path: Path):
     assert "risk-bench" in response.text
 
 
-def test_the_model_catalog_offers_tiers_and_the_baseline(tmp_path: Path):
-    catalog = client_for(tmp_path=tmp_path).get("/api/models").json()
+def test_the_model_catalog_offers_every_model_with_its_prices(tmp_path: Path):
+    client = TestClient(create_app(games_directory=tmp_path))
 
+    catalog = client.get("/api/models").json()
+
+    assert set(catalog["models_by_provider"]) == {"anthropic", "google", "openai"}
+    anthropic_models = catalog["models_by_provider"]["anthropic"]
+    # the setup form offers a provider's first entry by default, so the flagship must lead
+    assert anthropic_models[0]["id"] == "claude-fable-5"
+    assert {model["id"] for model in anthropic_models} >= {"claude-opus-5", "claude-haiku-4-5"}
+    haiku = next(model for model in anthropic_models if model["id"] == "claude-haiku-4-5")
+    assert (haiku["input_usd_per_million"], haiku["output_usd_per_million"]) == (1.00, 5.00)
     assert catalog["baseline"] == "random"
-    assert catalog["tiers_by_provider"]["anthropic"]["lo"] == "claude-haiku-4-5"
-    assert set(catalog["tiers_by_provider"]) == {"anthropic", "google", "openai"}
-    assert catalog["efforts"] == ["low", "medium", "high"]
 
 
 def test_launch_requests_are_validated(tmp_path: Path):
@@ -349,7 +355,7 @@ def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path:
 def client_with_evaluated_game(tmp_path: Path) -> tuple[TestClient, str]:
     client, game_id = client_with_finished_game(tmp_path=tmp_path)
     evaluation = Evaluation(
-        evaluator_spec="anthropic:hi",
+        evaluator_spec="anthropic:claude-opus-5",
         tags=(
             EvaluatorTag(
                 player=PLAYER_NAMES[0],
@@ -364,7 +370,7 @@ def client_with_evaluated_game(tmp_path: Path) -> tuple[TestClient, str]:
     )
     journal_path = tmp_path / "games" / game_id / "game.jsonl"
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
-    writer.write_header(panel=["anthropic:hi"], record_count=1, span_count=1)
+    writer.write_header(panel=["anthropic:claude-opus-5"], record_count=1, span_count=1)
     writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
     writer.close()
     return client, game_id
@@ -427,12 +433,15 @@ def client_with_two_evaluation_versions(tmp_path: Path) -> tuple[TestClient, str
     game_directory = tmp_path / "games" / game_id
     # the current (newest) run and one archived run, each its own panel + tag
     _write_raw_eval(
-        path=game_directory / "game.eval.jsonl", run_id="20260102-000000", panel=["openai:hi"], behavior="deception"
+        path=game_directory / "game.eval.jsonl",
+        run_id="20260102-000000",
+        panel=["openai:gpt-5.6-sol"],
+        behavior="deception",
     )
     _write_raw_eval(
         path=game_directory / "game.eval.20260101-000000.jsonl",
         run_id="20260101-000000",
-        panel=["anthropic:hi"],
+        panel=["anthropic:claude-opus-5"],
         behavior="betrayal",
     )
     return client, game_id
@@ -512,7 +521,9 @@ def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Pat
         callers=["evaluator[0]", "evaluator[0]", "evaluator[1]"],
     )
     monkeypatch.setattr(GameProcessManager, "is_evaluating", lambda self, game_id: True)
-    monkeypatch.setattr(GameProcessManager, "evaluating_panel", lambda self, game_id: ["anthropic:hi", "openai:hi"])
+    monkeypatch.setattr(
+        GameProcessManager, "evaluating_panel", lambda self, game_id: ["anthropic:claude-opus-5", "openai:gpt-5.6-sol"]
+    )
 
     payload = client.get(f"/api/games/{game_id}/evaluation").json()
 
@@ -523,8 +534,8 @@ def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Pat
     assert progress["cost_usd"] == round(3 * _CALL_COST_USD, 4)
     # each member is expected to make one call per turn plus the synthesis call
     assert [(member["calls"], member["spec"]) for member in progress["members"]] == [
-        (2, "anthropic:hi"),
-        (1, "openai:hi"),
+        (2, "anthropic:claude-opus-5"),
+        (1, "openai:gpt-5.6-sol"),
     ]
     assert progress["expected_calls"] == 2 * progress["members"][0]["expected_calls"]
 
@@ -599,11 +610,11 @@ def test_the_analysis_artifact_is_computed_on_demand_per_version(tmp_path: Path)
 
     current = client.get(f"/api/games/{game_id}/analysis")
     assert current.status_code == 200
-    assert current.json()["source"]["panel"] == ["openai:hi"]
+    assert current.json()["source"]["panel"] == ["openai:gpt-5.6-sol"]
     assert (game_directory / "game.analysis.json").is_file()  # persisted, so the next request just reads it
 
     archived = client.get(f"/api/games/{game_id}/analysis?version=20260101-000000")
-    assert archived.json()["source"]["panel"] == ["anthropic:hi"]
+    assert archived.json()["source"]["panel"] == ["anthropic:claude-opus-5"]
     assert (game_directory / "game.analysis.20260101-000000.json").is_file()
 
 

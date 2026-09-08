@@ -1,9 +1,10 @@
 """Player model-spec resolution, shared by the CLI and the web API.
 
-A spec is 'random', 'provider:tier' (e.g. 'anthropic:hi'), or 'provider:model'
-with an explicit model id, each optionally suffixed with ':<effort>' (low / mid-
-via 'medium' / high) to set that player's reasoning effort, e.g.
-'anthropic:hi:low'. Without the suffix the global default effort applies.
+A spec is 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5'), optionally suffixed with
+':<effort>' (low / mid- via 'medium' / high) to set that player's reasoning effort, e.g.
+'anthropic:claude-opus-5:low'. Without the suffix the global default effort applies. Any model id
+the provider accepts may be named, not only the ones listed in ``agents.models.MODELS`` — the
+registry is what the setup form offers and what usage reports can price, not a whitelist.
 Providers: anthropic, openai, google.
 """
 
@@ -13,7 +14,7 @@ from typing import Final
 from risk_bench.agents.anthropic import AnthropicAgent
 from risk_bench.agents.base import Agent, ReasoningEffort
 from risk_bench.agents.google import GeminiAgent
-from risk_bench.agents.models import AnthropicModel, GoogleModel, OpenAIModel
+from risk_bench.agents.models import Provider
 from risk_bench.agents.openai import OpenAIAgent
 from risk_bench.agents.tracing import TraceWriter, TracingAgent
 from risk_bench.config import Settings
@@ -25,18 +26,14 @@ from risk_bench.runner.commentary import Commentator
 from risk_bench.runner.evaluation import Evaluator
 from risk_bench.tournament.runner import PlayerFactory
 
-TIER_MODELS_BY_PROVIDER: Final[dict[str, type[AnthropicModel] | type[GoogleModel] | type[OpenAIModel]]] = {
-    "anthropic": AnthropicModel,
-    "google": GoogleModel,
-    "openai": OpenAIModel,
-}
+_PROVIDER_NAMES: Final[frozenset[str]] = frozenset(Provider)
 
 
 def resolve_model(spec: str) -> str:
-    """Resolve a player spec to a concrete model id.
+    """Resolve a player spec to the concrete model id it names.
 
     Args:
-        spec: A 'provider:tier' or 'provider:model' spec ('random' is not a model).
+        spec: A 'provider:model' spec ('random' is not a model).
 
     Returns:
         The concrete model id string.
@@ -45,15 +42,12 @@ def resolve_model(spec: str) -> str:
         ValueError: If the spec is malformed or names an unknown provider.
     """
     model_spec, _ = _split_effort(spec=spec)
-    provider, _, model_or_tier = model_spec.partition(":")
-    if not model_or_tier:
-        raise ValueError(f"'{spec}' is not 'random' or a provider:tier / provider:model spec.")
-    tier_models = TIER_MODELS_BY_PROVIDER.get(provider)
-    if tier_models is None:
-        raise ValueError(f"Unknown provider '{provider}'; use anthropic, openai, or google.")
-    if model_or_tier.upper() in tier_models.__members__:
-        return tier_models[model_or_tier.upper()].value
-    return model_or_tier
+    provider, _, model = model_spec.partition(":")
+    if not model:
+        raise ValueError(f"'{spec}' is not 'random' or a provider:model spec.")
+    if provider not in _PROVIDER_NAMES:
+        raise ValueError(f"Unknown provider '{provider}'; use {', '.join(Provider)}.")
+    return model
 
 
 def named_specs(specs: list[str]) -> dict[str, str]:
@@ -118,7 +112,7 @@ def build_agent(spec: str, settings: Settings, max_tokens: int) -> Agent:
     """Build the provider client for a model spec.
 
     Args:
-        spec: A 'provider:tier' or 'provider:model' spec.
+        spec: A 'provider:model' spec.
         settings: Provides API keys and the default reasoning effort.
         max_tokens: Output token budget per response; differs by role (game agents
             answer one move at a time, the evaluator writes a whole game's worth).
@@ -144,7 +138,7 @@ def build_agent(spec: str, settings: Settings, max_tokens: int) -> Agent:
         case "google":
             return GeminiAgent(model=model, api_key=api_key, max_tokens=max_tokens, reasoning_effort=reasoning_effort)
         case unknown_provider:
-            raise ValueError(f"Unknown provider '{unknown_provider}'; use anthropic, openai, or google.")
+            raise ValueError(f"Unknown provider '{unknown_provider}'; use {', '.join(Provider)}.")
 
 
 def build_commentators(

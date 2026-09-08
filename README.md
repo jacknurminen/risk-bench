@@ -61,7 +61,7 @@ The project uses [`uv`](https://github.com/astral-sh/uv) and requires Python 3.1
 uv sync
 ```
 
-Players are given inline as specs — `random`, `provider:tier` (providers `anthropic`/`openai`/`google`, tiers `lo`/`mid`/`hi`), or `provider:model` for an explicit model id. There is no separate registration step.
+Players are given inline as specs — `random` or `provider:model` (providers `anthropic`/`openai`/`google`), e.g. `anthropic:claude-opus-5`. Any model id the provider accepts works; the registry in `risk_bench/agents/models.py` is what the setup form offers and what usage reports can price, not a whitelist. There is no separate registration step.
 
 Run a quick game between random players to check the engine end-to-end:
 
@@ -72,14 +72,14 @@ uv run python -m risk_bench.main game random random random
 Play a model-backed game, optionally with split commentators (a bare `--commentator <spec>` runs every rubric on one model):
 
 ```bash
-uv run python -m risk_bench.main game anthropic:hi openai:hi google:mid \
-    --commentator skill=anthropic:hi --commentator conduct=google:mid
+uv run python -m risk_bench.main game anthropic:claude-opus-5 openai:gpt-5.6-sol google:gemini-3.8-flash \
+    --commentator skill=anthropic:claude-opus-5 --commentator conduct=google:gemini-3.8-flash
 ```
 
 Run a tournament and write its JSON report:
 
 ```bash
-uv run python -m risk_bench.main tournament anthropic:hi openai:hi random --games 10
+uv run python -m risk_bench.main tournament anthropic:claude-opus-5 openai:gpt-5.6-sol random --games 10
 ```
 
 Evaluate a stored game with a panel of whole-game **evaluators** — models that read the full trace
@@ -88,7 +88,7 @@ synthesis into a re-runnable `game.eval.jsonl` sidecar:
 
 ```bash
 uv run python -m risk_bench.main evaluate data/games/<game-folder>/game.jsonl \
-    --evaluator anthropic:hi --evaluator google:hi
+    --evaluator anthropic:claude-opus-5 --evaluator google:gemini-3.1-pro-preview
 ```
 
 Render a finished game into a standalone HTML replay:

@@ -13,9 +13,11 @@ from starlette.types import Scope
 
 from risk_bench import analysis, specs
 from risk_bench.agents.base import ReasoningEffort
+from risk_bench.agents.models import MODELS, Provider
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
+    CatalogModel,
     EvaluateRequest,
     GameListResponse,
     GameSummary,
@@ -277,9 +279,17 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.get("/api/models")
     def model_catalog() -> ModelCatalogResponse:
         return ModelCatalogResponse(
-            tiers_by_provider={
-                provider: {tier.name.lower(): tier.value for tier in tier_models}
-                for provider, tier_models in specs.TIER_MODELS_BY_PROVIDER.items()
+            models_by_provider={
+                provider.value: [
+                    CatalogModel(
+                        id=model.id,
+                        input_usd_per_million=model.pricing.input_usd_per_million,
+                        output_usd_per_million=model.pricing.output_usd_per_million,
+                    )
+                    for model in MODELS
+                    if model.provider is provider
+                ]
+                for provider in Provider
             },
             efforts=[effort.value for effort in ReasoningEffort],
             baseline="random",

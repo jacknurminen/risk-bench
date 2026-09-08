@@ -31,16 +31,18 @@ def _write_eval(path: Path, run_id: str | None, panel: list[str]) -> None:
 
 def test_a_single_run_is_the_current_version(tmp_path: Path):
     journal_path = tmp_path / "game.jsonl"
-    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260101-000000", panel=["anthropic:hi"])
+    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260101-000000", panel=["anthropic:claude-opus-5"])
 
     (version,) = list_versions(journal_path=journal_path)
-    assert version.is_current and version.run_id == "20260101-000000" and version.panel == ["anthropic:hi"]
+    assert version.is_current and version.run_id == "20260101-000000" and version.panel == ["anthropic:claude-opus-5"]
     assert version_for(journal_path=journal_path, run_id=None) == version
 
 
 def test_run_id_is_derived_from_created_at_when_absent(tmp_path: Path):
     journal_path = tmp_path / "game.jsonl"
-    _write_eval(path=tmp_path / "game.eval.jsonl", run_id=None, panel=["anthropic:hi"])  # pre-versioning sidecar
+    _write_eval(
+        path=tmp_path / "game.eval.jsonl", run_id=None, panel=["anthropic:claude-opus-5"]
+    )  # pre-versioning sidecar
 
     (version,) = list_versions(journal_path=journal_path)
     assert version.run_id == "20260101-000000"  # from the created_at timestamp
@@ -48,7 +50,7 @@ def test_run_id_is_derived_from_created_at_when_absent(tmp_path: Path):
 
 def test_archiving_frees_the_flat_paths_and_a_re_run_adds_a_second_version(tmp_path: Path):
     journal_path = tmp_path / "game.jsonl"
-    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260101-000000", panel=["anthropic:hi"])
+    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260101-000000", panel=["anthropic:claude-opus-5"])
     # the first run's companion sidecars, which must travel with it when archived
     (tmp_path / "game.verifications.jsonl").write_text("{}\n", encoding="utf-8")
     (tmp_path / "game.analysis.json").write_text("{}\n", encoding="utf-8")
@@ -63,14 +65,14 @@ def test_archiving_frees_the_flat_paths_and_a_re_run_adds_a_second_version(tmp_p
     assert (tmp_path / "game.verifications.20260101-000000.jsonl").is_file()  # verifications archived per version
     assert (tmp_path / "game.analysis.20260101-000000.json").is_file()
 
-    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260102-000000", panel=["openai:hi"])
+    _write_eval(path=tmp_path / "game.eval.jsonl", run_id="20260102-000000", panel=["openai:gpt-5.6-sol"])
     versions = list_versions(journal_path=journal_path)
 
     assert [version.run_id for version in versions] == ["20260102-000000", "20260101-000000"]  # newest first
     assert versions[0].is_current and not versions[1].is_current
-    assert versions[0].panel == ["openai:hi"] and versions[1].panel == ["anthropic:hi"]
+    assert versions[0].panel == ["openai:gpt-5.6-sol"] and versions[1].panel == ["anthropic:claude-opus-5"]
     pinned = version_for(journal_path=journal_path, run_id="20260101-000000")
-    assert pinned is not None and pinned.panel == ["anthropic:hi"]
+    assert pinned is not None and pinned.panel == ["anthropic:claude-opus-5"]
     assert version_for(journal_path=journal_path, run_id="nope") is None
 
 

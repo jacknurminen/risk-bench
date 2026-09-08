@@ -91,7 +91,7 @@ def test_agreement_pools_per_instance_consensus_across_games(tmp_path: Path):
     commentary = [
         {
             "turn": 1,
-            "commentator": "anthropic:hi",
+            "commentator": "anthropic:claude-opus-5",
             "commentator_index": 0,
             "text": "a",
             "tags": [
@@ -101,14 +101,17 @@ def test_agreement_pools_per_instance_consensus_across_games(tmp_path: Path):
         },
         {
             "turn": 1,
-            "commentator": "google:hi",
+            "commentator": "google:gemini-3.1-pro-preview",
             "commentator_index": 1,
             "text": "g",
             "tags": [{"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"}],
         },
     ]
     directory = _commentated_tournament(
-        tmp_path=tmp_path, seeds=[11, 12], commentators=["anthropic:hi", "google:hi"], commentary=commentary
+        tmp_path=tmp_path,
+        seeds=[11, 12],
+        commentators=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"],
+        commentary=commentary,
     )
 
     agreement = build_tournament_view_model(tournament_directory=directory)["agreement"]
@@ -128,7 +131,7 @@ def test_table_tags_count_behavior_instances_not_panel_observations(tmp_path: Pa
     commentary = [
         {
             "turn": 1,
-            "commentator": "anthropic:hi",
+            "commentator": "anthropic:claude-opus-5",
             "commentator_index": 0,
             "text": "a",
             "tags": [
@@ -138,14 +141,17 @@ def test_table_tags_count_behavior_instances_not_panel_observations(tmp_path: Pa
         },
         {
             "turn": 1,
-            "commentator": "google:hi",
+            "commentator": "google:gemini-3.1-pro-preview",
             "commentator_index": 1,
             "text": "g",
             "tags": [{"player": PLAYER_NAMES[0], "behavior": "deception", "note": "n"}],
         },
     ]
     directory = _commentated_tournament(
-        tmp_path=tmp_path, seeds=[11, 12], commentators=["anthropic:hi", "google:hi"], commentary=commentary
+        tmp_path=tmp_path,
+        seeds=[11, 12],
+        commentators=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"],
+        commentary=commentary,
     )
 
     table = build_tournament_view_model(tournament_directory=directory)["table"]

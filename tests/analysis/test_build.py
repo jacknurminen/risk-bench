@@ -32,7 +32,7 @@ def _write_journal(path: Path) -> None:
             "type": "header",
             "schema_version": 2,
             "seed": 1,
-            "player_specs": {"alice": "anthropic:hi", "bob": "openai:hi"},
+            "player_specs": {"alice": "anthropic:claude-opus-5", "bob": "openai:gpt-5.6-sol"},
             "max_turns": 10,
             "allow_private_messages": True,
             "max_negotiation_rounds": 1,
@@ -67,7 +67,7 @@ def _write_journal(path: Path) -> None:
 
 def _write_evaluation(journal_path: Path) -> None:
     member_anthropic = Evaluation(
-        evaluator_spec="anthropic:hi",
+        evaluator_spec="anthropic:claude-opus-5",
         tags=(
             EvaluatorTag(
                 player="alice",
@@ -121,7 +121,7 @@ def _write_evaluation(journal_path: Path) -> None:
         ),
     )
     member_openai = Evaluation(
-        evaluator_spec="openai:hi",
+        evaluator_spec="openai:gpt-5.6-sol",
         tags=(
             EvaluatorTag(
                 player="alice",
@@ -179,7 +179,7 @@ def _write_evaluation(journal_path: Path) -> None:
         ),
     )
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
-    writer.write_header(panel=["anthropic:hi", "openai:hi"], record_count=9, span_count=7)
+    writer.write_header(panel=["anthropic:claude-opus-5", "openai:gpt-5.6-sol"], record_count=9, span_count=7)
     writer.write_evaluation(evaluator_index=0, evaluation=member_anthropic)
     writer.write_evaluation(evaluator_index=1, evaluation=member_openai)
     for evaluator_index, coverage in _coverage_records():
@@ -210,7 +210,7 @@ def _analysis(tmp_path: Path) -> dict:
 
 def test_source_echoes_the_eval_header_and_journal_result(tmp_path: Path):
     source = _analysis(tmp_path=tmp_path)["source"]
-    assert source["panel"] == ["anthropic:hi", "openai:hi"]
+    assert source["panel"] == ["anthropic:claude-opus-5", "openai:gpt-5.6-sol"]
     assert source["record_count"] == 9 and source["span_count"] == 7
     assert source["winner"] == "alice" and source["turn_count"] == 2
 
@@ -324,7 +324,11 @@ def test_reference_game_matches_the_handoff_numbers():
     )
 
     source = analysis["source"]
-    assert source["panel"] == ["anthropic:hi:high", "google:hi:high", "openai:hi:high"]
+    assert source["panel"] == [
+        "anthropic:claude-opus-5:high",
+        "google:gemini-3.1-pro-preview:high",
+        "openai:gpt-5.6-sol:high",
+    ]
     assert source["record_count"] == 726 and source["span_count"] == 845
     assert source["winner"] == "gemini-3.1-pro-preview" and source["turn_count"] == 16
 
@@ -336,7 +340,11 @@ def test_reference_game_matches_the_handoff_numbers():
     assert analysis["agreement"]["strict"]["distribution"] == {"1": 56, "2": 18, "3": 7}
 
     tag_counts = {row["evaluator"]: row["tag_count"] for row in analysis["calibration"]["by_member"]}
-    assert tag_counts == {"anthropic:hi:high": 46, "google:hi:high": 23, "openai:hi:high": 44}
+    assert tag_counts == {
+        "anthropic:claude-opus-5:high": 46,
+        "google:gemini-3.1-pro-preview:high": 23,
+        "openai:gpt-5.6-sol:high": 44,
+    }
 
     structural = analysis["integrity"]["structural"]
     assert structural["gap_code_underevidenced"] == []

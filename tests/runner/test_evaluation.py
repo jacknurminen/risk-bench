@@ -68,7 +68,7 @@ def _synthesis_response(syntheses: list[dict[str, Any]]) -> Response:
 
 
 def _evaluate(agent: ScriptedAgent) -> EvaluatedGame | None:
-    return Evaluator(agent=agent, spec="anthropic:hi").evaluate_game(
+    return Evaluator(agent=agent, spec="anthropic:claude-opus-5").evaluate_game(
         players=PLAYERS, spans=_spans(), game_overview="overview", living_by_turn=LIVING
     )
 
@@ -251,7 +251,7 @@ def test_the_whole_game_trace_is_in_the_cacheable_system_prefix():
 
 def test_the_sidecar_round_trips_tags_and_coverage_through_the_store(tmp_path):
     evaluation = Evaluation(
-        evaluator_spec="anthropic:hi",
+        evaluator_spec="anthropic:claude-opus-5",
         tags=(
             EvaluatorTag(
                 player="alice",
@@ -266,7 +266,9 @@ def test_the_sidecar_round_trips_tags_and_coverage_through_the_store(tmp_path):
     )
     path = tmp_path / "game.eval.jsonl"
     writer = EvaluationWriter(path=path)
-    writer.write_header(panel=["anthropic:hi", "google:hi"], record_count=12, span_count=8)
+    writer.write_header(
+        panel=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"], record_count=12, span_count=8
+    )
     writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
     writer.write_coverage(
         evaluator_index=0,

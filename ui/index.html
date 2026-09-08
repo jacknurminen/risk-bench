@@ -165,17 +165,16 @@ const PROVIDER_LOGOS = {
   openai: "/assets/openai.png",
 };
 const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI" };
-const DEFAULT_SIZE = "hi";
 const DEFAULT_EFFORT = "low";
 
-let tiersByProvider = {};
+let modelsByProvider = {};
 let providers = [];
 let efforts = [];
 
 async function loadModels() {
   const catalog = await (await fetch("/api/models")).json();
-  tiersByProvider = catalog.tiers_by_provider;
-  providers = Object.keys(tiersByProvider);
+  modelsByProvider = catalog.models_by_provider;
+  providers = Object.keys(modelsByProvider);
   efforts = catalog.efforts;
   addPlayerRow(); addPlayerRow(); addPlayerRow();
 }
@@ -188,9 +187,13 @@ function providerTile(provider, active) {
     title="${label}">${inner}</button>`;
 }
 
-function sizeOptions(provider, selected) {
-  return Object.entries(tiersByProvider[provider]).map(([tier, modelId]) =>
-    `<option value="${tier}"${tier === selected ? " selected" : ""}>${tier} · ${modelId}</option>`).join("");
+const defaultModel = provider => (modelsByProvider[provider] ?? [])[0]?.id ?? "";
+
+// The price is the whole basis for picking one model over another now that there are no tiers,
+// so it is on the option itself rather than a tooltip or a separate column.
+function modelOptions(provider, selected) {
+  return (modelsByProvider[provider] ?? []).map(model =>
+    `<option value="${model.id}"${model.id === selected ? " selected" : ""}>${model.id} · $${model.input_usd_per_million}/$${model.output_usd_per_million}</option>`).join("");
 }
 
 function effortOptions(selected) {
@@ -206,7 +209,7 @@ function addPlayerRow() {
   row.className = "playerRow";
   row.innerHTML = `<span class="seat">seat ${rows.children.length + 1}</span>
     <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
-    <select class="sizeSelect">${sizeOptions(provider, DEFAULT_SIZE)}</select>
+    <select class="modelSelect">${modelOptions(provider, defaultModel(provider))}</select>
     <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
     <button type="button" class="subtle remove">✕</button>`;
   row.querySelectorAll(".providerTile").forEach(tile =>
@@ -218,9 +221,9 @@ function addPlayerRow() {
 function selectProvider(row, provider) {
   row.querySelectorAll(".providerTile").forEach(tile =>
     tile.classList.toggle("active", tile.dataset.provider === provider));
-  const sizeSelect = row.querySelector(".sizeSelect");
-  // tier keys (lo/mid/hi) are shared across providers, so keep the chosen size; only the model label changes
-  sizeSelect.innerHTML = sizeOptions(provider, sizeSelect.value || DEFAULT_SIZE);
+  // model ids belong to one provider, so there is no selection to carry across; switching
+  // providers falls back to that provider's first (most capable) model
+  row.querySelector(".modelSelect").innerHTML = modelOptions(provider, defaultModel(provider));
 }
 
 function renumber() {
@@ -228,15 +231,15 @@ function renumber() {
     .forEach((seat, i) => seat.textContent = `seat ${i + 1}`);
 }
 
-// A commentator-panel row reuses the player row's provider/size/effort controls; a member
-// is just another provider:size:effort spec. The panel may hold any number (0 = no commentary).
+// A commentator-panel row reuses the player row's provider/model/effort controls; a member
+// is just another provider:model:effort spec. The panel may hold any number (0 = no commentary).
 function addCommentatorRow() {
   const provider = providers[0];
   const row = document.createElement("div");
   row.className = "playerRow commentatorRow";
   row.innerHTML = `<span class="seat">🎙️</span>
     <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
-    <select class="sizeSelect">${sizeOptions(provider, DEFAULT_SIZE)}</select>
+    <select class="modelSelect">${modelOptions(provider, defaultModel(provider))}</select>
     <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
     <button type="button" class="subtle remove">✕</button>`;
   row.querySelectorAll(".providerTile").forEach(tile =>
@@ -247,7 +250,7 @@ function addCommentatorRow() {
 
 const specFromRow = row => {
   const provider = row.querySelector(".providerTile.active").dataset.provider;
-  return `${provider}:${row.querySelector(".sizeSelect").value}:${row.querySelector(".effortSelect").value}`;
+  return `${provider}:${row.querySelector(".modelSelect").value}:${row.querySelector(".effortSelect").value}`;
 };
 
 async function launch() {

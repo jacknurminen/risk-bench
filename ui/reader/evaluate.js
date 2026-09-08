@@ -93,20 +93,22 @@ function prefillPanel(version) {
   if (!el("evalRows").children.length) addEvalRow();
 }
 function addEvalRow(spec) {
-  const providers = Object.keys(modelCatalog.tiers_by_provider);
-  const parts = (spec || "").split(":");  // provider:tier:effort
+  const providers = Object.keys(modelCatalog.models_by_provider);
+  const parts = (spec || "").split(":");  // provider:model:effort
   const row = document.createElement("div"); row.className = "evalRow";
   const opt = (arr, sel) => arr.map(v => `<option${v === sel ? " selected" : ""}>${v}</option>`).join("");
-  row.innerHTML = `<select class="evP">${opt(providers, parts[0])}</select><select class="evT"></select><select class="evE">${opt(modelCatalog.efforts, parts[2])}</select>
+  const modelOpt = (models, sel) => models.map(m =>
+    `<option value="${m.id}"${m.id === sel ? " selected" : ""}>${m.id} · $${m.input_usd_per_million}/$${m.output_usd_per_million}</option>`).join("");
+  row.innerHTML = `<select class="evP">${opt(providers, parts[0])}</select><select class="evM"></select><select class="evE">${opt(modelCatalog.efforts, parts[2])}</select>
     <button class="btn" onclick="this.parentNode.remove()">✕</button>`;
   el("evalRows").appendChild(row);
-  const syncTiers = sel => { const tiers = Object.keys(modelCatalog.tiers_by_provider[row.querySelector(".evP").value]);
-    row.querySelector(".evT").innerHTML = opt(tiers, sel); };
-  row.querySelector(".evP").onchange = () => syncTiers(); syncTiers(parts[1]);
+  const syncModels = sel => { const models = modelCatalog.models_by_provider[row.querySelector(".evP").value] ?? [];
+    row.querySelector(".evM").innerHTML = modelOpt(models, sel); };
+  row.querySelector(".evP").onchange = () => syncModels(); syncModels(parts[1]);
 }
 async function runEvaluation() {
   const rows = [...el("evalRows").children].map(r =>
-    `${r.querySelector(".evP").value}:${r.querySelector(".evT").value}:${r.querySelector(".evE").value}`);
+    `${r.querySelector(".evP").value}:${r.querySelector(".evM").value}:${r.querySelector(".evE").value}`);
   if (!rows.length) { toast("add at least one panel member"); return; }
   const res = await fetch(EVALUATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ evaluators: rows }) });
   if (!res.ok) { toast("could not start: " + (await res.json()).detail); return; }

@@ -87,9 +87,17 @@ class TagVerificationBody(BaseModel):
     version: str | None = None
 
 
-class ModelCatalogResponse(BaseModel):
-    """The choices the setup form can offer: a model per provider/tier, and the reasoning efforts."""
+class CatalogModel(BaseModel):
+    """One selectable model, with the prices the setup form shows beside it."""
 
-    tiers_by_provider: dict[str, dict[str, str]]
+    id: str
+    input_usd_per_million: float
+    output_usd_per_million: float
+
+
+class ModelCatalogResponse(BaseModel):
+    """The choices the setup form can offer: the models each provider serves, and the efforts."""
+
+    models_by_provider: dict[str, list[CatalogModel]]
     efforts: list[str]
     baseline: str

@@ -118,7 +118,7 @@ def test_one_pass_member_tags_the_whole_vocabulary_skill_and_conduct_together():
             {"player": "alice", "behavior": "betrayal", "note": "a conduct tag, same pass"},
         ],
     )
-    commentator = Commentator(agent=StubAgent(response=response), spec="anthropic:hi")
+    commentator = Commentator(agent=StubAgent(response=response), spec="anthropic:claude-opus-5")
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=2, turn_log=["alice attacked"], previous_commentary=[], notes={}
@@ -140,7 +140,7 @@ def test_a_commentate_call_validates_players_and_behaviors():
             {"player": "bob", "behavior": "interpretive_dance", "note": "unknown behavior is dropped"},
         ],
     )
-    commentator = Commentator(agent=StubAgent(response=response), spec="anthropic:hi")
+    commentator = Commentator(agent=StubAgent(response=response), spec="anthropic:claude-opus-5")
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=4, turn_log=["alice attacked bob"], previous_commentary=[], notes={}
@@ -156,7 +156,7 @@ def test_a_commentate_call_validates_players_and_behaviors():
 def test_the_commentator_sees_missions_thoughts_notes_and_prior_commentary():
     agent = StubAgent(response=commentate_response(commentary="Quiet turn.", tags=[]))
 
-    Commentator(agent=agent, spec="anthropic:hi").comment_on_turn(
+    Commentator(agent=agent, spec="anthropic:claude-opus-5").comment_on_turn(
         state=game_state(),
         turn_number=2,
         turn_log=["bob (thinks): I will betray alice next turn"],
@@ -175,7 +175,8 @@ def test_the_commentator_sees_missions_thoughts_notes_and_prior_commentary():
 
 def test_plain_text_without_a_tool_call_still_becomes_commentary():
     commentator = Commentator(
-        agent=StubAgent(response=Response(text="A bold opening from carla.", tool_calls=())), spec="anthropic:hi"
+        agent=StubAgent(response=Response(text="A bold opening from carla.", tool_calls=())),
+        spec="anthropic:claude-opus-5",
     )
 
     commentary = commentator.comment_on_turn(
@@ -193,7 +194,9 @@ def test_a_tool_call_leaked_as_text_is_salvaged_not_shown_raw():
         '<parameter name="tags">[{"player": "alice", "behavior": "strong_move", "note": "good odds"}]'
         "</parameter></invoke>"
     )
-    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), spec="anthropic:hi")
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text=leaked, tool_calls=())), spec="anthropic:claude-opus-5"
+    )
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[], notes={}
@@ -212,7 +215,9 @@ def test_a_leak_with_a_swallowed_opening_tag_keeps_prose_and_complete_tags():
         '<parameter name="tags">[{"player": "bob", "behavior": "deception", "note": "said one thing"}, '
         '{"player": "alice", "behavior": "theory_of_mind", "note": "saw it coming and publicly wond'
     )  # cut off mid-JSON, as max-token truncation leaves it
-    commentator = Commentator(agent=StubAgent(response=Response(text=leaked, tool_calls=())), spec="anthropic:hi")
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text=leaked, tool_calls=())), spec="anthropic:claude-opus-5"
+    )
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["bob spoke"], previous_commentary=[], notes={}
@@ -240,7 +245,9 @@ def test_markup_leaked_inside_a_real_calls_commentary_argument_is_salvaged():
             "tags": [{"player": "bob", "behavior": "betrayal", "note": "a properly passed tag survives too"}],
         },
     )
-    commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=(call,))), spec="anthropic:hi")
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text=None, tool_calls=(call,))), spec="anthropic:claude-opus-5"
+    )
 
     commentary = commentator.comment_on_turn(
         state=game_state(), turn_number=1, turn_log=["alice attacked"], previous_commentary=[], notes={}
@@ -258,7 +265,8 @@ def test_markup_leaked_inside_a_real_calls_commentary_argument_is_salvaged():
 def test_an_unsalvageable_contaminated_call_falls_back_to_the_text_channel():
     call = ToolCall(id="call-1", name="commentate", arguments={"commentary": '<parameter name="tags">[]</parameter>'})
     commentator = Commentator(
-        agent=StubAgent(response=Response(text="carla held the line.", tool_calls=(call,))), spec="anthropic:hi"
+        agent=StubAgent(response=Response(text="carla held the line.", tool_calls=(call,))),
+        spec="anthropic:claude-opus-5",
     )
 
     commentary = commentator.comment_on_turn(
@@ -273,7 +281,7 @@ def test_an_unsalvageable_contaminated_call_falls_back_to_the_text_channel():
 def test_leaked_markup_without_salvageable_commentary_is_discarded():
     commentator = Commentator(
         agent=StubAgent(response=Response(text='<parameter name="tags">[]</parameter>', tool_calls=())),
-        spec="anthropic:hi",
+        spec="anthropic:claude-opus-5",
     )
 
     assert (
@@ -285,7 +293,9 @@ def test_leaked_markup_without_salvageable_commentary_is_discarded():
 
 
 def test_an_unusable_response_yields_no_commentary():
-    commentator = Commentator(agent=StubAgent(response=Response(text=None, tool_calls=())), spec="anthropic:hi")
+    commentator = Commentator(
+        agent=StubAgent(response=Response(text=None, tool_calls=())), spec="anthropic:claude-opus-5"
+    )
 
     assert (
         commentator.comment_on_turn(
@@ -303,7 +313,7 @@ class FailingAgent:
 
 
 def test_a_provider_failure_yields_no_commentary_instead_of_crashing():
-    commentator = Commentator(agent=FailingAgent(), spec="anthropic:hi")
+    commentator = Commentator(agent=FailingAgent(), spec="anthropic:claude-opus-5")
 
     assert (
         commentator.comment_on_turn(
@@ -324,7 +334,7 @@ def test_the_runner_journals_each_panel_members_commentary_after_each_turn(tmp_p
             max_turns=3,
             allow_private_messages=True,
             max_negotiation_rounds=3,
-            commentators=["anthropic:hi", "google:hi"],
+            commentators=["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"],
         )
     )
     panel = (
@@ -335,11 +345,11 @@ def test_the_runner_journals_each_panel_members_commentary_after_each_turn(tmp_p
                     tags=[{"player": "alice", "behavior": "threat", "note": "always whispering"}],
                 )
             ),
-            spec="anthropic:hi",
+            spec="anthropic:claude-opus-5",
         ),
         Commentator(
             agent=StubAgent(response=commentate_response(commentary="google's read.", tags=[])),
-            spec="google:hi",
+            spec="google:gemini-3.1-pro-preview",
         ),
     )
     GameRunner(
@@ -358,9 +368,12 @@ def test_the_runner_journals_each_panel_members_commentary_after_each_turn(tmp_p
 
     commentaries = [record for record in read_journal(path=path) if record["type"] == "commentary"]
     # every member annotates every completed turn, and records are kept separately (never merged)
-    assert {record["commentator"] for record in commentaries} == {"anthropic:hi", "google:hi"}
+    assert {record["commentator"] for record in commentaries} == {
+        "anthropic:claude-opus-5",
+        "google:gemini-3.1-pro-preview",
+    }
     assert {record["commentator_index"] for record in commentaries} == {0, 1}
-    by_index = {0: "anthropic:hi", 1: "google:hi"}
+    by_index = {0: "anthropic:claude-opus-5", 1: "google:gemini-3.1-pro-preview"}
     assert all(by_index[record["commentator_index"]] == record["commentator"] for record in commentaries)
     # within each turn, members are written in panel order, so replays are stable
     for turn in {record["turn"] for record in commentaries}:
@@ -370,7 +383,10 @@ def test_the_runner_journals_each_panel_members_commentary_after_each_turn(tmp_p
 
 def test_each_member_receives_players_fresh_notes_during_a_game():
     agents = [StubAgent(response=commentate_response(commentary="ok", tags=[])) for _ in range(2)]
-    panel = tuple(Commentator(agent=agent, spec=spec) for agent, spec in zip(agents, ["anthropic:hi", "google:hi"]))
+    panel = tuple(
+        Commentator(agent=agent, spec=spec)
+        for agent, spec in zip(agents, ["anthropic:claude-opus-5", "google:gemini-3.1-pro-preview"])
+    )
     GameRunner(
         players=dict(noting_players(seed=4)),
         seed=4,
