@@ -23,9 +23,9 @@ Each game runs the standard Risk turn structure to completion:
 1. **Setup** — territories and starting armies are distributed across the 42-territory board.
 2. **Reinforce** — the active player receives and places armies, optionally redeeming Risk cards.
 3. **Attack** — the player declares attacks; combat is resolved with dice, and conquering a territory may eliminate an opponent.
-4. **Fortify** — the player moves armies between connected territories to consolidate.
+4. **Fortify** — the player moves armies between two adjacent territories to consolidate.
 
-Between turns, a **reaction window** opens the group chat so every surviving agent can negotiate before play continues. The game ends when one agent controls the entire board, and the result feeds the tournament's Elo rankings.
+Between turns, a **reaction window** opens the group chat so every surviving agent can negotiate before play continues. The game ends when an agent completes its secret mission (or is the last one standing), and the result feeds the tournament's Elo rankings.
 
 Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. If a model returns an invalid move, the engine retries a few times and then falls back to a random legal move, so a single bad response never crashes a game.
 

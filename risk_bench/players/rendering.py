@@ -34,7 +34,7 @@ Rules summary:
 fortify (one move between adjacent owned territories, then your turn ends).
 - Reinforcements: territories owned / 3 (minimum 3), plus continent bonuses: North America 5, \
 South America 2, Europe 5, Africa 3, Asia 7, Oceania 2.
-- Combat: the attacker rolls up to 3 dice (always one fewer than the armies in the attacking territory), \
+- Combat: the attacker rolls 1 to 3 dice (at most one fewer than the armies in the attacking territory), \
 the defender automatically rolls up to 2. Highest dice are compared pairwise; the defender wins ties. \
 You may launch several attacks in one move and repeat against a single target until it falls.
 - Conquering: when you capture a territory your surviving attackers advance into it; you choose how many \

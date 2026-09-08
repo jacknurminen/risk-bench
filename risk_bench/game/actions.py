@@ -39,7 +39,7 @@ class Attack:
 
 @dataclass(frozen=True)
 class Fortify:
-    """Move armies between two connected owned territories, ending the turn."""
+    """Move armies between two adjacent owned territories, ending the turn."""
 
     from_territory: Territory
     to_territory: Territory
