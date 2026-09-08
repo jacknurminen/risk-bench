@@ -38,8 +38,9 @@ South America 2, Europe 5, Africa 3, Asia 7, Oceania 2.
 the defender automatically rolls up to 2. Highest dice are compared pairwise; the defender wins ties. \
 You may launch several attacks in one move and repeat against a single target until it falls.
 - Conquering: when you capture a territory your surviving attackers advance into it; you choose how many \
-stay behind (all but one by default). Conquering at least one territory during your turn earns one \
-territory card at the end of it.
+stay behind (all but one by default), but at least as many armies as dice you rolled in the capturing \
+battle must advance. Conquering at least one territory during your turn earns one territory card at the \
+end of it.
 - Cards: trade sets of three (all the same design or one of each; wilds substitute for any design). \
 Bonuses: 3 infantry = 4 armies, 3 cavalry = 6, 3 artillery = 8, one of each = 10, plus 2 extra armies \
 on each pictured territory you own. Holding 5 or more cards forces a trade.

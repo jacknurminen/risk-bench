@@ -167,6 +167,22 @@ def test_conquering_a_territory_advances_armies_and_stays_in_the_attack_phase():
 
 
 def test_armies_to_leave_behind_controls_how_many_advance():
+    state = alaska_attack_state(alaska_armies=6)
+    attack = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.NORTHWEST_TERRITORY,
+        attacker_dice=2,
+        max_attacks=1,
+        armies_to_leave_behind=3,
+    )
+
+    result = apply_action(state=state, action=attack, rng=ScriptedRandom([6, 6, 1]))
+
+    assert result.state.armies[Territory.ALASKA] == 3
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 3
+
+
+def test_at_least_as_many_armies_as_dice_rolled_must_advance_on_capture():
     state = alaska_attack_state(alaska_armies=4)
     attack = Attack(
         from_territory=Territory.ALASKA,
@@ -178,8 +194,9 @@ def test_armies_to_leave_behind_controls_how_many_advance():
 
     result = apply_action(state=state, action=attack, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
 
-    assert result.state.armies[Territory.ALASKA] == 3
-    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 1
+    # three dice were rolled, so three armies advance even though only one was asked to
+    assert result.state.armies[Territory.ALASKA] == 1
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 3
 
 
 def test_attack_repeats_until_the_target_falls_or_the_count_runs_out():

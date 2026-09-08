@@ -26,8 +26,9 @@ class Attack:
     ``max_attacks`` is how many times to keep rolling against the target,
     stopping early on capture or when the source can no longer attack.
     ``armies_to_leave_behind`` is how many armies stay in the source if the
-    target is captured; the rest advance into it (clamped so at least one army
-    stays and at least one advances).
+    target is captured; the rest advance into it. It is clamped so that one
+    army stays and at least as many armies as dice were rolled in the
+    capturing battle advance.
     """
 
     from_territory: Territory

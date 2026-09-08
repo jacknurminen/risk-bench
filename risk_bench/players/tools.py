@@ -289,7 +289,8 @@ def _attack_tool(attacks: list[Attack]) -> Tool:
     )
     launch_item["properties"]["armies_to_leave_behind"] = _positive_int_property(
         description="Optional: if you capture the target, how many armies stay in the source; the rest advance. "
-        "Defaults to 1 (advance all but one)."
+        "At least as many armies as dice rolled in the capturing battle must advance, so a larger value is "
+        "reduced if needed. Defaults to 1 (advance all but one)."
     )
     return Tool(
         name="attack",

@@ -234,17 +234,21 @@ def _apply_attack(state: GameState, action: Attack, rng: random.Random) -> list[
             )
         )
         if state.armies[action.to_territory] <= 0:
-            events += _occupy_conquered_territory(state=state, action=action, attacker=attacker, defender=defender)
+            events += _occupy_conquered_territory(
+                state=state, action=action, attacker=attacker, defender=defender, capturing_dice_count=dice_count
+            )
             break
     return events
 
 
 def _occupy_conquered_territory(
-    state: GameState, action: Attack, attacker: PlayerId, defender: PlayerId
+    state: GameState, action: Attack, attacker: PlayerId, defender: PlayerId, capturing_dice_count: int
 ) -> list[GameEvent]:
+    # at least as many armies as dice rolled in the capturing battle must advance; the attacker loses
+    # nothing on a capturing roll, so the source always still holds that many plus the one that stays
     from_armies = state.armies[action.from_territory]
-    armies_to_leave_behind = max(1, min(action.armies_to_leave_behind, from_armies - 1))
-    armies_to_move = from_armies - armies_to_leave_behind
+    requested_advance = from_armies - action.armies_to_leave_behind
+    armies_to_move = min(max(requested_advance, capturing_dice_count, 1), from_armies - 1)
     state.armies[action.from_territory] -= armies_to_move
     state.armies[action.to_territory] += armies_to_move
     state.owner[action.to_territory] = attacker
