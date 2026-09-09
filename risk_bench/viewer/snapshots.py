@@ -15,7 +15,7 @@ from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
 from risk_bench.players.rendering import describe_action, narrate_event
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
-from risk_bench.runner.journal import read_journal
+from risk_bench.runner.journal import read_journal, ruleset_for_schema_version
 
 
 def build_view_model(journal_path: Path) -> dict[str, Any]:
@@ -41,7 +41,8 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
 
     player_names: list[PlayerId] = list(header["player_specs"])
     rng = random.Random(int(header["seed"]))
-    state = setup_game(player_ids=player_names, rng=rng)
+    ruleset = ruleset_for_schema_version(schema_version=int(header["schema_version"]))
+    state = setup_game(player_ids=player_names, rng=rng, ruleset=ruleset)
 
     steps = [_step(state=state, player_names=player_names, action_text=None, events=[])]
     messages = []

@@ -3,8 +3,10 @@
 Pre-fold journals (schema v1) recorded a single-roll ``attack`` followed by a
 separate ``occupy`` action. The current engine folds the occupy into the
 conquering attack and has no OCCUPY phase, so the current loaders reject those
-journals. This script translates them on disk so they load natively; the loaders
-no longer carry any backward-compatibility path.
+journals. This script translates them on disk to schema v2 so they load
+natively. Schema v3 only records that a game was played under the current
+ruleset; a folded game keeps v2 so the loaders replay it under the legacy rules
+it was actually played with.
 
 The rewrite is faithful: each attack's army advance is derived from the recorded
 battle losses and occupy amount, reproducing the original board exactly. Writes
@@ -18,9 +20,12 @@ Usage (run from the repository root):
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
-from risk_bench.runner.journal import SCHEMA_VERSION, read_journal
+from risk_bench.runner.journal import read_journal
+
+# the schema the fold produces; v3 only changes the ruleset a game is judged by, which no rewrite can supply
+_FOLDED_SCHEMA_VERSION: Final[int] = 2
 
 
 def main() -> None:
@@ -46,11 +51,11 @@ def _migrate_journal(path: Path, dry_run: bool) -> bool:
         return False
 
     folded = _fold_records(records=records)
-    already_current = folded is records and int(records[0].get("schema_version", 1)) >= SCHEMA_VERSION
+    already_current = folded is records and int(records[0].get("schema_version", 1)) >= _FOLDED_SCHEMA_VERSION
     if already_current:
         return False
 
-    upgraded = [{**folded[0], "schema_version": SCHEMA_VERSION}, *folded[1:]]
+    upgraded = [{**folded[0], "schema_version": _FOLDED_SCHEMA_VERSION}, *folded[1:]]
     if not dry_run:
         _write_journal(path=path, records=upgraded)
     print(f"  {'would migrate' if dry_run else 'migrated'}: {path}")

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.game.engine import setup_game
+from risk_bench.game.ruleset import CURRENT_RULESET
 from risk_bench.game.state import GameState
 from risk_bench.runner.commentary import (
     BEHAVIOR_AXIS,
@@ -37,7 +38,7 @@ class StubAgent:
 
 
 def game_state() -> GameState:
-    return setup_game(player_ids=PLAYER_NAMES, rng=random.Random(1))
+    return setup_game(player_ids=PLAYER_NAMES, rng=random.Random(1), ruleset=CURRENT_RULESET)
 
 
 def commentate_response(commentary: str, tags: list[dict[str, str]]) -> Response:

@@ -9,6 +9,7 @@ from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached, TurnStarted
 from risk_bench.game.missions import Mission
 from risk_bench.game.rules import legal_actions, validate_action
+from risk_bench.game.ruleset import CURRENT_RULESET
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
@@ -112,7 +113,7 @@ class GameRunner:
         """
         rng = random.Random(self._seed)
         self._reset_progress(transcript=ChatTranscript())
-        state = setup_game(player_ids=list(self._players), rng=rng)
+        state = setup_game(player_ids=list(self._players), rng=rng, ruleset=CURRENT_RULESET)
         return self._play(state=state, rng=rng)
 
     def resume(self, restored: RestoredGame) -> GameRecord:
