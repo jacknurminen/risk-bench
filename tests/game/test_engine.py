@@ -15,6 +15,7 @@ from risk_bench.game.events import (
     TurnStarted,
 )
 from risk_bench.game.rules import legal_actions, must_trade_cards, reinforcement_count
+from risk_bench.game.ruleset import CURRENT_RULESET, LEGACY_RULESET
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 from tests.game.builders import PLACEHOLDER_MISSION, make_state, split_board_between
@@ -56,7 +57,7 @@ ATTACK_NORTHWEST = Attack(
 
 
 def test_setup_deals_all_territories_evenly_with_one_army_each():
-    state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(1))
+    state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(1), ruleset=CURRENT_RULESET)
 
     assert state.phase is Phase.SETUP_PLACEMENT
     assert all(state.armies[territory] == 1 for territory in Territory)
@@ -68,24 +69,28 @@ def test_setup_deals_all_territories_evenly_with_one_army_each():
 
 
 def test_setup_is_deterministic_by_seed():
-    first = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(5))
-    second = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(5))
+    first = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(5), ruleset=CURRENT_RULESET)
+    second = setup_game(player_ids=[ALICE, BOB, CARLA], rng=random.Random(5), ruleset=CURRENT_RULESET)
     assert first.owner == second.owner
     assert {p: s.mission for p, s in first.players.items()} == {p: s.mission for p, s in second.players.items()}
 
 
 def test_setup_rejects_invalid_player_counts_and_duplicate_ids():
     with pytest.raises(ValueError):
-        setup_game(player_ids=[ALICE, BOB], rng=random.Random(0))
+        setup_game(player_ids=[ALICE, BOB], rng=random.Random(0), ruleset=CURRENT_RULESET)
     with pytest.raises(ValueError):
-        setup_game(player_ids=[ALICE, BOB, CARLA, "dan", "erin", "fred", "gina"], rng=random.Random(0))
+        setup_game(
+            player_ids=[ALICE, BOB, CARLA, "dan", "erin", "fred", "gina"],
+            rng=random.Random(0),
+            ruleset=CURRENT_RULESET,
+        )
     with pytest.raises(ValueError):
-        setup_game(player_ids=[ALICE, ALICE, BOB], rng=random.Random(0))
+        setup_game(player_ids=[ALICE, ALICE, BOB], rng=random.Random(0), ruleset=CURRENT_RULESET)
 
 
 def test_setup_placement_cycles_players_then_starts_turn_one():
     rng = random.Random(2)
-    state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=rng)
+    state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=rng, ruleset=CURRENT_RULESET)
 
     for expected_player in (ALICE, BOB, CARLA):
         assert state.current_player == expected_player
@@ -182,6 +187,23 @@ def test_armies_to_leave_behind_controls_how_many_advance():
     assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 3
 
 
+def test_the_legacy_ruleset_lets_a_single_army_advance_regardless_of_dice():
+    state = alaska_attack_state(alaska_armies=4)
+    state.ruleset = LEGACY_RULESET
+    attack = Attack(
+        from_territory=Territory.ALASKA,
+        to_territory=Territory.NORTHWEST_TERRITORY,
+        attacker_dice=3,
+        max_attacks=1,
+        armies_to_leave_behind=3,
+    )
+
+    result = apply_action(state=state, action=attack, rng=ScriptedRandom(list(CONQUERING_ROLLS)))
+
+    assert result.state.armies[Territory.ALASKA] == 3
+    assert result.state.armies[Territory.NORTHWEST_TERRITORY] == 1
+
+
 def test_at_least_as_many_armies_as_dice_rolled_must_advance_on_capture():
     state = alaska_attack_state(alaska_armies=4)
     attack = Attack(
@@ -263,6 +285,17 @@ def test_eliminating_a_player_into_six_cards_forces_a_trade_before_attacking_res
     assert placed.phase is Phase.ATTACK
     assert placed.armies_to_place == 0
     assert any(isinstance(action, Attack) for action in legal_actions(state=placed))
+
+
+def test_the_legacy_ruleset_never_forces_a_trade_during_attack():
+    state = alaska_attack_state(alaska_armies=4)
+    state.ruleset = LEGACY_RULESET
+    state.players[ALICE].cards = [
+        TerritoryCard(design=CardDesign.INFANTRY, territory=territory) for territory in Territory
+    ][:6]
+
+    assert not must_trade_cards(state=state)
+    assert any(isinstance(action, Attack) for action in legal_actions(state=state))
 
 
 def test_completing_a_mission_by_conquest_wins_the_game():
@@ -365,7 +398,7 @@ def test_apply_action_does_not_mutate_the_input_state():
 def test_random_playthroughs_finish_with_a_winner_and_keep_invariants():
     for seed in range(5):
         rng = random.Random(seed)
-        state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=rng)
+        state = setup_game(player_ids=[ALICE, BOB, CARLA], rng=rng, ruleset=CURRENT_RULESET)
         for _ in range(20_000):
             if state.phase is Phase.GAME_OVER:
                 break

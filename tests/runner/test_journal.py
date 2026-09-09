@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from risk_bench.game.ruleset import CURRENT_RULESET, LEGACY_RULESET
 from risk_bench.game.types import Phase, PlayerId, Territory
 from risk_bench.players.base import Player
 from risk_bench.players.random import RandomPlayer
@@ -14,9 +15,11 @@ from risk_bench.runner.journal import (
     JournalWriter,
     read_journal,
     restore_game,
+    ruleset_for_schema_version,
 )
 
 PLAYER_NAMES = ["alice", "bob", "carla"]
+REFERENCE_GAME_JOURNAL = Path(__file__).parents[2] / "data" / "games" / "20260908-092609-seed0" / "game.jsonl"
 
 
 def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -> GameRunner:
@@ -174,6 +177,33 @@ def test_headers_from_before_multi_pass_negotiation_restore_with_one_round(tmp_p
     restored = restore_game(path=path)
 
     assert restored.header.max_negotiation_rounds == 1
+
+
+def test_journals_from_before_schema_three_replay_under_the_legacy_ruleset(tmp_path: Path):
+    assert ruleset_for_schema_version(schema_version=2) is LEGACY_RULESET
+    assert ruleset_for_schema_version(schema_version=SCHEMA_VERSION) is CURRENT_RULESET
+
+    path = tmp_path / "game.jsonl"
+    header = {
+        "type": "header",
+        "schema_version": 2,
+        "seed": 0,
+        "player_specs": {name: "random" for name in PLAYER_NAMES},
+    }
+    header.update({"max_turns": 10, "allow_private_messages": False, "max_negotiation_rounds": 1, "commentators": []})
+    path.write_text(json.dumps(header) + "\n", encoding="utf-8")
+
+    assert restore_game(path=path).state.ruleset is LEGACY_RULESET
+
+
+@pytest.mark.skipif(not REFERENCE_GAME_JOURNAL.exists(), reason="the committed reference game is not checked out")
+def test_the_committed_reference_game_replays_cleanly():
+    # played under the legacy ruleset before the minimum-advance and forced-trade clauses were enforced
+    restored = restore_game(path=REFERENCE_GAME_JOURNAL)
+
+    assert restored.is_finished
+    assert restored.state.winner == "gpt-5.6-sol"
+    assert restored.state.turn_number == 15
 
 
 def test_restore_rejects_files_without_a_header(tmp_path: Path):

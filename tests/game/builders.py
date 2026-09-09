@@ -2,6 +2,7 @@ import random
 
 from risk_bench.game.cards import create_shuffled_deck
 from risk_bench.game.missions import Mission, MissionKind
+from risk_bench.game.ruleset import CURRENT_RULESET
 from risk_bench.game.state import GameState, PlayerState
 from risk_bench.game.types import Phase, PlayerId, Territory
 
@@ -29,6 +30,7 @@ def make_state(
         for player_id, mission in missions.items()
     }
     return GameState(
+        ruleset=CURRENT_RULESET,
         armies=armies,
         owner=owner,
         players=players,

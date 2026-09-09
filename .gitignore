@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Local API keys
+.env
+
 # Runtime data, except one committed reference game (journal, traces, evaluation, analysis)
 data/*
 !data/games/

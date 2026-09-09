@@ -100,11 +100,12 @@ def must_trade_cards(state: GameState) -> bool:
     """Check whether the current player is forced to trade a card set before doing anything else.
 
     During reinforce, a hand of five or more cards must be traded down. During
-    attack, cards taken from an eliminated player force trades once the hand
-    reaches six, continuing until it holds four or fewer, and the bonus armies
-    are placed before attacking resumes. A five-card hand mid-attack is only
-    forced while such a chain is in progress, which is exactly when bonus
-    armies from an earlier forced trade are still waiting to be placed.
+    attack, when the ruleset enforces it, cards taken from an eliminated player
+    force trades once the hand reaches six, continuing until it holds four or
+    fewer, and the bonus armies are placed before attacking resumes. A five-card
+    hand mid-attack is only forced while such a chain is in progress, which is
+    exactly when bonus armies from an earlier forced trade are still waiting to
+    be placed.
 
     Args:
         state: The current game state.
@@ -117,6 +118,8 @@ def must_trade_cards(state: GameState) -> bool:
         case Phase.REINFORCE:
             return hand_size >= _REINFORCE_FORCED_TRADE_HAND_SIZE
         case Phase.ATTACK:
+            if not state.ruleset.forced_trade_during_attack:
+                return False
             trade_chain_in_progress = state.armies_to_place > 0
             return hand_size >= _ATTACK_FORCED_TRADE_HAND_SIZE or (
                 trade_chain_in_progress and hand_size >= _REINFORCE_FORCED_TRADE_HAND_SIZE

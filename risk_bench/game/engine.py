@@ -28,6 +28,7 @@ from risk_bench.game.events import (
 )
 from risk_bench.game.missions import deal_missions, effective_mission, is_mission_complete
 from risk_bench.game.rules import reinforcement_count, validate_action
+from risk_bench.game.ruleset import Ruleset
 from risk_bench.game.state import GameState, PlayerState
 from risk_bench.game.types import Phase, PlayerId, Territory
 
@@ -47,7 +48,7 @@ class StepResult:
 _STARTING_ARMIES_BY_PLAYER_COUNT: Final[dict[int, int]] = {3: 35, 4: 30, 5: 25, 6: 20}
 
 
-def setup_game(player_ids: list[PlayerId], rng: random.Random) -> GameState:
+def setup_game(player_ids: list[PlayerId], rng: random.Random, ruleset: Ruleset) -> GameState:
     """Create the starting state: deal territories, missions, and starting armies.
 
     Territories are dealt randomly with one army each; each player then places
@@ -57,6 +58,7 @@ def setup_game(player_ids: list[PlayerId], rng: random.Random) -> GameState:
     Args:
         player_ids: The players in turn order; must be 3-6 unique ids.
         rng: Source of randomness for all deals and shuffles.
+        ruleset: The optional rulebook clauses enforced for the whole game.
 
     Returns:
         The initial game state in the SETUP_PLACEMENT phase.
@@ -80,6 +82,7 @@ def setup_game(player_ids: list[PlayerId], rng: random.Random) -> GameState:
     }
 
     state = GameState(
+        ruleset=ruleset,
         armies={territory: 1 for territory in Territory},
         owner=owner,
         players=players,
@@ -244,11 +247,12 @@ def _apply_attack(state: GameState, action: Attack, rng: random.Random) -> list[
 def _occupy_conquered_territory(
     state: GameState, action: Attack, attacker: PlayerId, defender: PlayerId, capturing_dice_count: int
 ) -> list[GameEvent]:
-    # at least as many armies as dice rolled in the capturing battle must advance; the attacker loses
-    # nothing on a capturing roll, so the source always still holds that many plus the one that stays
+    # under the rulebook clause at least as many armies as dice rolled in the capturing battle must advance;
+    # the attacker loses nothing on a capturing roll, so the source always still holds that many plus one
+    minimum_advance = capturing_dice_count if state.ruleset.minimum_advance_on_capture else 1
     from_armies = state.armies[action.from_territory]
     requested_advance = from_armies - action.armies_to_leave_behind
-    armies_to_move = min(max(requested_advance, capturing_dice_count, 1), from_armies - 1)
+    armies_to_move = min(max(requested_advance, minimum_advance), from_armies - 1)
     state.armies[action.from_territory] -= armies_to_move
     state.armies[action.to_territory] += armies_to_move
     state.owner[action.to_territory] = attacker

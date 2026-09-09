@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from risk_bench.game.board import BOARD
 from risk_bench.game.cards import Deck, TerritoryCard
 from risk_bench.game.missions import Mission
+from risk_bench.game.ruleset import Ruleset
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 
 
@@ -24,11 +25,13 @@ class PlayerState:
 class GameState:
     """The complete state of a game in progress.
 
-    ``players`` preserves turn order (dict insertion order). The query methods
+    ``players`` preserves turn order (dict insertion order). ``ruleset`` fixes
+    which optional rulebook clauses apply for the whole game. The query methods
     are strictly read-only derived values; all mutation goes through
     ``engine.apply_action``.
     """
 
+    ruleset: Ruleset
     armies: dict[Territory, int]
     owner: dict[Territory, PlayerId]
     players: dict[PlayerId, PlayerState]

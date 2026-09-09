@@ -8,6 +8,7 @@ from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.actions import Action
 from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import GameEvent
+from risk_bench.game.ruleset import CURRENT_RULESET, LEGACY_RULESET, Ruleset
 from risk_bench.game.serialization import (
     action_from_json,
     action_to_json,
@@ -18,7 +19,10 @@ from risk_bench.game.serialization import (
 from risk_bench.game.state import GameState
 from risk_bench.game.types import PlayerId
 
-SCHEMA_VERSION: Final[int] = 2  # v2 folds the separate occupy action into the attack that conquers
+# v2 folded the separate occupy action into the attack that conquers; v3 games are played under the
+# current ruleset (minimum advance on capture, forced trade during attack), earlier ones under the legacy one
+SCHEMA_VERSION: Final[int] = 3
+_FIRST_CURRENT_RULESET_SCHEMA_VERSION: Final[int] = 3
 
 
 @dataclass(frozen=True)
@@ -189,12 +193,30 @@ def read_journal(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def ruleset_for_schema_version(schema_version: int) -> Ruleset:
+    """Return the ruleset a journal of the given schema version was played under.
+
+    Rule clauses cannot be migrated on disk the way a record layout can, so a
+    replay has to judge the recorded actions by the rules in force at the time.
+
+    Args:
+        schema_version: The journal header's schema version.
+
+    Returns:
+        The ruleset to replay the journal with.
+    """
+    if schema_version < _FIRST_CURRENT_RULESET_SCHEMA_VERSION:
+        return LEGACY_RULESET
+    return CURRENT_RULESET
+
+
 def restore_game(path: Path) -> RestoredGame:
     """Reconstruct a game's exact state by replaying the journal's actions.
 
     The engine is a pure seed-deterministic reducer, so replaying the header's
-    seed and the recorded actions through it lands on the same state (and the
-    same rng stream position) the game crashed in.
+    seed and the recorded actions through it, under the ruleset the schema
+    version implies, lands on the same state (and the same rng stream position)
+    the game crashed in.
 
     Args:
         path: The journal file to restore from.
@@ -211,7 +233,8 @@ def restore_game(path: Path) -> RestoredGame:
     header = _header_from_json(data=records[0])
 
     rng = random.Random(header.seed)
-    state = setup_game(player_ids=list(header.player_specs), rng=rng)
+    ruleset = ruleset_for_schema_version(schema_version=header.schema_version)
+    state = setup_game(player_ids=list(header.player_specs), rng=rng, ruleset=ruleset)
     messages = []
     is_finished = False
     for record in records[1:]:
