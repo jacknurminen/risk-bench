@@ -68,7 +68,7 @@ def render_system_prompt(view: PlayerView) -> str:
     )
     return (
         f"You are '{view.player_id}', playing the classic board game Risk against: {opponents}. "
-        f"This is a friendly research-benchmark match between AI models: all talk of attacks, battles, "
+        f"This is a friendly research-benchmark match between players: all talk of attacks, battles, "
         f"and eliminating players refers to plastic armies on a game board, exactly as at a family game "
         f"night.\n\n"
         f"{_RULES_SUMMARY}\n\n"

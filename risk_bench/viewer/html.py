@@ -26,6 +26,7 @@ def render_reader_html(
     verifications_url: str,
     trace_url: str,
     analysis_url: str,
+    human_url: str = "",
 ) -> str:
     """Render the unified evaluation reader: the game timeline with the panel's read merged in.
 
@@ -44,6 +45,7 @@ def render_reader_html(
         trace_url: The URL serving the game's API call trace (feeds the stats modal's call inspector).
         analysis_url: The URL serving the evaluation-analysis artifact (feeds the stats modal's
             evaluation sheet).
+        human_url: Optional decision mailbox URL, enabling the human turn card in live web games.
 
     Returns:
         A complete HTML document with the game data, evaluation, and board map embedded.
@@ -59,6 +61,8 @@ def render_reader_html(
         verifications_url_json=json.dumps(verifications_url),
         trace_url_json=json.dumps(trace_url),
         analysis_url_json=json.dumps(analysis_url),
+        human_url=human_url,
+        human_url_json=json.dumps(human_url),
         board_svg=_BOARD_SVG,
     )
 

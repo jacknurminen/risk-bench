@@ -40,11 +40,12 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     trace_path = trace_path_for_journal(journal_path=journal_path)
 
     player_names: list[PlayerId] = list(header["player_specs"])
+    human_players = [name for name in player_names if header["player_specs"][name] == "human"]
     rng = random.Random(int(header["seed"]))
     ruleset = ruleset_for_schema_version(schema_version=int(header["schema_version"]))
     state = setup_game(player_ids=player_names, rng=rng, ruleset=ruleset)
 
-    steps = [_step(state=state, player_names=player_names, action_text=None, events=[])]
+    steps = [_step(state=state, player_names=player_names, human_players=human_players, action_text=None, events=[])]
     messages = []
     thoughts = []
     notes = []
@@ -65,6 +66,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                     _step(
                         state=state,
                         player_names=player_names,
+                        human_players=human_players,
                         action_text=describe_action(player_id=acting_player, action=action),
                         events=[],
                     )
@@ -128,6 +130,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         "seed": int(header["seed"]),
         "max_turns": int(header["max_turns"]),
         "players": [{"name": name, "mission": state.players[name].mission.description} for name in player_names],
+        "human_players": human_players,
         "continents": [
             {
                 "name": str(continent),
@@ -160,7 +163,11 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
 
 
 def _step(
-    state: GameState, player_names: list[PlayerId], action_text: str | None, events: list[str]
+    state: GameState,
+    player_names: list[PlayerId],
+    human_players: list[PlayerId],
+    action_text: str | None,
+    events: list[str],
 ) -> dict[str, Any]:
     player_index = {name: index for index, name in enumerate(player_names)}
     return {
@@ -169,6 +176,13 @@ def _step(
         "current_player": state.current_player,
         "action": action_text,
         "events": events,
+        "hands": {
+            name: [
+                {"design": str(card.design), "territory": str(card.territory) if card.territory is not None else None}
+                for card in state.players[name].cards
+            ]
+            for name in human_players
+        },
         "board": {str(t): [player_index[state.owner[t]], state.armies[t]] for t in Territory},
         "players": [
             {

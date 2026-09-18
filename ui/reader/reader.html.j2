@@ -19,6 +19,7 @@
       <span style="color:#c7c1b3">·</span>
       <span id="mastWinner"></span>
       <button class="btn" id="gameControl" style="display:none;font-size:10px;padding:4px 10px">⏸ pause game</button>
+      {% if human_url %}<button class="btn" id="humanControl" style="display:none;font-size:10px;padding:4px 10px">Your move</button>{% endif %}
       <button class="btn" id="exportBtn" onclick="toggleExport()" style="font-size:10px;padding:4px 10px">✂ export</button>
       <button class="btn" onclick="openStats()" style="font-size:10px;padding:4px 10px">📊 stats</button>
     </div>
@@ -29,6 +30,10 @@
   <aside class="rail">
     <div class="section">
       <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
+      <button class="toggle missionToggle" id="missionToggle" type="button" role="switch" aria-checked="false" hidden>
+        <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+        <span>Hide opponent missions</span>
+      </button>
       <div id="railPlayers"></div>
     </div>
     <div class="card filters">
@@ -50,7 +55,11 @@
   <main class="feed">
     <section class="card boardcard">
       <div class="boardhead"><span class="eyebrow" id="boardTurnLabel">Board</span>
-        <span class="mono" style="font-size:10px;color:var(--faintest)" id="boardHint"></span></div>
+        <div class="boardTools"><span id="boardHint"></span>
+          <button class="btn" id="mapZoomOut" type="button" aria-label="Zoom out map">−</button>
+          <button class="btn" id="mapZoomReset" type="button" title="Reset map view">100%</button>
+          <button class="btn" id="mapZoomIn" type="button" aria-label="Zoom in map">+</button>
+          <button class="btn" id="mapFocus" type="button" aria-pressed="false">Focus map</button></div></div>
       <div id="board">{{ board_svg }}<div id="continentLegend"></div>
         <div class="attribution">Map: <a href="https://commons.wikimedia.org/wiki/File:Risk_board.svg">Risk board</a>
           by Gr0gmint, Wikimedia Commons, <a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA 3.0</a></div>
@@ -69,9 +78,65 @@
       <div class="statstrip" id="statStrip"></div>
     </section>
 
+    <div id="mapDivider" role="separator" tabindex="0" aria-label="Resize map and timeline"
+      aria-orientation="horizontal" aria-controls="board timelinePane"
+      title="Drag to resize · arrow keys to adjust · double-click to reset"><span></span></div>
+    <section id="timelinePane" aria-label="Timeline and game analysis" tabindex="0">
+    {% if human_url %}
+    <section class="card humanTurn" id="humanTurn" hidden aria-labelledby="humanTitle">
+      <div class="notesHead"><span class="serif" id="humanTitle">Your turn</span><span class="mono humanContext" id="humanContext"></span></div>
+      <p id="humanHint" aria-live="polite"></p><p id="humanHelp"></p>
+      <div id="humanLiveNotice" hidden><span>Return to the live board to continue your turn. Your draft is saved.</span>
+        <button class="btn" id="humanGoLive" type="button">Return to live board</button></div>
+      <div id="humanResult" aria-live="polite"></div>
+      <form id="humanForm"><fieldset id="humanFields">
+        <label id="humanNotesLabel" hidden>Your private notes<textarea id="humanNotes" rows="10" maxlength="8000" placeholder="Record agreements, mission suspicions, and plans for later turns."></textarea></label>
+        <div id="humanActions">
+          <label id="humanModeLabel">Action<select id="humanKind"></select></label>
+          <div id="humanPlacement" hidden>
+            <div class="humanPlanHead"><strong id="humanProgress"></strong><div>
+              <button class="btn" id="humanUndo" type="button">Undo last change</button>
+              <button class="btn" id="humanClear" type="button">Clear placements</button></div></div>
+            <div class="humanAdd"><label>Add to territory<select id="humanPlaceTerritory"></select></label>
+              <button class="btn" id="humanAddOne" type="button">Add one</button>
+              <button class="btn" id="humanAddRemaining" type="button">Add remaining</button></div>
+            <div id="humanAllocations"></div>
+          </div>
+          <div id="humanPair" hidden>
+            <div class="humanColumns"><label>From<select id="humanSource"></select></label>
+              <label>To<select id="humanTarget"></select></label></div>
+            <p id="humanPairSummary"></p>
+            <div id="humanAttack" class="humanColumns" hidden>
+              <label>Attack dice<input id="humanDice" type="number" min="1" max="3" value="1"></label>
+              <label>Armies to leave behind<input id="humanLeave" type="number" min="1" value="1"></label>
+              <label>Maximum rolls<input id="humanRolls" type="number" min="1" value="3"></label>
+            </div>
+            <div id="humanFortify" hidden><label>Armies to move<input id="humanMoveSlider" type="range" min="1" value="1"></label>
+              <div class="humanMoveCount"><button class="btn" id="humanMoveMinus" type="button" aria-label="Move one fewer army">−</button>
+                <label>Count<input id="humanMoveCount" type="number" min="1" value="1"></label>
+                <button class="btn" id="humanMovePlus" type="button" aria-label="Move one more army">+</button></div></div>
+          </div>
+          <label id="humanTradeLabel" hidden>Card set<select id="humanTrade"></select></label>
+        </div>
+        <details class="humanHand"><summary>Your mission &amp; cards</summary><p id="humanMission"></p><p id="humanCards"></p></details>
+        <label id="humanMessageLabel">Message (optional)<textarea id="humanMessage" rows="2" maxlength="4000" placeholder="Say something to the table"></textarea></label>
+        <label id="humanRecipientLabel">Send to<select id="humanRecipient"></select></label>
+        <details class="humanReasoning" id="humanReasoning"><summary>Private reasoning (optional)</summary><label>Saved for analysis<textarea id="humanThought" rows="2" maxlength="8000"></textarea></label></details>
+        <div class="humanFooter"><button class="btn" id="humanSkipNotes" type="button" hidden>Continue without changes</button>
+          <button class="btn" id="humanEnd" type="button" hidden>Finish attacking</button>
+          <button class="btn" id="humanRepeat" type="button" hidden>Attack repeatedly</button>
+          <button class="btn dark" id="humanSubmit" type="submit">Confirm move</button></div>
+      </fieldset></form><p id="humanError" role="alert"></p>
+    </section>
+    {% endif %}
+
+    <details class="readerAnalysis" id="readerAnalysis" open>
+    <summary>Game analysis</summary>
     <section class="card evalBar" id="evalBar" hidden></section>
     <section class="card ctaCard" id="evalCta" hidden></section>
     <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+
+    </details>
 
     <div class="subbar">
       <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
@@ -83,7 +148,13 @@
     </div>
 
     <div id="timeline"></div>
+    </section>
   </main>
+  {% if human_url %}
+  <aside class="humanSide" id="humanSide" hidden aria-label="Human player controls">
+    <div class="card humanWaiting" id="humanWaiting" role="status">Agents are playing. Your controls will appear here when needed.</div>
+  </aside>
+  {% endif %}
 </div>
 
 <div id="panelRoot"></div>
@@ -149,6 +220,7 @@
     </div>
   </div>
 </div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -164,6 +236,7 @@ window.BOOT = {
     verifications: {{ verifications_url_json }},
     trace: {{ trace_url_json }},
     analysis: {{ analysis_url_json }},
+    human: {{ human_url_json }},
   },
 };
 </script>
@@ -177,5 +250,8 @@ window.BOOT = {
 <script src="/assets/reader/evalstats.js"></script>
 <script src="/assets/reader/export.js"></script>
 <script src="/assets/reader/main.js"></script>
+<script src="/assets/reader/layout.js"></script>
+{% if human_url %}<script src="/assets/reader/human-draft.js"></script>
+<script src="/assets/reader/human.js"></script>{% endif %}
 </body>
 </html>

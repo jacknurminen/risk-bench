@@ -15,6 +15,7 @@ from risk_bench import analysis, specs
 from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.models import MODELS, Provider
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
+from risk_bench.api.human import install_human_routes
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     CatalogModel,
@@ -89,6 +90,7 @@ def create_app(games_directory: Path) -> FastAPI:
     app.add_event_handler("shutdown", manager.shutdown)
     app.mount("/assets", _RevalidatingStaticFiles(directory=UI_DIRECTORY), name="assets")
     usage_cache: _UsageCache = {}
+    install_human_routes(app, manager, lambda game_id: _journal_path(games_directory, game_id))
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -97,6 +99,8 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.get("/games/{game_id}", include_in_schema=False)
     def game_page(game_id: str) -> HTMLResponse:
         game_view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
+        with _journal_path(games_directory, game_id).open(encoding="utf-8") as journal:
+            has_human = "human" in json.loads(journal.readline())["player_specs"].values()
         evaluation_view_model = _load_evaluation_view_model(
             games_directory=games_directory, game_id=game_id, manager=manager, run_id=None, usage_cache=usage_cache
         )
@@ -112,6 +116,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 verifications_url=f"/api/games/{game_id}/verifications",
                 trace_url=f"/api/games/{game_id}/trace",
                 analysis_url=f"/api/games/{game_id}/analysis",
+                human_url=f"/api/games/{game_id}/human" if has_human and game_view_model["result"] is None else "",
             )
         )
 
@@ -161,7 +166,9 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.get("/api/games/{game_id}")
     def game_view_model(game_id: str) -> dict[str, Any]:
-        return _load_view_model(games_directory=games_directory, game_id=game_id)
+        view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
+        view_model["running"] = manager.is_running(game_id=game_id)
+        return view_model
 
     @app.post("/api/games", status_code=201)
     def launch_game(request: NewGameRequest) -> NewGameResponse:
@@ -690,11 +697,13 @@ def _launched_commentators(game_directory: Path) -> list[str]:
 def _validate_launch_request(request: NewGameRequest) -> None:
     if not 3 <= len(request.players) <= 6:
         raise HTTPException(status_code=400, detail="Risk seats 3-6 players per game.")
+    if "human" in request.players and request.parallel_games != 1:
+        raise HTTPException(status_code=400, detail="Human games must be launched one at a time.")
     settings = load_settings()
     try:
         specs.named_specs(specs=request.players)
         for spec in request.players:
-            if spec != "random":
+            if spec not in {"random", "human"}:
                 specs.build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
         # mirror player validation: build every panel member up front so a bad spec fails fast
         specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)

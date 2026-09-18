@@ -23,10 +23,20 @@ const COLORS = ["#a33f3b","#3670ab","#6e8f3a","#71509c","#c97a29","#1f92ab"];
 const MEMBER_COLORS = ["#7a6a55","#4a7a6e","#8a6f9e","#9e6a4a","#5a7a3c","#3c6a8a","#9a8a3c","#6a6a6a"];
 GAME.notes ??= []; GAME.commentary ??= []; GAME.commentators ??= [];
 const steps = GAME.steps;
+const humanPlayers = new Set(GAME.human_players || []);
+let hideOpponentMissions = false;
+try { hideOpponentMissions = localStorage.getItem("risk-bench:hide-opponent-missions") === "true"; } catch {}
 let index = 0, timer = null;
 
 const el = id => document.getElementById(id);
 const pretty = name => (name ?? "").replaceAll("_", " ");
+const placeName = name => pretty(name).replace(/\b\w/g, letter => letter.toUpperCase());
+let humanPending = false;
+function readerStatus() {
+  if (GAME.result) return GAME.result.winner ? "Game over" : "Draw";
+  if (!gameRunning) return "Paused";
+  return humanPending ? "Waiting for you" : "Agents playing";
+}
 const escapeHtml = t => (t ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
 /* ---- player identity ---- */
@@ -130,20 +140,37 @@ function turnActor(turn) {
 const isSetupTurn = turn => turn === 0;
 const turnStep = turn => { const ls = spansByTurn.get(turn) || []; return ls.length ? Math.max(...ls.map(s => s.step)) : 0; };
 const turnOfStep = step => (steps[step] || {}).turn ?? turns[0];
-/* a short headline for the collapsed card: prefer a win/elimination, else the actor's first message, else its first action */
+/* Summarize resolved engine events, so repeated attack rolls are counted once each
+   and an action followed by its event never double-counts placements. */
+function turnHighlights(turn) {
+  const lines = (spansByTurn.get(turn) || []).filter(s => s.layer === "event");
+  const count = pattern => lines.filter(s => pattern.test(s.text)).length;
+  const placed = lines.reduce((sum, s) => sum + Number(s.text.match(/ placed (\d+) armies on /)?.[1] || 0), 0);
+  return [
+    ["placement", placed, `${placed} ${placed === 1 ? "army" : "armies"} placed`],
+    ["attack", count(/ attacked .* from .*:/), "battles"],
+    ["conquest", count(/ conquered .* from /), "conquests"],
+    ["fortify", count(/ fortified, moving /), "fortifications"],
+    ["elimination", count(/ was ELIMINATED by /), "eliminations"],
+  ].filter(([, n]) => n).map(([kind, count, label]) => ({kind, count,
+    label: kind === "placement" ? label : `${count} ${count === 1 ? label.slice(0,-1) : label}`}));
+}
 function turnSummary(turn) {
-  const ls = spansByTurn.get(turn) || [];
-  const win = ls.find(s => s.layer === "event" && /WON|ELIMINATED/i.test(s.text));
+  const lines = spansByTurn.get(turn) || [];
+  const win = lines.find(s => s.layer === "event" && /WON|ELIMINATED/.test(s.text));
   if (win) return win.text;
-  const msg = ls.find(s => s.layer === "message");
-  if (msg) return msg.text.replace(/^[^:]*:\s*/, "");
-  const act = ls.find(s => s.layer === "action");
-  return act ? act.text : "—";
+  const conquest = lines.filter(s => s.layer === "event" && / conquered /.test(s.text)).at(-1);
+  if (conquest) return conquest.text;
+  const move = lines.filter(s => s.layer === "event" && / placed \d+ armies on | attacked .* from .*:| fortified, moving /.test(s.text)).at(-1);
+  if (move) return move.text;
+  const action = lines.find(s => s.layer === "action");
+  const message = lines.find(s => s.layer === "message");
+  return action?.text || message?.text.replace(/^[^:]*:\s*/, "") || "Waiting for moves";
 }
 
 /* ---- reader state ---- */
 const state = {
-  expanded: new Set(), openAnno: new Set(), openEvidence: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
+  expanded: new Set(), openPrivate: new Set(), openAnno: new Set(), openEvidence: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
   filters: {
     axes: new Set(["skill", "conduct", "affect"]), minConf: 1,
     annotators: new Set(annotators().map(a => a.index)),
@@ -154,4 +181,3 @@ const state = {
 // annotators the filter set has already decided on; lets a panel that finishes after page
 // load default to visible without re-enabling members the viewer explicitly hid
 const knownAnnotators = new Set(state.filters.annotators);
-

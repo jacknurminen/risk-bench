@@ -3,6 +3,9 @@ let lastFingerprint = null;
 async function refreshFromJournal() {
   const res = await fetch(POLL_URL, { cache: "no-store" }); if (!res.ok) return;
   const updated = await res.json();
+  gameRunning = updated.running;
+  renderGameControl();
+  document.dispatchEvent(new CustomEvent("reader:game-status"));
   const fingerprint = JSON.stringify([updated.steps.length, updated.steps.at(-1), updated.messages.length,
     updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.result]);
   if (fingerprint === lastFingerprint) return; lastFingerprint = fingerprint;

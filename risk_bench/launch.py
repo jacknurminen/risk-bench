@@ -11,6 +11,7 @@ from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
 from risk_bench.config import Settings
 from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
+from risk_bench.players.human import mailbox_for
 from risk_bench.players.rendering import render_board_text
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
 from risk_bench.runner.evaluation_store import (
@@ -32,6 +33,7 @@ def run_new_game(
     journal_path: Path | None,
     max_turns: int | None,
     verbose: bool,
+    human_controls: bool = False,
 ) -> tuple[GameRecord, Path]:
     """Play a fully journaled game between the given player specs.
 
@@ -44,6 +46,7 @@ def run_new_game(
         journal_path: Where to write the journal; None derives a timestamped path.
         max_turns: Turn limit; None uses the settings default.
         verbose: Whether to print events and chat to stdout as they happen.
+        human_controls: True only for web workers with an API serving the human mailbox.
 
     Returns:
         The finished game's record and its journal path.
@@ -51,6 +54,8 @@ def run_new_game(
     Raises:
         ValueError: If any spec is invalid or a needed API key is missing.
     """
+    if "human" in models and not human_controls:
+        raise ValueError("Launch human games from the web app (serve), where the play controls are available.")
     player_specs = _seat_in_random_order(player_specs=specs.named_specs(specs=models), seed=seed)
     if journal_path is None:
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
@@ -59,7 +64,9 @@ def run_new_game(
         journal_path=journal_path, player_specs=player_specs, commentators=commentators, append=False
     )
     players = {
-        name: specs.player_factory(spec=spec, settings=settings, trace=trace)(name, random.Random(f"{seed}:{name}"))
+        name: specs.player_factory(spec=spec, settings=settings, trace=trace, human_mailbox=mailbox_for(journal_path))(
+            name, random.Random(f"{seed}:{name}")
+        )
         for name, spec in player_specs.items()
     }
     turn_limit = max_turns if max_turns is not None else settings.max_turns
@@ -95,7 +102,9 @@ def run_new_game(
             trace.close()
 
 
-def resume_game(journal_file: Path, settings: Settings, commentators: list[str], verbose: bool) -> GameRecord:
+def resume_game(
+    journal_file: Path, settings: Settings, commentators: list[str], verbose: bool, human_controls: bool = False
+) -> GameRecord:
     """Continue a paused or crashed game from its journal until completion.
 
     Args:
@@ -103,6 +112,7 @@ def resume_game(journal_file: Path, settings: Settings, commentators: list[str],
         settings: Provides API keys and agent limits.
         commentators: The commentator panel as one model spec per member; empty for none.
         verbose: Whether to print events and chat to stdout as they happen.
+        human_controls: True only for web workers with an API serving the human mailbox.
 
     Returns:
         The finished game's record.
@@ -114,11 +124,13 @@ def resume_game(journal_file: Path, settings: Settings, commentators: list[str],
     if restored.is_finished:
         raise ValueError(f"{journal_file} records a finished game; nothing to resume.")
     header = restored.header
+    if "human" in header.player_specs.values() and not human_controls:
+        raise ValueError("Resume human games from the web app (serve).")
     trace = _trace_writer(
         journal_path=journal_file, player_specs=header.player_specs, commentators=commentators, append=True
     )
     players = {
-        name: specs.player_factory(spec=spec, settings=settings, trace=trace)(
+        name: specs.player_factory(spec=spec, settings=settings, trace=trace, human_mailbox=mailbox_for(journal_file))(
             name, random.Random(f"{header.seed}:{name}:resume")
         )
         for name, spec in header.player_specs.items()
@@ -298,7 +310,7 @@ def _seat_in_random_order(player_specs: dict[str, str], seed: int) -> dict[str, 
 def _trace_writer(
     journal_path: Path, player_specs: dict[str, str], commentators: list[str], append: bool
 ) -> TraceWriter | None:
-    involves_an_api = bool(commentators) or any(spec != "random" for spec in player_specs.values())
+    involves_an_api = bool(commentators) or any(spec not in {"random", "human"} for spec in player_specs.values())
     if not involves_an_api:
         return None
     return TraceWriter(path=trace_path_for_journal(journal_path=journal_path), append=append)

@@ -1,6 +1,6 @@
 """Player model-spec resolution, shared by the CLI and the web API.
 
-A spec is 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5'), optionally suffixed with
+A spec is 'human' (web games), 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5'), optionally suffixed with
 ':<effort>' (low / mid- via 'medium' / high) to set that player's reasoning effort, e.g.
 'anthropic:claude-opus-5:low'. Without the suffix the global default effort applies. Any model id
 the provider accepts may be named, not only the ones listed in ``agents.models.MODELS`` — the
@@ -9,6 +9,7 @@ Providers: anthropic, openai, google.
 """
 
 import random
+from pathlib import Path
 from typing import Final
 
 from risk_bench.agents.anthropic import AnthropicAgent
@@ -20,6 +21,7 @@ from risk_bench.agents.tracing import TraceWriter, TracingAgent
 from risk_bench.config import Settings
 from risk_bench.game.types import PlayerId
 from risk_bench.players.base import Player
+from risk_bench.players.human import HumanPlayer
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.commentary import Commentator
@@ -62,9 +64,11 @@ def named_specs(specs: list[str]) -> dict[str, str]:
     Raises:
         ValueError: If any spec is invalid.
     """
+    if specs.count("human") > 1:
+        raise ValueError("Only one human player is supported per game.")
     named = {}
     for spec in specs:
-        base_name = "random" if spec == "random" else resolve_model(spec=spec)
+        base_name = spec if spec in {"random", "human"} else resolve_model(spec=spec)
         name = base_name
         suffix = 2
         while name in named:
@@ -74,13 +78,16 @@ def named_specs(specs: list[str]) -> dict[str, str]:
     return named
 
 
-def player_factory(spec: str, settings: Settings, trace: TraceWriter | None) -> PlayerFactory:
+def player_factory(
+    spec: str, settings: Settings, trace: TraceWriter | None, human_mailbox: Path | None = None
+) -> PlayerFactory:
     """Create a factory producing fresh players for the given spec.
 
     Args:
         spec: The player spec ('random' or a model spec).
         settings: Provides API keys and agent limits.
         trace: Records every provider API call when given; None disables tracing.
+        human_mailbox: The web worker’s decision mailbox; required for a human seat.
 
     Returns:
         A factory taking (player_id, rng) and returning a new player.
@@ -88,6 +95,10 @@ def player_factory(spec: str, settings: Settings, trace: TraceWriter | None) -> 
     Raises:
         ValueError: If the spec is invalid or the provider's API key is missing.
     """
+    if spec == "human":
+        if human_mailbox is None:
+            raise ValueError("Human players require a single journaled game; launch one from the web app.")
+        return lambda player_id, rng: HumanPlayer(player_id=player_id, mailbox=human_mailbox)
     if spec == "random":
         return lambda player_id, rng: RandomPlayer(player_id=player_id, rng=rng)
     agent = build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
