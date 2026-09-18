@@ -12,11 +12,16 @@ wheels/
 # Local API keys
 .env
 
-# Runtime data, except one committed reference game (journal, traces, evaluation, analysis)
+# Runtime data, except selected example games (journals, traces, evaluation, analysis)
 data/*
 !data/games/
 data/games/*
 !data/games/20260908-092609-seed0/
+!data/games/20260909-123257-seed1/
+!data/games/20260910-092103-seed7/
+!data/games/20260911-071339-seed8/
+data/games/*/game.human/
+data/games/*/*.log
 
 # Local design scratch: UI prototypes and screenshots, kept out of history (heavy binaries)
 designs/

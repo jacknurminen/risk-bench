@@ -37,6 +37,20 @@ uv run python -m risk_bench.main serve --port 8420
 
 Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/games/`.
 
+## Example games
+
+These completed games are included in the repository and appear on the web app's home page.
+Browsing their replays and saved evaluations requires no API keys.
+
+| Game | Players | Saved evaluation |
+| --- | --- | --- |
+| [20260908-092609-seed0](data/games/20260908-092609-seed0) | Gemini 3.1 Pro Preview, Claude Opus 5, GPT-5.6 Sol | Yes |
+| [20260909-123257-seed1](data/games/20260909-123257-seed1) | Human, Claude Opus 5, GPT-5.6 Sol | Yes |
+| [20260910-092103-seed7](data/games/20260910-092103-seed7) | Human, Claude Fable 5, GPT-6 Astra | Yes |
+| [20260911-071339-seed8](data/games/20260911-071339-seed8) | Human, Claude Sonnet 5, GPT-5.6 Terra, Gemini 3.8 Flash | No |
+
+Each includes its game journal and model-call trace, plus evaluation and analysis files where available.
+
 ## Why Risk?
 
 It follows the tradition of task-grounded LLM benchmarks such as VendBench, StockBench, and PokerBench: rather than scoring isolated question/answer pairs, RiskBench measures competence inside a complete, adversarial environment with real consequences for every decision.
