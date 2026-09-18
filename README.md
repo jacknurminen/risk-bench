@@ -4,9 +4,42 @@
 
 RiskBench is a benchmark in which LLM agents play full games of [Risk](https://en.wikipedia.org/wiki/Risk_(game)) against one another. Agents are ranked by an Elo rating computed from head-to-head results across a tournament, giving a single comparable score per model.
 
-It follows the tradition of task-grounded LLM benchmarks such as VendBench, StockBench, and PokerBench: rather than scoring isolated question/answer pairs, RiskBench measures competence inside a complete, adversarial environment with real consequences for every decision.
+## Setup
+
+Requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.13+.
+From the repository root:
+
+```bash
+uv python install 3.13
+uv sync
+cp .env.example .env
+```
+
+Generate keys in the [Claude Console](https://platform.claude.com/settings/keys),
+[OpenAI Platform](https://platform.openai.com/api-keys), or
+[Google AI Studio](https://aistudio.google.com/apikey).
+In `.env`, uncomment and set the keys for the providers you use:
+
+```dotenv
+ANTHROPIC_API_KEY=your-anthropic-api-key
+OPENAI_API_KEY=your-openai-api-key
+GOOGLE_API_KEY=your-google-api-key
+```
+
+Only selected providers need keys. Settings load from `.env` or environment variables;
+`.env` is excluded from Git. Random players require no keys.
+
+Start the web app:
+
+```bash
+uv run python -m risk_bench.main serve --port 8420
+```
+
+Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/games/`.
 
 ## Why Risk?
+
+It follows the tradition of task-grounded LLM benchmarks such as VendBench, StockBench, and PokerBench: rather than scoring isolated question/answer pairs, RiskBench measures competence inside a complete, adversarial environment with real consequences for every decision.
 
 Most game-based benchmarks isolate a single skill. Poker probes probabilistic reasoning and bluffing; trading benchmarks probe sequential decision-making under market uncertainty. Risk is interesting precisely because it combines several demands in one environment:
 
@@ -53,13 +86,10 @@ A third class of tags captures **affect** (tilt, taunting, …); these are descr
 | Wiring | `risk_bench/{config,specs,launch}.py` | Settings, spec parsing, and game launching |
 | CLI | `risk_bench/main.py` | Entry point: the `game`, `tournament`, `evaluate`, `view`, and `serve` commands |
 
-## Getting started
+## Command-line usage
 
-The project uses [`uv`](https://github.com/astral-sh/uv) and requires Python 3.13+.
-
-```bash
-uv sync
-```
+The browser is enough to play. These commands are for running agent-only games, tournaments,
+evaluations, and replay exports directly from the terminal, after completing the setup above.
 
 Players are given inline as specs — `random` or `provider:model` (providers `anthropic`/`openai`/`google`), e.g. `anthropic:claude-opus-5`. Any model id the provider accepts works; the registry in `risk_bench/agents/models.py` is what the setup form offers and what usage reports can price, not a whitelist. There is no separate registration step.
 
@@ -96,14 +126,6 @@ Render a finished game into a standalone HTML replay:
 ```bash
 uv run python -m risk_bench.main view data/games/<game-folder>/game.jsonl
 ```
-
-Serve the web app to browse games, watch them live, and launch new ones:
-
-```bash
-uv run python -m risk_bench.main serve --port 8420
-```
-
-Provider API keys are read from the environment (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`).
 
 ## Status
 

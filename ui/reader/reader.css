@@ -35,6 +35,18 @@
   .pstats { font-family: var(--font-mono); font-size: 9.5px; color: var(--mute-2); margin-top: 3px; }
   .pmission { font-family: var(--font-mono); font-size: 9.5px; line-height: 1.4; color: var(--mute-2); padding: 7px 9px;
               background: var(--subtle); border-radius: 4px; margin: 10px 0 0; }
+  .missionToggle { box-sizing: border-box; margin: 0 0 10px !important; font: 11px var(--font-mono); color: var(--ink); text-align: left; }
+  .missionToggle[hidden] { display: none; }
+  .missionToggle .switch { flex: none; }
+  .missionToggle .switch.on { background: var(--ink); }
+  .playerHand { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .handHead { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px; margin-bottom: 7px; }
+  .handHead strong { font-size: 12px; }
+  .handHead span { font-size: 10px; color: var(--mute); }
+  .heldCard { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; padding: 7px 8px; margin-top: 5px;
+    border: 1px solid var(--line); border-radius: 5px; background: var(--subtle); font-size: 12px; }
+  .cardDesign { font: 10px var(--font-mono); color: var(--mute); }
+  .handEmpty { font-size: 12px; color: var(--mute); margin: 0; }
   .checkbox { display: block; width: 16px; height: 16px; border-radius: 4px; box-shadow: inset 0 0 0 1.5px #cdc8bb; background: transparent; }
   .checkbox.on { background: var(--coop); box-shadow: inset 0 0 0 1.5px var(--coop); }
   .iconbtn { background: none; border: none; cursor: pointer; padding: 2px; flex: none; }
@@ -70,7 +82,7 @@
                            border: 1px solid #00000026; background: transparent; vertical-align: -1px; }
   .acount { font: 700 11px var(--font-mono); text-anchor: middle; dominant-baseline: middle; fill: #101010;
             paint-order: stroke; stroke: #ffffffd0; stroke-width: 2.5px; pointer-events: none; }
-  .tname { font: 400 5px var(--font-sans); text-anchor: middle; dominant-baseline: middle; fill: #2c3540; opacity: .85;
+  .tname { font: 500 7px var(--font-sans); text-anchor: middle; dominant-baseline: middle; fill: #2c3540; opacity: 1;
            paint-order: stroke; stroke: #ffffffa8; stroke-width: 1.6px; pointer-events: none; }
   #board path.flash { animation: borderFlash 1.2s ease-out; }
   @keyframes borderFlash { 0% { stroke: #c45d12; stroke-width: 4; } 55% { stroke: #c45d12; stroke-width: 2.5; } 100% { stroke: #000; stroke-width: 1.2; } }
@@ -308,3 +320,134 @@
   .exportBox { width: min(420px, 92vw); padding: 18px 20px; }
   .exportBox input { width: 100%; box-sizing: border-box; font-family: var(--font-mono); font-size: 12.5px;
     padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); }
+
+/* Human turns share the reader's card, type, and button styles. */
+.humanTurn { padding: 16px 18px; margin-bottom: 14px; scroll-margin-top: 70px; border-top: 3px solid var(--ink); }
+.humanTurn[hidden], .humanTurn [hidden] { display: none !important; }
+#humanTitle { font-size: 17px; font-weight: 600; }
+.humanTurn .humanContext { font-size: 11px; color: var(--mute-2); }
+.humanTurn p { font-size: 13px; line-height: 1.5; margin: 10px 0; }
+.humanTurn fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.humanTurn fieldset:disabled { opacity: .55; }
+.humanTurn label { display: block; font-family: var(--font-mono); font-size: 11px; margin: 10px 0; }
+.humanTurn select, .humanTurn input:not([type=range]), .humanTurn textarea { display: block; width: 100%; box-sizing: border-box;
+  margin-top: 5px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 5px; background: #fff;
+  color: var(--ink); font-family: var(--font-mono); font-size: 12px; }
+.humanTurn textarea { resize: vertical; }
+.humanTurn summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--mute); }
+.humanHand { padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-top: 12px; }
+.humanReasoning { margin: 12px 0; }
+.humanFooter, .humanPlanHead, .humanAdd, .humanColumns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.humanFooter { justify-content: flex-end; margin-top: 16px; }
+.humanPlanHead { justify-content: space-between; font-size: 12px; }
+.humanAdd label, .humanColumns label { flex: 1; min-width: 160px; }
+.humanAllocation { display: grid; grid-template-columns: minmax(120px,1fr) 34px 80px 34px; align-items: center; gap: 8px;
+  border-top: 1px solid var(--line); padding: 6px 0; font-size: 13px; }
+.humanAllocation input { margin: 0 !important; }
+.humanMoveCount { display: flex; align-items: center; gap: 8px; max-width: 250px; }
+.humanMoveCount label { flex: 1; }
+#humanMoveSlider { display: block; width: 100%; accent-color: var(--ink); }
+#humanError { color: var(--adversarial); }
+#humanLiveNotice { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--neutral-tint);
+  padding: 10px; border-radius: 5px; font-size: 12px; }
+#humanResult:empty { display: none; }
+#humanResult { border-left: 3px solid var(--gold); padding-left: 10px; margin: 12px 0; max-height: 150px; overflow: auto; }
+#board .humanEligible { cursor: pointer; outline: none; stroke: var(--ink) !important; stroke-width: 1.4px !important; }
+#board .humanTarget { stroke: var(--gold) !important; stroke-width: 2.5px !important; }
+#board .humanSelected, #board .humanEligible:focus { stroke: #111 !important; stroke-width: 3px !important; }
+#board .humanBadge { font: bold 10px var(--font-mono); fill: #17683c; text-anchor: middle; pointer-events: none;
+  paint-order: stroke; stroke: white; stroke-width: 3px; }
+
+/* The pinned replay board must not cover the interactive card when scrolling to its controls. */
+body.humanTurnActive .boardcard { position: static; }
+.humanTurn button:disabled { opacity: .45; cursor: default; }
+
+/* Keep the map, timeline, and turn controls in separate columns where there is room.
+   The same form moves back below the map on narrower screens without losing its draft. */
+.humanSide[hidden], .humanWaiting[hidden] { display: none !important; }
+.humanWaiting { padding: 18px; font-size: 13px; line-height: 1.5; color: var(--mute); }
+@media (min-width: 1280px) {
+  body.humanControlsSide { padding-bottom: 0; }
+  body.humanControlsSide .shell { max-width: 1880px; padding-inline: 24px; padding-bottom: 18px; gap: 20px; }
+  body.humanControlsSide .masthead .inner { max-width: 1880px; padding-inline: 24px; }
+  body.humanControlsSide .rail { width: 220px; }
+  .humanSide { width: 300px; flex: none; min-width: 0; position: sticky; top: 78px;
+    max-height: calc(100vh - 96px); max-height: calc(100dvh - 96px); overflow-y: auto;
+    overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 4px; }
+  body.humanControlsSide.humanTurnActive .boardcard { position: sticky; top: 56px; }
+  body.humanControlsSide #board { height: clamp(240px, calc(100vh - 300px), 540px); }
+  .humanSide .humanTurn { padding: 14px; margin-bottom: 0; }
+  .humanSide .notesHead { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .humanSide .humanAllocation { grid-template-columns: minmax(80px, 1fr) 28px 58px 28px; gap: 5px; }
+  .humanSide .humanAllocation .btn { padding-inline: 4px; }
+  .humanSide .humanAdd label { flex-basis: 100%; min-width: 0; }
+  .humanSide .humanColumns label { min-width: 110px; }
+  .humanSide .humanFooter { position: sticky; bottom: 0; padding-block: 10px; background: var(--card); }
+  .humanSide #humanLiveNotice { flex-wrap: wrap; }
+}
+
+/* Small interaction cues within the existing reader layout. */
+.boardTools { display: flex; align-items: center; gap: 5px; }
+#boardHint { font-size: 10px; color: var(--mute); }
+.boardTools .btn { min-width: 28px; padding: 3px 7px; }
+.boardTools .btn:disabled { opacity: .4; cursor: default; }
+#board svg.zoomed { cursor: grab; touch-action: none; }
+#board svg.zoomed:active { cursor: grabbing; }
+#humanHint { font-weight: 600; font-size: 15px; line-height: 1.45; padding: 10px 12px; border-radius: 5px;
+  background: var(--neutral-tint); border-left: 3px solid var(--ink); }
+#humanHelp { color: var(--mute); font-size: 12px; }
+#board .humanUnavailable { fill-opacity: .3 !important; }
+.humanRoute { pointer-events: none; }
+.humanRoute > path { fill: none; stroke-linecap: round; }
+.humanRouteHalo { stroke: #fff; stroke-width: 6px; opacity: .9; }
+.humanRouteLine { stroke: #9c342c; stroke-width: 2.5px; stroke-dasharray: 5 3; }
+.humanRoute.fortify .humanRouteLine { stroke: #245e93; stroke-dasharray: none; }
+.turnHighlights { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.turnHighlights:empty { display: none; }
+.moveChip { font: 10px var(--font-mono); border: 1px solid var(--line); border-radius: 4px;
+  padding: 3px 6px; color: var(--mute); background: var(--subtle); }
+.moveChip.placement, .moveChip.conquest { color: var(--coop); background: var(--coop-tint); }
+.moveChip.attack, .moveChip.elimination { color: var(--adversarial); background: var(--adversarial-tint); }
+.moveChip.fortify { color: var(--blue); }
+.privateTrace { border-left: 2px solid var(--line); margin: 6px 0 6px 10px; padding-left: 10px; }
+.privateTrace > summary { cursor: pointer; font: 11px var(--font-mono); color: var(--mute); padding: 7px 0; }
+@media (max-width: 700px) { #boardHint { display: none; } }
+
+/* The centre column fits the viewport; only the lower pane scrolls. */
+#mapDivider, #mapFocus { display: none; }
+body.readerSplit { padding-bottom: 0; overflow: hidden; }
+body.readerSplit .shell { height: calc(100dvh - var(--reader-header-height)); padding-top: 12px; padding-bottom: 12px; align-items: stretch; }
+body.readerSplit .feed { display: grid; grid-template-rows: var(--map-pane-height, 60%) 16px minmax(0, 1fr); min-height: 0; }
+body.readerSplit .boardcard { position: relative; top: auto; margin: 0; min-height: 0; display: flex; flex-direction: column; }
+body.readerSplit #board { height: auto; min-height: 0; flex: 1; }
+body.readerSplit .boardhead, body.readerSplit .controls, body.readerSplit .statstrip { flex-shrink: 0; }
+body.readerSplit .rail, body.readerSplit .humanSide { position: static; max-height: none; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+body.readerSplit #timelinePane { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 3px 5px 16px 3px; }
+body.readerSplit #timelinePane:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+body.readerSplit #mapFocus { display: inline-block; white-space: nowrap; }
+body.readerSplit #mapDivider { display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; }
+#mapDivider span { width: 52px; height: 4px; border-radius: 4px; background: var(--line); }
+#mapDivider:hover span, #mapDivider:focus-visible span { background: var(--gold); }
+#mapDivider:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+body.resizingMap, body.resizingMap * { cursor: row-resize !important; user-select: none !important; }
+body.readerSplit.mapFocused .feed { grid-template-rows: minmax(0, 1fr); }
+body.readerSplit.mapFocused #timelinePane, body.readerSplit.mapFocused #mapDivider { display: none; }
+body.readerSplit .ctaCard { padding: 12px 14px; }
+body.readerSplit .ctaCard h2 { font-size: 14px; }
+body.readerSplit .ctaCard p { font-size: 11px; }
+@media (max-width: 999px), (max-height: 599px) {
+  .boardcard, body.humanControlsSide.humanTurnActive .boardcard { position: static; }
+  #board, body.humanControlsSide #board { height: clamp(220px, 48dvh, 540px); }
+}
+@media (max-width: 700px) {
+  .shell { flex-direction: column; padding: 12px; gap: 12px; }
+  .rail { width: 100%; position: static; max-height: 260px; padding-bottom: 0; }
+  .feed { width: 100%; }
+  .masthead .inner { padding-inline: 12px; gap: 8px; }
+  .subbar { flex-wrap: wrap; gap: 8px; }
+}
+
+.readerAnalysis > summary { cursor: pointer; font: 11px var(--font-mono); color: var(--mute); padding: 8px 2px; }
+.readerAnalysis[open] > summary { margin-bottom: 6px; }
+#board .attribution { position: absolute; bottom: 1px; right: 3px; background: #eef1f4d9; }
+body.readerSplit .subbar { gap: 6px 12px; }

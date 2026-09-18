@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,43 @@ def test_view_model_snapshots_track_the_board_and_outcome(tmp_path: Path):
     assert all(player["mission"] for player in model["players"])
     assert model["thoughts"] == []  # random players never think out loud
     json.dumps(model)  # must be embeddable in the HTML
+
+
+def test_human_hands_follow_draws_and_trades_in_historical_snapshots(tmp_path: Path):
+    path = journal_with_game(tmp_path=tmp_path)
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+    human = PLAYER_NAMES[0]
+    # Keep the real played actions; mark the seat as human to exercise viewer identity.
+    records[0]["player_specs"][human] = "human"
+    path.write_text("\n".join(json.dumps(record) for record in records) + "\n")
+    model = build_view_model(journal_path=path)
+    assert model["human_players"] == [human]
+    assert model["steps"][0]["hands"][human] == []
+    for step in model["steps"]:
+        assert set(step["hands"]) == {human}
+        assert len(step["hands"][human]) == step["players"][0]["cards"]
+
+    def card_counts(cards):
+        return Counter((card["design"], card["territory"]) for card in cards)
+
+    step_index = 0
+    draws = trades = 0
+    for record in records:
+        if record["type"] == "action":
+            step_index += 1
+            if record["player"] == human and record["action"]["kind"] == "trade_cards":
+                before = model["steps"][step_index - 1]["hands"][human]
+                after = model["steps"][step_index]["hands"][human]
+                assert card_counts(after) == card_counts(before) - card_counts(record["action"]["cards"])
+                trades += 1
+        elif record["type"] == "events":
+            if any(event["kind"] == "card_drawn" and event["player_id"] == human for event in record["events"]):
+                before = model["steps"][step_index - 1]["hands"][human]
+                after = model["steps"][step_index]["hands"][human]
+                assert len(after) == len(before) + 1
+                assert card_counts(before) <= card_counts(after)
+                draws += 1
+    assert draws > 0 and trades > 0
 
 
 def test_commentary_records_appear_in_the_view_model(tmp_path: Path):

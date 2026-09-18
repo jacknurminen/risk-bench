@@ -208,7 +208,7 @@ function addPlayerRow() {
   const row = document.createElement("div");
   row.className = "playerRow";
   row.innerHTML = `<span class="seat">seat ${rows.children.length + 1}</span>
-    <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
+    <div class="providerPicker">${[...providers, "human"].map(name => providerTile(name, name === provider)).join("")}</div>
     <select class="modelSelect">${modelOptions(provider, defaultModel(provider))}</select>
     <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
     <button type="button" class="subtle remove">✕</button>`;
@@ -223,6 +223,9 @@ function selectProvider(row, provider) {
     tile.classList.toggle("active", tile.dataset.provider === provider));
   // model ids belong to one provider, so there is no selection to carry across; switching
   // providers falls back to that provider's first (most capable) model
+  const baseline = provider === "human" || provider === "random";
+  row.querySelector(".modelSelect").hidden = baseline;
+  row.querySelector(".effortSelect").hidden = baseline;
   row.querySelector(".modelSelect").innerHTML = modelOptions(provider, defaultModel(provider));
 }
 
@@ -250,6 +253,7 @@ function addCommentatorRow() {
 
 const specFromRow = row => {
   const provider = row.querySelector(".providerTile.active").dataset.provider;
+  if (provider === "human" || provider === "random") return provider;
   return `${provider}:${row.querySelector(".modelSelect").value}:${row.querySelector(".effortSelect").value}`;
 };
 

@@ -137,7 +137,7 @@ class Player(Protocol):
         """Rewrite the player's private notes after a turn ends.
 
         Notes are the only memory a player keeps of earlier turns; later prompts
-        show just the current turn plus these notes. Non-LLM players no-op.
+        show just the current turn plus these notes. Players may leave notes unchanged.
 
         Args:
             view: The player's view of the just-ended turn, carrying that turn's

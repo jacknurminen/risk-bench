@@ -4,7 +4,7 @@ function playerResult(name) {
   const seat = seatOf[name];
   if (GAME.result && GAME.result.winner === name) return ["winner", "var(--coop)"];
   if (last.players[seat].eliminated) return ["eliminated", "var(--adversarial)"];
-  return ["survived", "var(--gold)"];
+  return [GAME.result ? "survived" : "in game", "var(--gold)"];
 }
 function renderRail() {
   el("railPlayers").innerHTML = GAME.players.map((p, seat) => {
@@ -22,10 +22,38 @@ function renderRail() {
           <div class="pstats" id="prstats-${seat}"></div>
         </div>
       </div>
-      <div class="pmission">▸ ${escapeHtml(p.mission)}</div>
+      <div class="pmission">${humanPlayers.size && hideOpponentMissions && !humanPlayers.has(p.name) ? "Mission hidden" : `▸ ${escapeHtml(p.mission)}`}</div>
+      ${humanPlayers.has(p.name) ? `<section class="playerHand" aria-label="Your cards"><div class="handHead"><strong>Your cards</strong><span id="handContext-${seat}"></span></div><div id="playerHand-${seat}"></div></section>` : ""}
     </article>`;
   }).join("");
   renderFilters();
+  renderMissionToggle();
+  renderPlayerHands(steps[index]);
+}
+function renderMissionToggle() {
+  const toggle = el("missionToggle");
+  toggle.hidden = !humanPlayers.size;
+  toggle.classList.toggle("on", hideOpponentMissions);
+  toggle.setAttribute("aria-checked", String(hideOpponentMissions));
+  toggle.querySelector(".switch").classList.toggle("on", hideOpponentMissions);
+}
+el("missionToggle").onclick = () => {
+  hideOpponentMissions = !hideOpponentMissions;
+  try { localStorage.setItem("risk-bench:hide-opponent-missions", String(hideOpponentMissions)); } catch {}
+  renderRail(); show(index);
+};
+
+function renderPlayerHands(step) {
+  GAME.players.forEach((player, seat) => {
+    const container = el("playerHand-" + seat);
+    if (!container) return;
+    const cards = step.hands?.[player.name];
+    const historical = index !== steps.length - 1;
+    el("handContext-" + seat).textContent = historical ? `Turn ${step.turn} · step ${index}` : "Latest board";
+    container.innerHTML = cards?.length ? cards.map(card =>
+      `<div class="heldCard"><span class="cardDesign">${escapeHtml(placeName(card.design))}</span><span>${card.territory ? `<span class="tlink" data-place="${card.territory}">${escapeHtml(placeName(card.territory))}</span>` : "Wild card"}</span></div>`).join("")
+      : `<p class="handEmpty">${cards ? "No cards held." : "Card details unavailable for this snapshot."}</p>`;
+  });
 }
 function renderFilters() {
   // only offer axis chips for axes that actually occur in the present tags; with no tags at all
@@ -113,6 +141,7 @@ function turnCard(turn) {
           ${hasGap && showTags ? `<span class="gapbadge">⚡ deception gap</span>` : ""}
         </span>
         <span class="tsummary">${richText(turnSummary(turn))}</span>
+        <span class="turnHighlights">${turnHighlights(turn).map(h => `<span class="moveChip ${h.kind}">${h.label}</span>`).join("")}</span>
       </span>
       <span class="chev" style="transform:rotate(${expanded ? 180 : 0}deg)">⌄</span>
     </button>
@@ -154,13 +183,21 @@ function commentatorTagsBySpan(turn) {
 }
 
 function traceLine(turn, s, liveAnno) {
-  const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
+  let [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
+  if (s.layer === "action" || s.layer === "event") {
+    const kind = /\bconquered\b/.test(s.text) ? ["conquest", "var(--coop)"]
+      : /\bELIMINATED\b/.test(s.text) ? ["elimination", "var(--adversarial)"]
+      : /\battacks?\b|\battacked\b/.test(s.text) && !/ends the attack/.test(s.text) ? ["attack", "var(--adversarial)"]
+      : /\bplaces?\b|\bplaced\b/.test(s.text) ? ["placement", "var(--coop)"]
+      : /\bfortifies\b|\bfortified\b/.test(s.text) ? ["fortification", "var(--blue)"] : null;
+    if (kind) [kindLabel, kindColor] = kind;
+  }
   const isMsg = s.layer === "message", isPrivate = s.layer === "thought" || s.layer === "note";
   const anno = [...tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span)), ...liveAnno];
   const annoOpen = state.openAnno.has(turn + ":" + s.span);
   const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
   const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
-  return `<div>
+  const content = `<div>
     <div class="traceline" onclick="lineClick(event, ${s.step})" title="wind the board to this moment">
       <button class="chip" onclick="chipClick(${s.span})" title="open in the raw trace">[${s.span}]</button>
       <span class="kindbar" style="background:${kindColor}"></span>
@@ -174,6 +211,9 @@ function traceLine(turn, s, liveAnno) {
     </div>
     ${annoOpen ? `<div style="margin:3px 0 9px 42px;display:flex;flex-direction:column;gap:6px">${anno.map(annoCard).join("")}</div>` : ""}
   </div>`;
+  if (!isPrivate) return content;
+  return `<details class="privateTrace" ${state.openPrivate.has(s.span) ? "open" : ""} ontoggle="this.open ? state.openPrivate.add(${s.span}) : state.openPrivate.delete(${s.span})">
+    <summary>${s.layer === "thought" ? "Private reasoning" : "Private memory"}${s.player ? ` · ${escapeHtml(tagOf(s.player))}` : ""}</summary>${content}</details>`;
 }
 
 function annoCard(t) {
@@ -342,4 +382,3 @@ function renderCompare() {
     button.onclick = () => { compareGrain = button.dataset.grain; renderCompare(); });
   updateSubBar();
 }
-

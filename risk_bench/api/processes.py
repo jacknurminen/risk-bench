@@ -16,6 +16,7 @@ from pathlib import Path
 
 from risk_bench import launch
 from risk_bench.config import load_settings
+from risk_bench.players.human import mailbox_for
 from risk_bench.players.llm import ProviderUnavailableError
 
 
@@ -63,6 +64,7 @@ class GameProcessManager:
             commentators: The commentator panel as one model spec per member; empty for none.
             log_path: Where the worker's output is appended.
         """
+        (mailbox_for(journal_path) / "request.json").unlink(missing_ok=True)
         arguments = (str(log_path), str(journal_path), commentators)
         self._start(game_id=game_id, target=_resume_game_in_worker, arguments=arguments)
 
@@ -179,6 +181,7 @@ def _run_new_game_in_worker(
             journal_path=Path(journal_path),
             max_turns=max_turns,
             verbose=False,
+            human_controls=True,
         )
     except ProviderUnavailableError as error:
         print(f"[paused] {error}")
@@ -192,6 +195,7 @@ def _resume_game_in_worker(log_path: str, journal_path: str, commentators: list[
             settings=load_settings(),
             commentators=commentators,
             verbose=False,
+            human_controls=True,
         )
     except ProviderUnavailableError as error:
         print(f"[paused] {error}")

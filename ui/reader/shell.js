@@ -1,6 +1,6 @@
 /* ================= MASTHEAD + MODE ================= */
 function renderMasthead() {
-  const status = GAME.result ? (GAME.result.winner ? "game over" : "draw") : (LIVE ? "in progress" : "paused");
+  const status = readerStatus();
   el("mastStatus").innerHTML = `<span class="dot"></span>${status}`;
   el("mastWinner").innerHTML = GAME.result && GAME.result.winner
     ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
@@ -13,6 +13,8 @@ function setMode(m) { state.mode = m; renderModeToggle(); renderTimeline(); }
 
 /* pause/resume the running game worker (only meaningful while the game is unfinished) */
 function renderGameControl() {
+  renderMasthead();
+  renderBoardStatus();
   const btn = el("gameControl");
   if (!LIVE || GAME.result) { btn.style.display = "none"; return; }
   btn.style.display = "";
@@ -22,7 +24,7 @@ el("gameControl").onclick = async () => {
   const action = gameRunning ? "pause" : "resume";
   const res = await fetch(`${POLL_URL}/${action}`, { method: "POST" });
   // 204 = done; 409 = already in the opposite state — either way the game now matches the intent
-  if (res.ok || res.status === 409) { gameRunning = action === "resume"; renderGameControl(); toast("game " + (gameRunning ? "resumed" : "paused")); }
+  if (res.ok || res.status === 409) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); toast("game " + (gameRunning ? "resumed" : "paused")); }
   else toast(`could not ${action} the game`);
 };
 
@@ -66,6 +68,7 @@ el("slider").oninput = e => show(Number(e.target.value));
 el("play").onclick = () => { if (timer) { stopPlaying(); return; } el("play").textContent = "⏸ pause";
   timer = setInterval(() => { if (index >= steps.length - 1) stopPlaying(); else show(index + 1); }, 250); };
 document.addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable=true]")) return;
   if (e.key === "Escape" && statsOpen()) { closeStats(); return; }
   if (e.key === "Escape" && el("notesModal").classList.contains("open")) { closeNotes(); return; }
   if (state.drawer) { if (e.key === "Escape") { state.drawer = null; renderPanels(); } return; }
