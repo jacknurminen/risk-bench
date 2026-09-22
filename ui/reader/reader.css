@@ -464,3 +464,33 @@ body.readerSplit .subbar { gap: 6px 12px; }
 .forkSep:hover .forkBtn, .forkBtn:focus-visible, .forkBtn[disabled] { opacity: 1; }
 .forkBtn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .forkBtn[disabled] { cursor: progress; }
+
+/* The paused branch's setup card: what each player will be told before it starts running. */
+.forkPanel { padding: 16px 18px; margin-bottom: 14px; border-left: 3px solid var(--gold); }
+.forkPanel[hidden] { display: none; }
+.forkHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 7px; }
+.forkHead .serif { font-family: var(--font-serif); font-size: 16px; font-weight: 600; }
+.forkHead .mono { font-family: var(--font-mono); font-size: 10px; color: var(--mute-2); }
+.forkPanel > p { margin: 0 0 12px; font-size: 12px; line-height: 1.5; color: var(--body); }
+.forkPlayers { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.forkPlayers label { display: flex; flex-direction: column; gap: 4px; }
+.forkPlayers .mono { font-family: var(--font-mono); font-size: 11px; font-weight: 600; }
+.forkPlayers textarea { box-sizing: border-box; width: 100%; resize: vertical; padding: 7px 8px; border: 1px solid var(--line);
+                        border-radius: 5px; font: 12px/1.45 var(--font-sans); color: var(--ink-soft); background: var(--card); }
+.forkActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 13px; }
+.forkActions .mono { font-family: var(--font-mono); font-size: 10.5px; color: var(--mute); }
+.forkPrompt { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
+.forkPrompt > summary { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; cursor: pointer; font-size: 11px; }
+.forkPrompt > summary .mono { font-family: var(--font-mono); font-size: 10.5px; color: var(--mute); }
+.forkChanged { padding: 1px 6px; border-radius: 999px; background: var(--coop-tint); color: var(--coop);
+               font: 9px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+.forkPromptPanes { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); margin-top: 9px; }
+.forkPromptPanes pre, .forkSystem pre { max-height: 340px; margin: 0; overflow: auto; padding: 8px 10px; border-radius: 5px;
+  background: var(--subtle); white-space: pre-wrap; overflow-wrap: anywhere; font: 10.5px/1.55 var(--font-mono); color: var(--body); }
+.forkPromptPanes mark { background: var(--coop-tint); color: inherit; }
+.forkSystem { margin-top: 9px; }
+.forkSystem > summary { cursor: pointer; font: 10px var(--font-mono); color: var(--mute); }
+
+.forkInherited { padding: 6px 9px; border-radius: 5px; background: var(--subtle); border: 1px solid var(--line);
+                 font: 11.5px/1.45 var(--font-sans); color: var(--mute); white-space: pre-wrap; }
+.forkInherited .eyebrow { display: block; margin-bottom: 3px; }

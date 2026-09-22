@@ -63,6 +63,7 @@ def view_to_json(view: PlayerView) -> dict[str, Any]:
         "mission": view.own_mission.description,
         "armies_to_place": view.armies_to_place,
         "notes": view.notes,
+        "additional_context": view.additional_context,
         "chat": [asdict(message) for message in view.visible_chat],
         "events": [narrate_event(event) for event in view.recent_events],
     }

@@ -62,3 +62,65 @@ test('a fork refused by the server leaves the seam usable and says why', async (
   assert.equal(sandbox.toasts.at(-1), 'Cannot continue a terminal cursor.');
   assert.equal(sandbox.window.location.href, undefined);
 });
+
+test('the panel edits context only on a paused branch, and previews what the next prompt gains', async () => {
+  const boxes = [{dataset: {player: 'alice'}, value: ''}, {dataset: {player: 'bob'}, value: ''}];
+  const panel = {hidden: false, innerHTML: '', querySelectorAll: () => boxes, contains: () => false};
+  const status = {textContent: ''};
+  const preview = {innerHTML: ''};
+  const posted = [];
+  const sandbox = fork({
+    elements: {forkPanel: panel, forkStatus: status, forkPreview: preview, driftNotice: {}},
+    context: {
+      fetch: async (url, options) => {
+        posted.push({url, payload: options.body ? JSON.parse(options.body) : null});
+        if (url.endsWith('/prompt-preview')) return {ok: true, json: async () => ({prompts: [
+          {player: 'alice', request_kind: 'negotiation', is_next_request: true, system_prompt: 'You are alice',
+           before: 'Board:\nasia', after: 'Board:\nAdditional information available to you:\nBob holds all of asia.\nasia'},
+        ]})};
+        return {status: 204, ok: true, json: async () => ({})};
+      },
+    },
+  });
+
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.hidden, true, 'an ordinary game offers no context editor');
+
+  sandbox.GAME.ancestry = {parent_game_id: 'parent', parent_cursor: '2:before'};
+  sandbox.GAME.additional_context = {alice: 'kept from the fork'};
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.hidden, false);
+  // what a player already knows is shown, but only as context for what you are adding
+  assert.match(panel.innerHTML, /already knows<\/span>kept from the fork/);
+  assert.match(panel.innerHTML, /\/games\/parent/);
+
+  boxes[0].value = ' Bob holds all of asia. ';
+  // half-written context survives the live poll, which calls this every second
+  panel.innerHTML = '';
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.innerHTML, '', 'a panel with unsaved text is left alone');
+  panel.innerHTML = 'rebuilt';
+
+  sandbox.gameRunning = true;
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.hidden, true, 'a running branch takes no context edits');
+  sandbox.gameRunning = false;
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.hidden, false);
+
+  await vm.runInContext('previewForkPrompts', sandbox)();
+  // the preview renders the whole section, so it is sent the inherited text joined with the addition
+  assert.deepEqual(posted.at(-1), {url: '/api/games/parent/prompt-preview',
+    payload: {context: {alice: 'kept from the fork\n\nBob holds all of asia.'}}});
+  assert.match(preview.innerHTML, /<mark>Additional information available to you:\nBob holds all of asia.\n<\/mark>/);
+  assert.match(preview.innerHTML, /changed/);
+
+  await vm.runInContext('saveForkContext', sandbox)();
+  // saving sends only the addition, with append set: an inherited briefing is never replaced
+  assert.deepEqual(posted.at(-2), {url: '/api/games/parent/context',
+    payload: {context: {alice: 'Bob holds all of asia.'}, append: true}});
+  assert.equal(sandbox.GAME.additional_context.alice, 'kept from the fork\n\nBob holds all of asia.');
+  assert.deepEqual(posted.at(-1), {url: '/api/games/parent/resume', payload: null});
+  assert.equal(status.textContent, 'Running.');
+  assert.deepEqual(boxes.map(box => box.value), ['', ''], 'committed additions leave the boxes empty');
+});

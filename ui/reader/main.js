@@ -5,6 +5,7 @@ async function refreshFromJournal() {
   const updated = await res.json();
   gameRunning = updated.running;
   renderGameControl();
+  renderForkPanel();
   document.dispatchEvent(new CustomEvent("reader:game-status"));
   const fingerprint = JSON.stringify([updated.steps.length, updated.steps.at(-1), updated.messages.length,
     updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.cursors?.length, updated.result]);
@@ -19,6 +20,7 @@ async function refreshFromJournal() {
   GAME.result = updated.result;
   GAME.cursors = updated.cursors;
   GAME.ancestry = updated.ancestry;
+  GAME.additional_context = updated.additional_context;
   GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
@@ -31,6 +33,7 @@ async function refreshFromJournal() {
 /* ================= INIT ================= */
 buildBoard(); buildContinentLegend();
 renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
+renderForkPanel();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
 if (EVAL.running) pollEvaluation();  // a run already in flight (started before this page load)

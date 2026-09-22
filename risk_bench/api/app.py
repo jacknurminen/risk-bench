@@ -3,6 +3,7 @@ import re
 import shutil
 import time
 import uuid
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -27,6 +28,7 @@ from risk_bench.api.schemas import (
     ModelCatalogResponse,
     NewGameRequest,
     NewGameResponse,
+    PlayerContextRequest,
     TagVerificationBody,
     TournamentSummary,
 )
@@ -38,11 +40,12 @@ from risk_bench.runner.evaluation_store import (
     read_evaluation,
 )
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
-from risk_bench.runner.forking import fork_game
+from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
 from risk_bench.runner.verification_store import delete_verification, write_verification
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
+from risk_bench.viewer.prompts import preview_next_prompts
 from risk_bench.viewer.snapshots import build_view_model
 from risk_bench.viewer.tournament import build_tournament_view_model
 
@@ -206,6 +209,25 @@ def create_app(games_directory: Path) -> FastAPI:
                 destination.parent / "worker.log",
             )
         return {"id": branch_id, "url": f"/games/{branch_id}"}
+
+    @app.post("/api/games/{game_id}/context", status_code=204)
+    def set_player_context(game_id: str, request: PlayerContextRequest) -> None:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        if manager.is_running(game_id=game_id):
+            raise HTTPException(status_code=409, detail="Pause the game before changing what its players know.")
+        try:
+            apply_additional_context(journal=journal_path, context=request.context, append=request.append)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+
+    @app.post("/api/games/{game_id}/prompt-preview")
+    def prompt_preview(game_id: str, request: PlayerContextRequest) -> dict[str, Any]:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        try:
+            previews = preview_next_prompts(journal_path=journal_path, additional_context=request.context)
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        return {"prompts": [asdict(preview) for preview in previews]}
 
     @app.delete("/api/games/{game_id}", status_code=204)
     def delete_game(game_id: str) -> None:
@@ -682,9 +704,16 @@ def _start_game_worker(game_directory: Path, manager: GameProcessManager, reques
         seed=seed,
         commentators=request.commentators,
         max_turns=request.max_turns,
+        additional_context=_starting_context(request=request),
         journal_path=game_directory / "game.jsonl",
         log_path=game_directory / "worker.log",
     )
+
+
+def _starting_context(request: NewGameRequest) -> list[str]:
+    # one line for everyone plus a per-player line, folded into the single block each player sees
+    per_player = request.player_context or [""] * len(request.players)
+    return ["\n\n".join(part for part in (request.common_context.strip(), own.strip()) if part) for own in per_player]
 
 
 def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
@@ -721,6 +750,8 @@ def _validate_launch_request(request: NewGameRequest) -> None:
         raise HTTPException(status_code=400, detail="Risk seats 3-6 players per game.")
     if "human" in request.players and request.parallel_games != 1:
         raise HTTPException(status_code=400, detail="Human games must be launched one at a time.")
+    if request.player_context and len(request.player_context) != len(request.players):
+        raise HTTPException(status_code=400, detail="Per-player context must hold one entry per player.")
     settings = load_settings()
     try:
         specs.named_specs(specs=request.players)

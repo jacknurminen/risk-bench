@@ -14,7 +14,7 @@ from risk_bench.game.engine import IllegalActionError
 from risk_bench.game.types import Territory
 from risk_bench.players.human import HumanResponse, mailbox_for, read_prompt, submit_response, view_to_json
 from risk_bench.players.view import build_player_view
-from risk_bench.runner.journal import RestoredGame, restore_game
+from risk_bench.runner.journal import RestoredGame, restore_game, restored_context
 
 
 def _restore(path: Path) -> RestoredGame:
@@ -45,6 +45,10 @@ def install_human_routes(app: FastAPI, manager: GameProcessManager, journal_path
             # The exact decision view also includes this turn's filtered event history.
             view = prompt["view"]
         else:
+            context = restored_context(game)
+            progress = game.checkpoint["progress"] if game.checkpoint else {}
+            noting = progress.get("stage") in {"note_request", "note_apply"}
+            turn = progress["commented_turn"] if noting else game.state.turn_number
             view = view_to_json(
                 build_player_view(
                     state=game.state,
@@ -52,15 +56,18 @@ def install_human_routes(app: FastAPI, manager: GameProcessManager, journal_path
                     visible_chat=tuple(
                         message
                         for message in game.messages
-                        if message.turn_number == game.state.turn_number
+                        if message.turn_number == turn
                         and (
                             message.visibility is MessageVisibility.PUBLIC
                             or human_id in (message.sender, message.recipient)
                         )
                     ),
-                    recent_events=(),
+                    recent_events=tuple(
+                        context.get("_last_turn_events" if noting else "_current_turn_events", {}).get(human_id, [])
+                    ),
                     private_messages_allowed=game.header.allow_private_messages,
-                    notes=None,
+                    notes=context.get("_notes", {}).get(human_id),
+                    additional_context=(game.checkpoint or {}).get("additional_context", {}).get(human_id),
                 )
             )
         return {

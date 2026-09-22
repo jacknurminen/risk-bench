@@ -13,6 +13,7 @@ def build_player_view(
     recent_events: tuple[GameEvent, ...],
     private_messages_allowed: bool,
     notes: str | None,
+    additional_context: str | None,
 ) -> PlayerView:
     """Project the full game state down to what one player may legally know.
 
@@ -29,6 +30,8 @@ def build_player_view(
         recent_events: The current turn's events visible to this player.
         private_messages_allowed: Whether this game permits private messages.
         notes: The player's own latest notes, their only memory of earlier turns.
+        additional_context: Information an experimenter supplied to this player from a
+            fork's cursor onward, or None when the game supplies none.
 
     Returns:
         The player's view of the game.
@@ -48,6 +51,7 @@ def build_player_view(
         own_mission=own_player.mission,
         armies_to_place=state.armies_to_place if state.current_player == player_id else 0,
         notes=notes,
+        additional_context=additional_context,
         visible_chat=visible_chat,
         recent_events=recent_events,
     )

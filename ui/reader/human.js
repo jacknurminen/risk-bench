@@ -228,6 +228,8 @@
     el("humanCards").textContent = "Cards: " + (view.own_cards.map(cardLabel).join(", ") || "none");
     el("humanMessage").value = ""; el("humanThought").value = ""; el("humanError").textContent = "";
     el("humanNotes").value = view.notes ?? "";
+    el("humanContextNote").textContent = view.additional_context ? `Additional information available to you: ${view.additional_context}` : "";
+    el("humanContextNote").hidden = !view.additional_context;
     el("humanActions").hidden = ["negotiation", "notes"].includes(mode);
     el("humanMessageLabel").hidden = el("humanReasoning").hidden = mode === "notes";
     const mainModes = draft.modes.filter(m => !["end_attack_phase", "skip_fortify"].includes(m));

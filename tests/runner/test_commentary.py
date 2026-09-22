@@ -355,6 +355,7 @@ def test_the_runner_journals_each_panel_members_commentary_after_each_turn(tmp_p
     )
     GameRunner(
         players=whisperers(seed=7),
+        additional_context={},
         seed=7,
         max_turns=3,
         allow_private_messages=True,
@@ -390,6 +391,7 @@ def test_each_member_receives_players_fresh_notes_during_a_game():
     )
     GameRunner(
         players=dict(noting_players(seed=4)),
+        additional_context={},
         seed=4,
         max_turns=4,
         allow_private_messages=True,

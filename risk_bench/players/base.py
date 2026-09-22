@@ -53,6 +53,9 @@ class PlayerView:
     armies_to_place: int
     # private memory: the player's own latest notes, the only carry-over from earlier turns
     notes: str | None
+    # information an experimenter supplied to this player from a fork's cursor onward; rendered
+    # as part of what the player knows, never as an instruction to it
+    additional_context: str | None
     # history, scoped to the current turn — everything older lives only in ``notes``
     visible_chat: tuple[ChatMessage, ...]
     recent_events: tuple[GameEvent, ...]

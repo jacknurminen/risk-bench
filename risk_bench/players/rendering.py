@@ -130,6 +130,7 @@ def render_decision_prompt(request: DecisionRequest) -> str:
         _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
+        _render_additional_context(view=view),
         _render_players(view=view),
         _render_board(view=view),
         _render_hand(view=view),
@@ -160,6 +161,7 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
+        _render_additional_context(view=view),
         _render_players(view=view),
         _render_board(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
@@ -189,6 +191,7 @@ def render_noting_prompt(view: PlayerView) -> str:
         "future self before the next turn begins.",
         _render_events(view=view),
         _render_chat(view=view),
+        _render_additional_context(view=view),
         _render_players(view=view),
         _render_board(view=view),
         _render_notes_for_update(view=view),
@@ -209,6 +212,15 @@ _NOTING_INSTRUCTION: Final[str] = (
     f"(aim for under about {_NOTES_WORD_BUDGET} words). Reply with the notes themselves as plain text "
     "and nothing else."
 )
+
+
+# An experimental intervention is rendered as information the player has, in the same register as
+# the rest of the game context: framing it as an instruction, or as the player's own recollection,
+# would change what a comparison between two forks actually measures.
+def _render_additional_context(view: PlayerView) -> str:
+    if not view.additional_context:
+        return ""
+    return f"Additional information available to you:\n{view.additional_context}"
 
 
 def _render_notes(view: PlayerView) -> str:

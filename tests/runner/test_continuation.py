@@ -14,9 +14,10 @@ from risk_bench.players.base import Decision, NegotiationTurn
 from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner import checkpoint
-from risk_bench.runner.forking import fork_game
+from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import JournalHeader, JournalWriter, raw_journal, read_journal, restore_game
+from risk_bench.viewer.prompts import preview_next_prompts
 
 NAMES = ("alice", "bob", "carla")
 
@@ -81,7 +82,7 @@ class ObservedRunner(GameRunner):
 
 
 def runner(group, journal=None, turns=2):
-    return ObservedRunner(group, 19, turns, True, 3, (), 1, journal, None, False)
+    return ObservedRunner(group, {}, 19, turns, True, 3, (), 1, journal, None, False)
 
 
 @pytest.fixture
@@ -408,3 +409,78 @@ def test_live_parent_growth_cannot_enter_a_selected_prefix(completed, tmp_path, 
     forking.fork_game(source, destination, "0:after")
     assert "Future private intelligence" not in destination.read_text()
     assert restore_game(destination).messages == []
+
+
+def _views(player):
+    return [request.view if kind == "decision" else request for kind, request in player.requests]
+
+
+def test_player_context_only_reaches_later_prompts_and_survives_resume(completed, tmp_path):
+    path, _, _ = completed
+    transition = next(t for t in raw_journal(path)[1:] if t["stage"] == "negotiation_request")
+    child = tmp_path / "briefed" / "game.jsonl"
+    fork_game(path, child, f"{transition['id']}:before")
+
+    plain = preview_next_prompts(journal_path=child, additional_context={})
+    assert sum(preview.is_next_request for preview in plain) == 1
+    proposed = preview_next_prompts(journal_path=child, additional_context={"bob": "alice broke the pact."})
+    bob_proposal = next(preview for preview in proposed if preview.player == "bob")
+    assert "alice broke the pact." in bob_proposal.after
+    assert "alice broke the pact." not in bob_proposal.before
+
+    apply_additional_context(journal=child, context={"alice": "carla is one territory from winning."}, append=False)
+    briefed = preview_next_prompts(journal_path=child, additional_context={})
+    alice_before = next(preview for preview in plain if preview.player == "alice")
+    alice_after = next(preview for preview in briefed if preview.player == "alice")
+    assert "carla is one territory from winning." in alice_after.before
+    assert "Additional information available to you:" not in alice_before.before
+    # the intervention is information inside the game context, never an instruction in the system prompt
+    assert alice_before.system_prompt == alice_after.system_prompt
+    assert "carla is one territory" not in next(p for p in briefed if p.player == "bob").before
+    assert "carla is one territory" not in path.read_text()
+
+    group = players()
+    runner(group).resume(restore_game(child))
+    assert all(view.additional_context == "carla is one territory from winning." for view in _views(group["alice"]))
+    assert all(view.additional_context is None for view in _views(group["bob"]))
+    resumed = restore_game(child)
+    assert resumed.checkpoint is not None
+    assert resumed.checkpoint["additional_context"]["alice"] == "carla is one territory from winning."
+
+
+def test_context_edits_are_rejected_for_unknown_players_and_finished_games(completed, tmp_path):
+    path, _, _ = completed
+    with pytest.raises(ValueError, match="Unknown player"):
+        apply_additional_context(journal=path, context={"dave": "hello"}, append=False)
+    with pytest.raises(ValueError, match="finished"):
+        apply_additional_context(journal=path, context={"alice": "hello"}, append=False)
+    with pytest.raises(ValueError, match="finished"):
+        preview_next_prompts(journal_path=path, additional_context={})
+
+
+def test_context_given_at_launch_reaches_the_first_prompt_and_a_fork_adds_to_it(tmp_path, monkeypatch):
+    monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
+    path = tmp_path / "briefed" / "game.jsonl"
+    writer = JournalWriter(path, False)
+    writer.write_header(JournalHeader(4, 19, dict.fromkeys(NAMES, "random"), 2, True, 3, []))
+    group = players()
+    ObservedRunner(group, {"alice": "The table has met before."}, 19, 2, True, 3, (), 1, writer, None, False).run()
+    writer.close()
+
+    # every request alice received carried it, and nobody else's did
+    assert all(view.additional_context == "The table has met before." for view in _views(group["alice"]))
+    assert all(view.additional_context is None for view in _views(group["bob"]))
+
+    transition = next(t for t in raw_journal(path)[1:] if t["stage"] == "negotiation_request")
+    child = tmp_path / "child" / "game.jsonl"
+    fork_game(path, child, f"{transition['id']}:before")
+    apply_additional_context(journal=child, context={"alice": "Carla just broke the pact."}, append=True)
+
+    inherited = restore_game(child)
+    assert inherited.checkpoint is not None
+    # the fork adds to the briefing rather than replacing it: both halves reach the next prompt
+    assert inherited.checkpoint["additional_context"]["alice"] == (
+        "The table has met before.\n\nCarla just broke the pact."
+    )
+    alice = next(p for p in preview_next_prompts(journal_path=child, additional_context={}) if p.player == "alice")
+    assert "The table has met before." in alice.before and "Carla just broke the pact." in alice.before

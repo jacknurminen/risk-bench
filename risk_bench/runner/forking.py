@@ -31,6 +31,7 @@ def fork_game(
     redecide: bool = False,
     action: dict | None = None,
     message: dict | None = None,
+    context: dict[str, str] | None = None,
     continuation_seed: int | None = None,
 ) -> Path:
     # Read once: a live parent's subsequent growth cannot enter this branch.
@@ -44,8 +45,8 @@ def fork_game(
     if state.phase is Phase.GAME_OVER or p["stage"] in {"done", "result", "final_commentary"}:
         raise ValueError("Cannot continue a terminal cursor; choose an earlier nonterminal cursor.")
     header = _header_from_json(prefix[0])
-    instructions, controllers = instructions or {}, controllers or {}
-    unknown = (instructions.keys() | controllers.keys()) - header.player_specs.keys()
+    instructions, controllers, context = instructions or {}, controllers or {}, context or {}
+    unknown = (instructions.keys() | controllers.keys() | context.keys()) - header.player_specs.keys()
     if unknown:
         raise ValueError(f"Unknown player identities: {sorted(unknown)}")
     player_specs = {**header.player_specs, **controllers}
@@ -62,6 +63,9 @@ def fork_game(
     for name, text in instructions.items():
         prior = saved["players"][name].get("additional_instructions", "")
         saved["players"][name]["additional_instructions"] = "\n\n".join(filter(None, (prior, text)))
+    saved["additional_context"] = _merged_context(
+        saved.get("additional_context"), context, header.player_specs, append=False
+    )
     discarded = None
     if redecide:
         if p["stage"] in {"action", "decision_thought", "decision_delivery", "decision_request"}:
@@ -152,6 +156,7 @@ def fork_game(
             "discarded_pending": discarded,
             "action": action,
             "message": message,
+            "context": context,
         },
     }
     header = replace(header, player_specs=player_specs, ancestry=ancestry)
@@ -174,3 +179,62 @@ def fork_game(
         writer.close()
         temporary_path.unlink(missing_ok=True)
     return destination
+
+
+def apply_additional_context(journal: Path, context: dict[str, str], append: bool) -> None:
+    """Change what information a paused game supplies to each player from here on.
+
+    The journal is appended to, never rewritten: the edit commits as a new execution
+    checkpoint next to an intervention record, so the played prefix and the change to it
+    stay separately readable. The new text reaches each player through its next rendered
+    prompt; already generated responses are unaffected.
+
+    Args:
+        journal: The paused game's journal.
+        context: The per-player context text keyed by player identity; omitted players keep
+            theirs, and when replacing, an empty string clears a player's context.
+        append: True adds the text to what the player already knows (what a fork does, so an
+            inherited briefing is never silently dropped); False replaces it outright.
+
+    Raises:
+        ValueError: If the journal predates execution checkpoints, the game has already
+            finished, or a player identity is unknown.
+    """
+    records = raw_journal(journal)
+    transitions = [record for record in records if record["type"] == "transition"]
+    if not transitions:
+        raise ValueError("Editing player context requires execution checkpoints; this journal has none.")
+    header = _header_from_json(records[0])
+    unknown = context.keys() - header.player_specs.keys()
+    if unknown:
+        raise ValueError(f"Unknown player identities: {sorted(unknown)}")
+    saved = copy.deepcopy(transitions[-1]["checkpoint"])
+    if saved["progress"]["stage"] == "done":
+        raise ValueError("This game has finished; there is no later prompt left to change.")
+    saved["additional_context"] = _merged_context(
+        saved.get("additional_context"), context, header.player_specs, append=append
+    )
+    saved["sequence"] += 1
+    writer = JournalWriter(journal, append=True)
+    try:
+        writer.begin_transition()
+        writer.write_intervention(origin="human", details={"additional_context": saved["additional_context"]})
+        writer.commit_transition(saved, "context_intervention")
+    finally:
+        writer.close()
+
+
+def _merged_context(
+    saved: dict | None, edits: dict[str, str], player_specs: dict[str, str], append: bool
+) -> dict[str, str | None]:
+    existing = saved or {}
+    merged = {}
+    for name in player_specs:
+        held = existing.get(name)
+        if name not in edits:
+            merged[name] = held
+        elif append:
+            merged[name] = "\n\n".join(part for part in (held, edits[name].strip()) if part) or None
+        else:
+            merged[name] = edits[name] or None
+    return merged

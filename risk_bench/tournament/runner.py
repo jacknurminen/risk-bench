@@ -123,6 +123,7 @@ class TournamentRunner:
         journal = self._open_journal(game_index=game_index, seed=seed, seating=seating)
         runner = GameRunner(
             players=players,
+            additional_context={},
             seed=seed,
             max_turns=self._max_turns,
             allow_private_messages=self._allow_private_messages,

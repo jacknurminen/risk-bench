@@ -55,6 +55,10 @@ class NewGameRequest(BaseModel):
     commentators: list[str] = Field(default_factory=list)
     max_turns: int | None = None
     parallel_games: int = Field(default=1, ge=1, le=20)
+    # extra information the players start the game knowing: one line every player is given, plus
+    # an optional per-player line aligned with ``players``
+    common_context: str = ""
+    player_context: list[str] = Field(default_factory=list)
 
 
 class NewGameResponse(BaseModel):
@@ -110,5 +114,12 @@ class ForkRequest(BaseModel):
     redecide: bool = False
     action: dict | None = None
     message: dict | None = None
+    context: dict[str, str] = Field(default_factory=dict)
     continuation_seed: int | None = None
     start: bool = True
+
+
+class PlayerContextRequest(BaseModel):
+    context: dict[str, str] = Field(default_factory=dict)
+    # a fork adds to what a player already knows; an exact edit replaces it
+    append: bool = False

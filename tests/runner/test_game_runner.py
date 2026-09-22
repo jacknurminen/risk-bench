@@ -25,6 +25,7 @@ def talking_runner(
 ) -> GameRunner:
     return GameRunner(
         players=players,
+        additional_context={},
         seed=seed,
         max_turns=max_turns,
         allow_private_messages=allow_private_messages,
@@ -344,6 +345,7 @@ def test_note_versions_are_journaled_per_turn(tmp_path):
     journal = JournalWriter(path=tmp_path / "game.jsonl", append=False)
     GameRunner(
         players=dict(players),
+        additional_context={},
         seed=4,
         max_turns=6,
         allow_private_messages=True,
@@ -366,6 +368,7 @@ def test_random_players_record_no_notes(tmp_path):
     journal = JournalWriter(path=tmp_path / "game.jsonl", append=False)
     GameRunner(
         players=dict(players),
+        additional_context={},
         seed=4,
         max_turns=6,
         allow_private_messages=False,

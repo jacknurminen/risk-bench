@@ -81,6 +81,7 @@ def game(
                 journal_path=journal,
                 max_turns=max_turns,
                 verbose=verbose,
+                additional_context=[],
             )
         else:
             raise typer.BadParameter("Provide player specs, or --resume with a journal file.")

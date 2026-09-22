@@ -82,12 +82,14 @@
       aria-orientation="horizontal" aria-controls="board timelinePane"
       title="Drag to resize · arrow keys to adjust · double-click to reset"><span></span></div>
     <section id="timelinePane" aria-label="Timeline and game analysis" tabindex="0">
+    <section class="card forkPanel" id="forkPanel" hidden aria-label="Forked copy setup"></section>
     {% if human_url %}
     <section class="card humanTurn" id="humanTurn" hidden aria-labelledby="humanTitle">
       <div class="notesHead"><span class="serif" id="humanTitle">Your turn</span><span class="mono humanContext" id="humanContext"></span></div>
       <p id="humanHint" aria-live="polite"></p><p id="humanHelp"></p>
       <div id="humanLiveNotice" hidden><span>Return to the live board to continue your turn. Your draft is saved.</span>
         <button class="btn" id="humanGoLive" type="button">Return to live board</button></div>
+      <p id="humanContextNote" hidden></p>
       <div id="humanResult" aria-live="polite"></div>
       <form id="humanForm"><fieldset id="humanFields">
         <label id="humanNotesLabel" hidden>Your private notes<textarea id="humanNotes" rows="10" maxlength="8000" placeholder="Record agreements, mission suspicions, and plans for later turns."></textarea></label>

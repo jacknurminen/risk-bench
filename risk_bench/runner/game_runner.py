@@ -74,6 +74,7 @@ class GameRunner:
     def __init__(
         self,
         players: dict[PlayerId, Player],
+        additional_context: dict[PlayerId, str],
         seed: int,
         max_turns: int,
         allow_private_messages: bool,
@@ -85,6 +86,9 @@ class GameRunner:
         verbose: bool,
     ) -> None:
         self._players = players
+        # what the game starts each player knowing beyond the board; a resumed game's checkpoint
+        # replaces this, and a fork or a later edit adds to it from its own point onward
+        self._starting_context = dict(additional_context)
         self._seed = seed
         self._max_turns = max_turns
         self._allow_private_messages = allow_private_messages
@@ -105,6 +109,9 @@ class GameRunner:
         self._messages_by_turn: dict[int, list[ChatMessage]] = {}
         # each player's latest notes — its only memory of earlier turns, fed back into its prompts
         self._notes: dict[PlayerId, str | None] = {}
+        # experimenter-supplied information per player, carried by the checkpoint so a fork's
+        # intervention keeps applying to every later prompt it renders
+        self._additional_context: dict[PlayerId, str | None] = {}
         self._turn_log: list[str] = []
         # recent commentary kept per panel member (by index), so each only sees its own continuity
         self._previous_commentary: list[list[str]] = []
@@ -158,6 +165,7 @@ class GameRunner:
             saved = restored.checkpoint
             self._progress = dict(saved["progress"])
             self._sequence = saved["sequence"] + 1
+            self._additional_context.update(saved.get("additional_context") or {})
             for name, player in self._players.items():
                 checkpoint.restore_player(player, saved["players"][name])
         else:
@@ -179,6 +187,9 @@ class GameRunner:
         for message in transcript.full_transcript():
             self._messages_by_turn.setdefault(message.turn_number, []).append(message)
         self._notes = {player_id: None for player_id in self._players}
+        self._additional_context = {
+            player_id: self._starting_context.get(player_id) or None for player_id in self._players
+        }
         self._turn_log = []
         # each member keeps its own recent commentary, so its continuity stays independent of the panel
         self._previous_commentary: list[list[str]] = [[] for _ in self._commentators]
@@ -209,6 +220,8 @@ class GameRunner:
             "rng": checkpoint.encode(rng.getstate()),
             "players": {name: checkpoint.player_state(player) for name, player in self._players.items()},
             "progress": dict(self._progress),
+            # plain JSON, kept out of the encoded context so every reader can show and edit it
+            "additional_context": dict(self._additional_context),
             "context": checkpoint.encode(
                 {
                     name: getattr(self, name)
@@ -528,6 +541,7 @@ class GameRunner:
             recent_events=tuple(self._current_turn_events[player_id]),
             private_messages_allowed=self._allow_private_messages,
             notes=self._notes[player_id],
+            additional_context=self._additional_context[player_id],
         )
 
     def _noting_view(self, state: GameState, player_id: PlayerId, finished_turn: int) -> PlayerView:
@@ -538,6 +552,7 @@ class GameRunner:
             recent_events=tuple(self._last_turn_events[player_id]),
             private_messages_allowed=self._allow_private_messages,
             notes=self._notes[player_id],
+            additional_context=self._additional_context[player_id],
         )
 
     def _visible_turn_messages(self, player_id: PlayerId, turn_number: int) -> tuple[ChatMessage, ...]:

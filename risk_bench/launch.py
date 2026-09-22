@@ -35,6 +35,7 @@ def run_new_game(
     journal_path: Path | None,
     max_turns: int | None,
     verbose: bool,
+    additional_context: list[str],
     human_controls: bool = False,
 ) -> tuple[GameRecord, Path]:
     """Play a fully journaled game between the given player specs.
@@ -48,17 +49,25 @@ def run_new_game(
         journal_path: Where to write the journal; None derives a timestamped path.
         max_turns: Turn limit; None uses the settings default.
         verbose: Whether to print events and chat to stdout as they happen.
+        additional_context: Extra information to give each player from the first turn on, aligned
+            with ``models``; pass an empty list to give none.
         human_controls: True only for web workers with an API serving the human mailbox.
 
     Returns:
         The finished game's record and its journal path.
 
     Raises:
-        ValueError: If any spec is invalid or a needed API key is missing.
+        ValueError: If any spec is invalid, a needed API key is missing, or the context list is
+            neither empty nor one entry per player.
     """
     if "human" in models and not human_controls:
         raise ValueError("Launch human games from the web app (serve), where the play controls are available.")
-    player_specs = _seat_in_random_order(player_specs=specs.named_specs(specs=models), seed=seed)
+    if additional_context and len(additional_context) != len(models):
+        raise ValueError("Additional context must be empty or hold one entry per player.")
+    named = specs.named_specs(specs=models)
+    # named_specs keeps the caller's order, so the context lines pair with the names before seating
+    starting_context = {name: text for name, text in zip(named, additional_context) if text}
+    player_specs = _seat_in_random_order(player_specs=named, seed=seed)
     if journal_path is None:
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}" / "game.jsonl"
@@ -87,6 +96,7 @@ def run_new_game(
     )
     runner = GameRunner(
         players=players,
+        additional_context=starting_context,
         seed=seed,
         max_turns=turn_limit,
         allow_private_messages=settings.allow_private_messages,
@@ -155,6 +165,7 @@ def resume_game(
     journal = JournalWriter(path=journal_file, append=True)
     runner = GameRunner(
         players=players,
+        additional_context={},
         seed=header.seed,
         max_turns=header.max_turns,
         allow_private_messages=header.allow_private_messages,

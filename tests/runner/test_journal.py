@@ -28,6 +28,7 @@ def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -
     }
     return GameRunner(
         players=players,
+        additional_context={},
         seed=seed,
         max_turns=max_turns,
         allow_private_messages=False,
@@ -148,6 +149,7 @@ def test_thoughts_are_journaled_but_ignored_by_replay(tmp_path: Path):
     )
     GameRunner(
         players=whisperers(seed=7),
+        additional_context={},
         seed=7,
         max_turns=3,
         allow_private_messages=True,

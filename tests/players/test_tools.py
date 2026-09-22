@@ -47,6 +47,7 @@ def request_for_phase(phase: Phase, hand: list[TerritoryCard], private_messages_
         recent_events=(),
         private_messages_allowed=private_messages_allowed,
         notes=None,
+        additional_context=None,
     )
     return DecisionRequest(view=view, legal_actions=legal_actions(state=state))
 

@@ -27,7 +27,7 @@ from risk_bench.players.view import build_player_view
 
 def decision_request():
     state = setup_game(player_ids=["human", "bot", "bot2"], rng=random.Random(0), ruleset=CURRENT_RULESET)
-    view = build_player_view(state, "human", (), (), True, None)
+    view = build_player_view(state, "human", (), (), True, None, None)
     return DecisionRequest(view, legal_actions(state))
 
 

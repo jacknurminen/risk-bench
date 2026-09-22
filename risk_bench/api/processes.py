@@ -38,6 +38,7 @@ class GameProcessManager:
         seed: int,
         commentators: list[str],
         max_turns: int | None,
+        additional_context: list[str],
         journal_path: Path,
         log_path: Path,
     ) -> None:
@@ -49,10 +50,12 @@ class GameProcessManager:
             seed: The game seed.
             commentators: The commentator panel as one model spec per member; empty for none.
             max_turns: Turn limit, or None for the settings default.
+            additional_context: Extra information per player from the first turn on, aligned with
+                ``players``; empty strings give none.
             journal_path: Where the worker writes the journal.
             log_path: Where the worker's output goes.
         """
-        arguments = (str(log_path), players, seed, commentators, max_turns, str(journal_path))
+        arguments = (str(log_path), players, seed, commentators, max_turns, additional_context, str(journal_path))
         self._start(game_id=game_id, target=_run_new_game_in_worker, arguments=arguments)
 
     def resume_game(self, game_id: str, journal_path: Path, commentators: list[str], log_path: Path) -> None:
@@ -169,6 +172,7 @@ def _run_new_game_in_worker(
     seed: int,
     commentators: list[str],
     max_turns: int | None,
+    additional_context: list[str],
     journal_path: str,
 ) -> None:
     _redirect_output(log_path=log_path, append=False)
@@ -181,6 +185,7 @@ def _run_new_game_in_worker(
             journal_path=Path(journal_path),
             max_turns=max_turns,
             verbose=False,
+            additional_context=additional_context,
             human_controls=True,
         )
     except ProviderUnavailableError as error:
