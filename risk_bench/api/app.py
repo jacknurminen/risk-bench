@@ -51,6 +51,9 @@ from risk_bench.viewer.tournament import build_tournament_view_model
 
 _GAME_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 _LAUNCH_TIMEOUT_SECONDS = 15.0
+# long enough for a worker that rejects the journal outright to die and be reported, short enough
+# that a healthy resume is not held up
+_WORKER_START_GRACE_SECONDS = 2.0
 
 
 class _RevalidatingStaticFiles(StaticFiles):
@@ -208,6 +211,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 restore_game(destination).header.commentators,
                 destination.parent / "worker.log",
             )
+            _confirm_worker_started(game_directory=destination.parent, manager=manager)
         return {"id": branch_id, "url": f"/games/{branch_id}"}
 
     @app.post("/api/games/{game_id}/context", status_code=204)
@@ -731,6 +735,25 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
         commentators=_launched_commentators(game_directory=game_directory),
         log_path=game_directory / "worker.log",
     )
+    _confirm_worker_started(game_directory=game_directory, manager=manager)
+
+
+def _confirm_worker_started(game_directory: Path, manager: GameProcessManager) -> None:
+    # A worker that refuses the journal dies in its first moments, and the caller would otherwise see
+    # a successful resume and a game that never moves. A worker that took the journal writes to it —
+    # even a game it finishes inside the grace window — so an untouched journal and a dead worker is
+    # the one combination that means it never started.
+    journal_path = game_directory / "game.jsonl"
+    size_at_start = journal_path.stat().st_size
+    deadline = time.monotonic() + _WORKER_START_GRACE_SECONDS
+    while time.monotonic() < deadline:
+        if journal_path.stat().st_size != size_at_start:
+            return
+        if not manager.is_running(game_id=game_directory.name):
+            log_path = game_directory / "worker.log"
+            log_tail = log_path.read_text(encoding="utf-8").strip()[-1200:] if log_path.is_file() else ""
+            raise HTTPException(status_code=409, detail=f"The game worker exited at startup: {log_tail}")
+        time.sleep(0.05)
 
 
 def _launched_commentators(game_directory: Path) -> list[str]:

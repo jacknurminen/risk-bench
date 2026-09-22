@@ -6,6 +6,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from risk_bench import analysis, specs
 from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
@@ -137,6 +138,9 @@ def resume_game(
     if restored.is_finished:
         raise ValueError(f"{journal_file} records a finished game; nothing to resume.")
     header = restored.header
+    configuration_changes = _configuration_changes(
+        recorded=header.configuration, current=persisted_configuration(settings)
+    )
     stored_settings = header.configuration.get("settings", {})
     if stored_settings:
         settings = settings.model_copy(
@@ -163,6 +167,10 @@ def resume_game(
         for name, spec in header.player_specs.items()
     }
     journal = JournalWriter(path=journal_file, append=True)
+    if configuration_changes:
+        for change in configuration_changes:
+            print(f"[resume] continuing under changed code: {change}", file=sys.stderr)
+        journal.write_configuration_change(changes=configuration_changes)
     runner = GameRunner(
         players=players,
         additional_context={},
@@ -333,6 +341,31 @@ def _seat_in_random_order(player_specs: dict[str, str], seed: int) -> dict[str, 
     seats = list(player_specs)
     random.Random(seed).shuffle(seats)
     return {name: player_specs[name] for name in seats}
+
+
+def _configuration_changes(recorded: dict[str, Any], current: dict[str, Any]) -> list[str]:
+    """Name the ways the code now differs from the run the journal recorded.
+
+    Refusing to continue would be worse than continuing: a long game or a fork of an older
+    one would be unplayable after any edit, and the recorded configuration already lets an
+    analysis see that a game spans two code versions. So the difference is reported and
+    journaled instead, and the game keeps going.
+
+    Args:
+        recorded: The configuration stored in the journal header; empty for legacy journals.
+        current: The configuration this process would record for a new game.
+
+    Returns:
+        One human-readable line per difference, empty when the code matches or was never recorded.
+    """
+    changes = []
+    recorded_sources = recorded.get("prompt_and_tools") or {}
+    for name, source in recorded_sources.items():
+        if current["prompt_and_tools"].get(name) != source:
+            changes.append(f"players/{name}.py — the prompts and tools the models are shown — has changed")
+    if recorded.get("code_version") and recorded["code_version"] != current["code_version"]:
+        changes.append("the engine, player and runner code has changed")
+    return changes
 
 
 def _trace_writer(

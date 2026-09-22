@@ -46,6 +46,18 @@ async function createFork(cursor, button) {
   }
 }
 
+/* A game that was resumed under edited code keeps playing — refusing would strand long games and
+   every fork of an older one — but it must never look like one uninterrupted run. */
+function renderDriftNotice() {
+  const notice = el("driftNotice");
+  const changes = GAME.configuration_changes || [];
+  notice.hidden = !changes.length;
+  if (!notice.hidden)
+    notice.innerHTML = `<strong>Continued under changed code.</strong> This game did not run end to end
+      on one version, so treat it as spanning more than one when comparing it with others.
+      <ul>${changes.map(change => `<li>${escapeHtml(change)}</li>`).join("")}</ul>`;
+}
+
 /* ================= PAUSED BRANCH: WHAT EACH PLAYER KNOWS ================= */
 /* The intervention is information, not instruction: the text below is rendered into the player's
    next prompt in the same register as the board and the chat, so a comparison between two

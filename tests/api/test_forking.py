@@ -1,6 +1,9 @@
+import json
+
 from risk_bench.config import Settings
 from risk_bench.launch import run_new_game
 from risk_bench.players.human import mailbox_for
+from risk_bench.runner.forking import fork_game
 from risk_bench.runner.journal import raw_journal, restore_game
 from tests.api.test_app import client_for
 from tests.api.test_human import wait_for
@@ -61,6 +64,30 @@ def test_a_paused_branch_is_briefed_before_it_runs(tmp_path):
         finished = wait_for(client, f"/api/games/{branch}", lambda view: view["result"] is not None)
         assert finished["additional_context"][player] == "Asia is contested."
         assert not any(client.get("/api/games/parent").json()["additional_context"].values())
+
+
+def test_a_worker_that_dies_at_startup_is_reported_instead_of_looking_resumed(tmp_path):
+    source = tmp_path / "games" / "parent" / "game.jsonl"
+    run_new_game(["random"] * 3, 19, Settings(), [], source, 2, False, [])
+    branch = tmp_path / "games" / "broken" / "game.jsonl"
+    with client_for(tmp_path) as client:
+        cursor = client.get("/api/games/parent").json()["cursors"][8]["before"]
+        fork_game(source, branch, cursor)
+        # a controller the worker cannot build: the API reads only the header, so it resumes happily
+        # and the failure lands in the worker, which is exactly the case that used to pass silently
+        lines = branch.read_text(encoding="utf-8").splitlines(keepends=True)
+        header = json.loads(lines[0])
+        first_player = next(iter(header["player_specs"]))
+        header["player_specs"][first_player] = "notaprovider:model"
+        branch.write_text(json.dumps(header, separators=(",", ":")) + "\n" + "".join(lines[1:]), encoding="utf-8")
+        untouched = branch.read_bytes()
+
+        response = client.post("/api/games/broken/resume")
+
+        assert response.status_code == 409, response.text
+        assert "worker exited at startup" in response.json()["detail"]
+        assert "Unknown provider" in response.json()["detail"]
+        assert branch.read_bytes() == untouched
 
 
 def test_a_game_can_be_launched_with_shared_and_per_player_context(tmp_path):

@@ -23,9 +23,11 @@ function renderGameControl() {
 el("gameControl").onclick = async () => {
   const action = gameRunning ? "pause" : "resume";
   const res = await fetch(`${POLL_URL}/${action}`, { method: "POST" });
-  // 204 = done; 409 = already in the opposite state — either way the game now matches the intent
-  if (res.ok || res.status === 409) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); toast("game " + (gameRunning ? "resumed" : "paused")); }
-  else toast(`could not ${action} the game`);
+  if (res.ok) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); toast("game " + (gameRunning ? "resumed" : "paused")); return; }
+  // a refused resume carries the worker's own words; without them the game just silently never moves
+  const detail = await res.json().then(body => body.detail, () => "");
+  if (res.status === 409 && !detail) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); return; }
+  toast(detail ? `could not ${action} the game — ${detail}` : `could not ${action} the game`);
 };
 
 /* the full private-note history for one player (every end-of-turn version), like the classic view */

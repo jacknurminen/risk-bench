@@ -9,7 +9,9 @@ import pytest
 
 from risk_bench.agents.base import Response
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
+from risk_bench.config import Settings
 from risk_bench.game.actions import Attack, EndAttackPhase, PlaceArmies, SkipFortify
+from risk_bench.launch import persisted_configuration, resume_game
 from risk_bench.players.base import Decision, NegotiationTurn
 from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
 from risk_bench.players.random import RandomPlayer
@@ -18,6 +20,7 @@ from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import JournalHeader, JournalWriter, raw_journal, read_journal, restore_game
 from risk_bench.viewer.prompts import preview_next_prompts
+from risk_bench.viewer.snapshots import build_view_model
 
 NAMES = ("alice", "bob", "carla")
 
@@ -456,6 +459,33 @@ def test_context_edits_are_rejected_for_unknown_players_and_finished_games(compl
         apply_additional_context(journal=path, context={"alice": "hello"}, append=False)
     with pytest.raises(ValueError, match="finished"):
         preview_next_prompts(journal_path=path, additional_context={})
+
+
+def test_edited_code_is_reported_and_recorded_rather_than_blocking_the_resume(tmp_path, monkeypatch):
+    monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
+    path = tmp_path / "drifting" / "game.jsonl"
+    writer = JournalWriter(path, False)
+    recorded = persisted_configuration(Settings())
+    writer.write_header(
+        replace(JournalHeader(4, 19, dict.fromkeys(NAMES, "random"), 2, True, 3, []), configuration=recorded)
+    )
+    writer.close()
+
+    # the journal now carries a configuration; pretend the prompts and engine moved on since
+    moved_on = {
+        **recorded,
+        "code_version": "different",
+        "prompt_and_tools": {**recorded["prompt_and_tools"], "rendering": "edited"},
+    }
+    monkeypatch.setattr("risk_bench.launch.persisted_configuration", lambda settings: moved_on)
+    resume_game(journal_file=path, settings=Settings(), commentators=[], verbose=False)
+
+    assert restore_game(path).is_finished
+    changes = [record for record in read_journal(path) if record["type"] == "configuration_change"]
+    assert len(changes) == 1
+    assert any("rendering" in change for change in changes[0]["changes"])
+    assert any("engine" in change for change in changes[0]["changes"])
+    assert build_view_model(journal_path=path)["configuration_changes"] == changes[0]["changes"]
 
 
 def test_context_given_at_launch_reaches_the_first_prompt_and_a_fork_adds_to_it(tmp_path, monkeypatch):

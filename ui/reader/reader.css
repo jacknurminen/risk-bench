@@ -491,6 +491,11 @@ body.readerSplit .subbar { gap: 6px 12px; }
 .forkSystem { margin-top: 9px; }
 .forkSystem > summary { cursor: pointer; font: 10px var(--font-mono); color: var(--mute); }
 
+.driftNotice { padding: 12px 16px; margin-bottom: 14px; border-left: 3px solid var(--gold);
+               font-size: 12px; line-height: 1.55; color: var(--body); }
+.driftNotice[hidden] { display: none; }
+.driftNotice ul { margin: 6px 0 0; padding-left: 18px; }
+.driftNotice li { font-family: var(--font-mono); font-size: 11px; color: var(--mute); }
 .forkInherited { padding: 6px 9px; border-radius: 5px; background: var(--subtle); border: 1px solid var(--line);
                  font: 11.5px/1.45 var(--font-sans); color: var(--mute); white-space: pre-wrap; }
 .forkInherited .eyebrow { display: block; margin-bottom: 3px; }

@@ -21,11 +21,13 @@ async function refreshFromJournal() {
   GAME.cursors = updated.cursors;
   GAME.ancestry = updated.ancestry;
   GAME.additional_context = updated.additional_context;
+  GAME.configuration_changes = updated.configuration_changes;
   GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
   el("slider").max = steps.length - 1;
   renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
+  renderDriftNotice();
   if (statsOpen()) renderStats();
   show(following ? steps.length - 1 : index);
 }
@@ -34,6 +36,7 @@ async function refreshFromJournal() {
 buildBoard(); buildContinentLegend();
 renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
 renderForkPanel();
+renderDriftNotice();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
 if (EVAL.running) pollEvaluation();  // a run already in flight (started before this page load)
