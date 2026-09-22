@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -12,6 +13,7 @@ from risk_bench.config import load_settings
 from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.runner import evaluation_versions
 from risk_bench.runner.evaluation_store import evaluation_header, read_evaluation
+from risk_bench.runner.forking import fork_game
 from risk_bench.tournament.results import TournamentReport, write_report
 from risk_bench.tournament.runner import TournamentRunner
 from risk_bench.viewer.evaluation import build_evaluation_view_model
@@ -26,6 +28,23 @@ MODELS_HELP = (
     "provider:model for an explicit model id, or 'random' for the baseline. Add ':<effort>' (low/medium/high) "
     "to set a player's reasoning effort, e.g. 'anthropic:hi:low'."
 )
+
+
+@app.command("fork")
+def fork_command(
+    journal: Path,
+    cursor: Annotated[str, typer.Option(help="Stable transition cursor, e.g. 42:before")],
+    output: Annotated[Path, typer.Option(help="New branch journal path")],
+    overrides: Annotated[
+        Path | None, typer.Option(help="JSON interventions: instructions/controllers/action/message")
+    ] = None,
+    continuation_seed: int | None = None,
+    redecide: bool = False,
+) -> None:
+    """Create an independent paused branch; use game --resume to continue it."""
+    options = json.loads(overrides.read_text()) if overrides else {}
+    fork_game(journal, output, cursor, continuation_seed=continuation_seed, redecide=redecide, **options)
+    console.print(f"Created branch: {output}")
 
 
 @app.command()

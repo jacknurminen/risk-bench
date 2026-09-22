@@ -1,5 +1,6 @@
 """Running games as plain function calls, shared by the CLI and the web app's worker processes."""
 
+import hashlib
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,6 +12,7 @@ from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
 from risk_bench.config import Settings
 from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
+from risk_bench.players import rendering, tools
 from risk_bench.players.human import mailbox_for
 from risk_bench.players.rendering import render_board_text
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
@@ -40,7 +42,7 @@ def run_new_game(
     Args:
         models: Player specs ('random', 'provider:tier', 'provider:model'); their input order
             does not fix the seating, which is randomly shuffled (seed-derived) before play.
-        seed: The game seed; the whole game is reproducible from it.
+        seed: The engine seed; fresh model responses are not seed-deterministic.
         settings: Provides API keys, agent limits, and game defaults.
         commentators: The commentator panel as one model spec per member; empty for none.
         journal_path: Where to write the journal; None derives a timestamped path.
@@ -80,6 +82,7 @@ def run_new_game(
             allow_private_messages=settings.allow_private_messages,
             max_negotiation_rounds=settings.max_negotiation_rounds,
             commentators=commentators,
+            configuration=persisted_configuration(settings),
         )
     )
     runner = GameRunner(
@@ -124,6 +127,20 @@ def resume_game(
     if restored.is_finished:
         raise ValueError(f"{journal_file} records a finished game; nothing to resume.")
     header = restored.header
+    stored_settings = header.configuration.get("settings", {})
+    if stored_settings:
+        settings = settings.model_copy(
+            update={
+                **stored_settings,
+                "agent_reasoning_effort": settings.agent_reasoning_effort.__class__(
+                    stored_settings["agent_reasoning_effort"]
+                ),
+            }
+        )
+    if header.configuration:
+        commentators = header.commentators
+    for limitation in restored.recovery_limitations:
+        print(f"[resume] {limitation}", file=sys.stderr)
     if "human" in header.player_specs.values() and not human_controls:
         raise ValueError("Resume human games from the web app (serve).")
     trace = _trace_writer(
@@ -131,7 +148,7 @@ def resume_game(
     )
     players = {
         name: specs.player_factory(spec=spec, settings=settings, trace=trace, human_mailbox=mailbox_for(journal_file))(
-            name, random.Random(f"{header.seed}:{name}:resume")
+            name, random.Random(f"{header.seed}:{name}")
         )
         for name, spec in header.player_specs.items()
     }
@@ -314,3 +331,37 @@ def _trace_writer(
     if not involves_an_api:
         return None
     return TraceWriter(path=trace_path_for_journal(journal_path=journal_path), append=append)
+
+
+def persisted_configuration(settings: Settings) -> dict:
+    """Allowlist experimental settings; credentials and environment paths never enter journals."""
+    sources = {"rendering": Path(rendering.__file__).read_text(), "tools": Path(tools.__file__).read_text()}
+    package = Path(__file__).parent
+    code_files = sorted(
+        [
+            *(package / "game").glob("*.py"),
+            *(package / "players").glob("*.py"),
+            package / "runner" / "game_runner.py",
+            package / "runner" / "checkpoint.py",
+        ]
+    )
+    code_version = hashlib.sha256(
+        b"".join(str(path.relative_to(package)).encode() + b"\0" + path.read_bytes() for path in code_files)
+    ).hexdigest()
+    return {
+        "settings": settings.model_dump(
+            mode="json",
+            include={
+                "max_agent_tokens",
+                "agent_reasoning_effort",
+                "max_invalid_retries",
+                "max_consecutive_provider_failures",
+                "max_concurrent_commentators",
+            },
+        ),
+        "prompt_and_tools": sources,
+        "prompt_version": hashlib.sha256(sources["rendering"].encode()).hexdigest(),
+        "engine_version": 1,
+        "code_version": code_version,
+        "rng_version": "python-mt19937-v3",
+    }

@@ -101,3 +101,14 @@ class ModelCatalogResponse(BaseModel):
     models_by_provider: dict[str, list[CatalogModel]]
     efforts: list[str]
     baseline: str
+
+
+class ForkRequest(BaseModel):
+    cursor: str
+    instructions: dict[str, str] = Field(default_factory=dict)
+    controllers: dict[str, str] = Field(default_factory=dict)
+    redecide: bool = False
+    action: dict | None = None
+    message: dict | None = None
+    continuation_seed: int | None = None
+    start: bool = True

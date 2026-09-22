@@ -115,8 +115,9 @@ def test_a_restored_game_resumes_and_finishes(tmp_path: Path):
     record = journaled_runner(journal=journal, seed=11, max_turns=2_000).resume(restored=restored)
     journal.close()
 
-    assert record.winner is not None
-    assert record.turn_count > 3
+    # A committed terminal transition remains terminal even if result publication was interrupted.
+    assert record.winner is None
+    assert record.turn_count == restored.state.turn_number
     assert read_journal(path=path)[-1]["type"] == "result"
 
 
@@ -181,6 +182,7 @@ def test_headers_from_before_multi_pass_negotiation_restore_with_one_round(tmp_p
 
 def test_journals_from_before_schema_three_replay_under_the_legacy_ruleset(tmp_path: Path):
     assert ruleset_for_schema_version(schema_version=2) is LEGACY_RULESET
+    assert ruleset_for_schema_version(schema_version=3) is CURRENT_RULESET
     assert ruleset_for_schema_version(schema_version=SCHEMA_VERSION) is CURRENT_RULESET
 
     path = tmp_path / "game.jsonl"

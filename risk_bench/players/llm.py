@@ -1,5 +1,6 @@
 import random
 import sys
+from dataclasses import replace
 
 from risk_bench.agents.base import Agent, Message, Response, Tool, ToolCall
 from risk_bench.chat.diplomacy import ChatMessage
@@ -63,6 +64,9 @@ class LLMPlayer:
         self._max_consecutive_provider_failures = max_consecutive_provider_failures
         self._consecutive_provider_failures = 0
         self._rng = rng
+        self._retry_conversation = None
+        self._retry_index = 0
+        self.additional_instructions = ""
 
     def decide_action(self, request: DecisionRequest) -> Decision:
         """Ask the model to choose an action via tool calling, optionally with table talk.
@@ -79,13 +83,15 @@ class LLMPlayer:
         Returns:
             The decision, or a silent random legal action after exhausted retries.
         """
-        conversation = [
+        conversation = self._retry_conversation or [
             Message(role="system", content=render_system_prompt(view=request.view)),
             Message(role="user", content=render_decision_prompt(request=request)),
         ]
         tools = tools_for_decision(request=request)
 
-        for _ in range(self._max_invalid_retries + 1):
+        self._retry_conversation = conversation
+        for index in range(self._retry_index, self._max_invalid_retries + 1):
+            self._retry_index = index
             response = self._respond_or_none(conversation=conversation, tools=tools)
             if response is None:
                 continue
@@ -98,12 +104,16 @@ class LLMPlayer:
             except InvalidToolCallError as error:
                 conversation += _correction_messages(response=response, failed_call=action_calls[0], error=error)
                 continue
+            self._retry_conversation = None
+            self._retry_index = 0
             return Decision(
                 actions=tuple(actions),
                 chat_message=_first_valid_message(response=response, view=request.view),
                 thought=_thought_text(response=response),
             )
 
+        self._retry_conversation = None
+        self._retry_index = 0
         self.invalid_action_count += 1
         return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None, thought=None)
 
@@ -157,6 +167,16 @@ class LLMPlayer:
         return notes or None
 
     def _respond_or_none(self, conversation: list[Message], tools: list[Tool]) -> Response | None:
+        if self.additional_instructions:
+            conversation = [
+                replace(
+                    conversation[0],
+                    content=(conversation[0].content or "")
+                    + "\n\nAdditional instructions:\n"
+                    + self.additional_instructions,
+                ),
+                *conversation[1:],
+            ]
         try:
             response = self._agent.respond(messages=conversation, tools=tools)
         except Exception as error:  # noqa: BLE001 - transient provider failures must not kill the game

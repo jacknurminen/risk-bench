@@ -1,22 +1,26 @@
 import random
 import sys
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from risk_bench.agents.tracing import TraceWriter
 from risk_bench.chat.diplomacy import ChatMessage, ChatTranscript, MessageVisibility
+from risk_bench.game.actions import Attack
 from risk_bench.game.engine import apply_action, setup_game
 from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnLimitReached, TurnStarted
 from risk_bench.game.missions import Mission
 from risk_bench.game.rules import legal_actions, validate_action
 from risk_bench.game.ruleset import CURRENT_RULESET
+from risk_bench.game.serialization import event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Phase, PlayerId
 from risk_bench.players.base import DecisionRequest, Player, PlayerView
+from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.players.rendering import narrate_event
 from risk_bench.players.view import build_player_view
+from risk_bench.runner import checkpoint
 from risk_bench.runner.commentary import Commentary, Commentator
-from risk_bench.runner.journal import JournalWriter, RestoredGame
+from risk_bench.runner.journal import JournalWriter, RestoredGame, restored_context
 
 _PREVIOUS_COMMENTARY_KEPT = 5
 
@@ -119,8 +123,7 @@ class GameRunner:
     def resume(self, restored: RestoredGame) -> GameRecord:
         """Continue a game restored from a journal until completion.
 
-        The record returned covers the whole game except per-player
-        invalid-action counts, which restart at zero on resume.
+        Restores the committed operation, pending responses, player streams and context.
 
         Args:
             restored: The journal-replayed game; its player specs must match
@@ -133,7 +136,7 @@ class GameRunner:
             ValueError: If the restored game is already finished or the
                 players do not match.
         """
-        if restored.is_finished or restored.state.phase is Phase.GAME_OVER:
+        if restored.is_finished or (restored.checkpoint is None and restored.state.phase is Phase.GAME_OVER):
             raise ValueError("This game is already finished; nothing to resume.")
         if list(restored.header.player_specs) != list(self._players):
             raise ValueError("The journal's players do not match this runner's players.")
@@ -142,9 +145,31 @@ class GameRunner:
         for message in restored.messages:
             transcript.add(message=message)
         self._reset_progress(transcript=transcript)
+        self._seed = restored.header.seed
+        self._max_turns = restored.header.max_turns
+        self._allow_private_messages = restored.header.allow_private_messages
+        self._max_negotiation_rounds = restored.header.max_negotiation_rounds
+        self._all_events = [
+            event_from_json(e) for record in restored.records if record["type"] == "events" for e in record["events"]
+        ]
+        for name, value in restored_context(restored).items():
+            setattr(self, name, value)
+        if restored.checkpoint is not None:
+            saved = restored.checkpoint
+            self._progress = dict(saved["progress"])
+            self._sequence = saved["sequence"] + 1
+            for name, player in self._players.items():
+                checkpoint.restore_player(player, saved["players"][name])
+        else:
+            self._progress = self._initial_progress(restored.state.turn_number)
+            self._progress["legacy_assumptions"] = list(restored.recovery_limitations)
+            self._sequence = 0
+            self._commit(restored.state, restored.rng, "legacy_reconstruction")
         return self._play(state=restored.state, rng=restored.rng)
 
     def _reset_progress(self, transcript: ChatTranscript) -> None:
+        if hasattr(self, "_progress"):
+            del self._progress
         self._transcript = transcript
         self._all_events = []
         self._current_turn_events = {player_id: [] for player_id in self._players}
@@ -158,74 +183,240 @@ class GameRunner:
         # each member keeps its own recent commentary, so its continuity stays independent of the panel
         self._previous_commentary: list[list[str]] = [[] for _ in self._commentators]
 
-    def _play(self, state: GameState, rng: random.Random) -> GameRecord:
-        missions = {player_id: player.mission for player_id, player in state.players.items()}
+    def _initial_progress(self, turn: int = 0) -> dict:
+        return {
+            "stage": "route",
+            "negotiated_turn": turn,
+            "commented_turn": turn,
+            "pass": 0,
+            "speaker": 0,
+            "spoke": False,
+            "order": [],
+            "note_index": 0,
+            "pending": None,
+            "action_index": 0,
+            "rounds_left": None,
+            "message_index": 0,
+            "actor": None,
+        }
 
-        # on resume this skips re-running the current turn's negotiation round
-        last_negotiated_turn = state.turn_number
-        commented_turn = state.turn_number
-        while state.phase is not Phase.GAME_OVER:
-            if state.turn_number > self._max_turns:
-                self._record_events(state=state, events=(TurnLimitReached(turn_number=state.turn_number),))
-                break
-            if state.phase is not Phase.SETUP_PLACEMENT and state.turn_number > last_negotiated_turn:
-                last_negotiated_turn = state.turn_number
-                self._run_negotiation_round(state=state)
-            state = self._decide_and_apply(state=state, rng=rng)
-            if state.turn_number != commented_turn and state.phase is not Phase.GAME_OVER:
-                # note before commentating so the turn's fresh notes are available to the commentator
-                self._run_noting(state=state, finished_turn=commented_turn)
-                self._commentate(state=state, turn_number=commented_turn)
-                commented_turn = state.turn_number
+    def _checkpoint(self, state: GameState, rng: random.Random) -> dict:
+        return {
+            "version": checkpoint.VERSION,
+            "sequence": self._sequence,
+            "runtime": {"python": sys.version.split()[0], "rng": "python-mt19937-v3", "engine": 1},
+            "state": checkpoint.encode(state),
+            "rng": checkpoint.encode(rng.getstate()),
+            "players": {name: checkpoint.player_state(player) for name, player in self._players.items()},
+            "progress": dict(self._progress),
+            "context": checkpoint.encode(
+                {
+                    name: getattr(self, name)
+                    for name in (
+                        "_current_turn_events",
+                        "_last_turn_events",
+                        "_notes",
+                        "_turn_log",
+                        "_previous_commentary",
+                    )
+                }
+            ),
+        }
 
-        outcome = f"The game ended: {state.winner} won." if state.winner else "The game ended in a draw."
-        self._turn_log.append(outcome)
-        self._commentate(state=state, turn_number=state.turn_number)
-
+    def _commit(self, state: GameState, rng: random.Random, stage: str) -> None:
         if self._journal is not None:
-            self._journal.write_result(winner=state.winner, turn_count=state.turn_number)
+            self._journal.commit_transition(self._checkpoint(state, rng), stage)
+        self._sequence += 1
+
+    def _play(self, state: GameState, rng: random.Random) -> GameRecord:
+        if not hasattr(self, "_progress"):
+            self._progress = self._initial_progress()
+            self._sequence = 0
+            self._commit(state, rng, "setup")
+        while self._progress["stage"] != "done":
+            stage = self._progress["stage"]
+            if self._journal is not None:
+                self._journal.begin_transition()
+            try:
+                state = self._advance(state, rng)
+            except ProviderUnavailableError:
+                # No effects from a failed call are published. Preserve its retry conversation,
+                # failure counters and exact request position for an ordinary later resume.
+                if self._journal is not None:
+                    self._journal.abort_transition()
+                self._commit(state, rng, "paused:" + stage)
+                raise
+            except Exception:
+                # Unexpected engine/serialization errors leave the last complete transition intact.
+                if self._journal is not None:
+                    self._journal.abort_transition()
+                raise
+            self._commit(state, rng, stage)
         return GameRecord(
             seed=self._seed,
             player_ids=tuple(self._players),
-            missions=missions,
+            missions={name: player.mission for name, player in state.players.items()},
             events=tuple(self._all_events),
             chat=tuple(self._transcript.full_transcript()),
             winner=state.winner,
             turn_count=state.turn_number,
-            invalid_action_counts={
-                player_id: player.invalid_action_count for player_id, player in self._players.items()
-            },
+            invalid_action_counts={name: player.invalid_action_count for name, player in self._players.items()},
         )
 
-    def _decide_and_apply(self, state: GameState, rng: random.Random) -> GameState:
-        acting_player = state.current_player
-        if self._trace is not None:
-            self._trace.set_context(turn=state.turn_number, kind="decision")
-        request = DecisionRequest(
-            view=self._build_view(state=state, player_id=acting_player),
-            legal_actions=legal_actions(state=state),
-        )
-        decision = self._players[acting_player].decide_action(request)
-        for action in decision.actions:
-            rejection = validate_action(state=state, action=action)
-            if rejection is not None:
-                # an earlier action in this batch (e.g. an attack that depleted or captured) made
-                # this one illegal; skip it and keep going rather than abort the whole move
-                if self._verbose:
-                    print(f"[skipped] {acting_player}: {rejection}")
-                continue
-            result = apply_action(state=state, action=action, rng=rng)
+    def _advance(self, state: GameState, rng: random.Random) -> GameState:
+        p = self._progress
+        stage = p["stage"]
+        if stage == "route":
+            if state.phase is Phase.GAME_OVER or (
+                state.turn_number > self._max_turns and state.turn_number == p["commented_turn"]
+            ):
+                if state.phase is not Phase.GAME_OVER:
+                    events = (TurnLimitReached(turn_number=state.turn_number),)
+                    self._record_events(state, events)
+                    if self._journal is not None:
+                        self._journal.write_events(events)
+                self._turn_log.append(f"The game ended: {state.winner or 'draw'}.")
+                p["stage"] = "final_commentary"
+            elif state.turn_number != p["commented_turn"]:
+                p.update(stage="note_request", note_index=0)
+            elif state.phase is not Phase.SETUP_PLACEMENT and state.turn_number > p["negotiated_turn"]:
+                order = [state.current_player] + [
+                    name
+                    for name, player in state.players.items()
+                    if player.eliminated_by is None and name != state.current_player
+                ]
+                p.update(stage="negotiation_request", order=order, speaker=0, **{"pass": 0, "spoke": False})
+            else:
+                p["stage"] = "decision_request"
+        elif stage == "negotiation_request":
+            if p["pass"] >= self._max_negotiation_rounds:
+                p.update(stage="decision_request", negotiated_turn=state.turn_number)
+            else:
+                actor = p["order"][p["speaker"]]
+                self._set_trace(state.turn_number, "negotiation")
+                response = self._players[actor].compose_messages(self._build_view(state, actor))
+                p.update(
+                    stage="negotiation_thought", pending=checkpoint.encode(response), actor=actor, message_index=0
+                )
+        elif stage == "negotiation_thought":
+            response = checkpoint.decode(p["pending"])
+            self._record_thought(p["actor"], response.thought)
+            p["stage"] = "negotiation_delivery"
+        elif stage == "negotiation_delivery":
+            response = checkpoint.decode(p["pending"])
+            if p["message_index"] < len(response.messages):
+                p["spoke"] |= self._deliver_message(
+                    response.messages[p["message_index"]],
+                    origin="human" if p.get("message_override_index") == p["message_index"] else None,
+                )
+                p["message_index"] += 1
+            else:
+                p["pending"] = None
+                p.pop("message_override_index", None)
+                p["speaker"] += 1
+                if p["speaker"] == len(p["order"]):
+                    p["pass"] = p["pass"] + 1 if p["spoke"] else self._max_negotiation_rounds
+                    p.update(speaker=0, spoke=False)
+                p["stage"] = "negotiation_request"
+        elif stage == "decision_request":
+            actor = state.current_player
+            self._set_trace(state.turn_number, "decision")
+            response = self._players[actor].decide_action(
+                DecisionRequest(view=self._build_view(state, actor), legal_actions=legal_actions(state))
+            )
+            p.update(
+                stage="action", pending=checkpoint.encode(response), actor=actor, action_index=0, rounds_left=None
+            )
+        elif stage == "action":
+            response = checkpoint.decode(p["pending"])
+            if (
+                state.phase is Phase.GAME_OVER
+                or p["action_index"] >= len(response.actions)
+                or state.current_player != p["actor"]
+            ):
+                p["stage"] = "decision_thought"
+            else:
+                action = response.actions[p["action_index"]]
+                continuation = p["rounds_left"] is not None
+                if isinstance(action, Attack) and continuation:
+                    action = replace(
+                        action, attacker_dice=min(action.attacker_dice, state.armies[action.from_territory] - 1)
+                    )
+                rejection = validate_action(state, action)
+                if rejection is not None:
+                    p["action_index"] += 1
+                    p["rounds_left"] = None
+                else:
+                    if isinstance(action, Attack):
+                        if not continuation:
+                            p["rounds_left"] = action.max_attacks
+                        action = replace(action, max_attacks=1)
+                    result = apply_action(state, action, rng, shared_rng=True)
+                    if self._journal is not None:
+                        self._journal.write_action(
+                            p["actor"],
+                            action,
+                            origin="human" if p.get("action_override_index") == p["action_index"] else None,
+                        )
+                        self._journal.write_events(result.events)
+                    self._record_events(state, result.events)
+                    state = result.state
+                    if isinstance(action, Attack):
+                        p["rounds_left"] -= 1
+                        if (
+                            p["rounds_left"] == 0
+                            or state.owner[action.to_territory] == p["actor"]
+                            or state.armies[action.from_territory] < 2
+                            or state.phase is Phase.GAME_OVER
+                        ):
+                            p["rounds_left"] = None
+                    if p["rounds_left"] is None:
+                        p["action_index"] += 1
+        elif stage == "decision_thought":
+            self._record_thought(p["actor"], checkpoint.decode(p["pending"]).thought)
+            p["stage"] = "decision_delivery"
+        elif stage == "decision_delivery":
+            message = checkpoint.decode(p["pending"]).chat_message
+            if message is not None:
+                self._deliver_message(message, origin="human" if p.get("message_override_index") == 0 else None)
+            p.pop("action_override_index", None)
+            p.pop("message_override_index", None)
+            p.update(stage="route", pending=None)
+        elif stage == "note_request":
+            names = list(self._players)
+            if p["commented_turn"] < 1 or p["note_index"] == len(names):
+                p["stage"] = "commentary"
+            else:
+                actor = names[p["note_index"]]
+                if state.players[actor].eliminated_by is not None:
+                    p["note_index"] += 1
+                else:
+                    self._set_trace(p["commented_turn"], "noting")
+                    notes = self._players[actor].update_notes(self._noting_view(state, actor, p["commented_turn"]))
+                    p.update(stage="note_apply", actor=actor, pending=notes)
+        elif stage == "note_apply":
+            if p["pending"] is not None:
+                self._notes[p["actor"]] = p["pending"]
+                if self._journal is not None:
+                    self._journal.write_note(p["actor"], p["commented_turn"], p["pending"])
+            p.update(stage="note_request", pending=None, note_index=p["note_index"] + 1)
+        elif stage == "commentary":
+            self._commentate(state, p["commented_turn"])
+            p.update(stage="route", commented_turn=state.turn_number)
+        elif stage == "final_commentary":
+            self._commentate(state, state.turn_number)
+            p["stage"] = "result"
+        elif stage == "result":
             if self._journal is not None:
-                self._journal.write_action(player_id=acting_player, action=action)
-                self._journal.write_events(events=result.events)
-            self._record_events(state=state, events=result.events)
-            state = result.state
-            if state.phase is Phase.GAME_OVER:
-                break  # an action mid-batch (a winning placement or conquest) can end the game
-        self._record_thought(player_id=acting_player, thought=decision.thought)
-        if decision.chat_message is not None:
-            self._deliver_message(message=decision.chat_message)
+                self._journal.write_result(state.winner, state.turn_number)
+            p["stage"] = "done"
+        else:
+            raise ValueError(f"Unknown execution stage: {stage}")
         return state
+
+    def _set_trace(self, turn: int, kind: str) -> None:
+        if self._trace is not None:
+            self._trace.set_context(turn=turn, kind=kind)
 
     def _record_events(self, state: GameState, events: tuple[GameEvent, ...]) -> None:
         self._all_events.extend(events)
@@ -243,30 +434,6 @@ class GameRunner:
                     continue
                 self._current_turn_events[player_id].append(event)
 
-    def _run_negotiation_round(self, state: GameState) -> None:
-        living_others = [
-            player_id
-            for player_id, player in state.players.items()
-            if player.eliminated_by is None and player_id != state.current_player
-        ]
-        speaking_order = [state.current_player] + living_others
-        if self._trace is not None:
-            self._trace.set_context(turn=state.turn_number, kind="negotiation")
-        for _ in range(self._max_negotiation_rounds):
-            if not self._run_negotiation_pass(state=state, speaking_order=speaking_order):
-                return
-
-    def _run_negotiation_pass(self, state: GameState, speaking_order: list[PlayerId]) -> bool:
-        anyone_spoke = False
-        for player_id in speaking_order:
-            view = self._build_view(state=state, player_id=player_id)
-            negotiation_turn = self._players[player_id].compose_messages(view=view)
-            self._record_thought(player_id=player_id, thought=negotiation_turn.thought)
-            for message in negotiation_turn.messages:
-                # a dropped private message was heard by nobody, so it must not extend the round
-                anyone_spoke |= self._deliver_message(message=message)
-        return anyone_spoke
-
     def _record_thought(self, player_id: PlayerId, thought: str | None) -> None:
         if thought is None:
             return
@@ -276,7 +443,7 @@ class GameRunner:
         if self._verbose:
             print(f"({player_id} thinks) {thought}")
 
-    def _deliver_message(self, message: ChatMessage) -> bool:
+    def _deliver_message(self, message: ChatMessage, origin: str | None = None) -> bool:
         if message.visibility is MessageVisibility.PRIVATE and not self._allow_private_messages:
             return False
         channel = f"privately to {message.recipient}" if message.recipient else "to everyone"
@@ -284,7 +451,7 @@ class GameRunner:
         self._transcript.add(message=message)
         self._messages_by_turn.setdefault(message.turn_number, []).append(message)
         if self._journal is not None:
-            self._journal.write_message(message=message)
+            self._journal.write_message(message=message, origin=origin)
         if self._verbose:
             print(message)
         return True
@@ -352,24 +519,6 @@ class GameRunner:
             print(f"[{label}] {commentary.text}")
             for tag in commentary.tags:
                 print(f"[{label}]   {tag.behavior} — {tag.player}: {tag.note}")
-
-    def _run_noting(self, state: GameState, finished_turn: int) -> None:
-        if finished_turn < 1:
-            return  # turn 0 is blind setup placement: no negotiation and nothing to remember
-        for player_id, player in self._players.items():
-            if state.players[player_id].eliminated_by is not None:
-                continue
-            if self._trace is not None:
-                self._trace.set_context(turn=finished_turn, kind="noting")
-            view = self._noting_view(state=state, player_id=player_id, finished_turn=finished_turn)
-            notes = player.update_notes(view)
-            if notes is None:
-                continue
-            self._notes[player_id] = notes
-            if self._journal is not None:
-                self._journal.write_note(player_id=player_id, turn_number=finished_turn, text=notes)
-            if self._verbose:
-                print(f"[notes] {player_id} (turn {finished_turn}): {notes}")
 
     def _build_view(self, state: GameState, player_id: PlayerId) -> PlayerView:
         return build_player_view(

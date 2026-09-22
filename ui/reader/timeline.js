@@ -157,7 +157,18 @@ function expandedBody(turn) {
     && !(s.layer === "event" && eventEchoesAction(s.text))
     && !(s.layer === "note" && lastNoteSpanByPlayer[s.player] !== s.span));
   const liveBySpan = commentatorTagsBySpan(turn);
-  return `<div class="expand">${lines.map(s => traceLine(turn, s, liveBySpan.get(s.span) || [])).join("")}</div>`;
+  // Several entries can come out of one committed transition, so a seam is only offered where the
+  // cursor actually changes — one per forkable boundary rather than one per line.
+  const rows = [];
+  let cursor = null;
+  lines.forEach(s => {
+    if (s.cursor && s.cursor.before !== cursor?.before) rows.push(forkSeparator(s.cursor.before));
+    cursor = s.cursor || cursor;
+    rows.push(traceLine(turn, s, liveBySpan.get(s.span) || []));
+  });
+  // The final boundary is the game's head; later turns open with it as their own leading seam.
+  if (cursor && turn === turns[turns.length - 1]) rows.push(forkSeparator(cursor.after));
+  return `<div class="expand">${rows.join("")}</div>`;
 }
 // engine events that merely restate the board action above them (place/fortify), or the turn header
 // the card already shows — hidden from the timeline, but still present in the raw-trace evidence drawer
@@ -202,7 +213,7 @@ function traceLine(turn, s, liveAnno) {
       <button class="chip" onclick="chipClick(${s.span})" title="open in the raw trace">[${s.span}]</button>
       <span class="kindbar" style="background:${kindColor}"></span>
       <span style="flex:1;min-width:0">
-        <span class="kindlabel">${kindLabel}</span>
+        <span class="kindlabel">${kindLabel}${s.inherited ? " · inherited" : ""}${s.origin === "human" ? " · intervention" : ""}</span>
         ${s.player ? `<span class="tracewho" style="color:${colorOf(s.player)}">${tagOf(s.player)}</span>` : ""}
         <span class="tracetext ${isMsg ? "msg" : "mono"}" style="color:${bodyColor}">${richText(s.text)}</span>
       </span>

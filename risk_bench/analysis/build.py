@@ -68,7 +68,20 @@ def build_analysis(journal_path: Path, eval_path: Path, generated_at: str) -> di
         "schema_version": SCHEMA_VERSION,
         "game_id": journal_path.parent.name,
         "generated_at": generated_at,
-        "source": _source(header=header, result=result),
+        "source": {
+            **_source(header=header, result=result),
+            **(
+                {
+                    "ancestry": records[0]["ancestry"],
+                    "independent_observation": False,
+                    "inherited_span_count": sum(span.inherited for span in spans),
+                    "continuation_span_count": sum(not span.inherited for span in spans),
+                    "usage_scope": "continuation only; parent trace is not duplicated",
+                }
+                if records[0].get("ancestry")
+                else {}
+            ),
+        },
         "integrity": _integrity_section(members=members, span_count=len(spans), coverage_records=coverage_records),
         "agreement": _agreement_section(members=members),
         "calibration": _calibration_section(members=members),

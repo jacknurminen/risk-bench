@@ -451,3 +451,16 @@ body.readerSplit .ctaCard p { font-size: 11px; }
 .readerAnalysis[open] > summary { margin-bottom: 6px; }
 #board .attribution { position: absolute; bottom: 1px; right: 3px; background: #eef1f4d9; }
 body.readerSplit .subbar { gap: 6px 12px; }
+
+/* ---- forking ----
+   A seam between two trace entries, one per committed execution boundary: a hairline that
+   only names itself when pointed at or tabbed to, so the feed stays quiet while every
+   forkable point stays reachable. */
+.forkSep { position: relative; display: flex; align-items: center; justify-content: center; height: 12px; margin-left: 42px; }
+.forkSep::before { content: ""; position: absolute; left: 0; right: 0; height: 1px; background: transparent; }
+.forkSep:hover::before, .forkSep:focus-within::before { background: var(--line); }
+.forkBtn { position: relative; opacity: 0; cursor: pointer; padding: 1px 9px; border: 1px solid var(--gold); border-radius: 999px;
+           background: var(--card); color: var(--gold); font: 9.5px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+.forkSep:hover .forkBtn, .forkBtn:focus-visible, .forkBtn[disabled] { opacity: 1; }
+.forkBtn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.forkBtn[disabled] { cursor: progress; }

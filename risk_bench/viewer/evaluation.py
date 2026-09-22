@@ -115,6 +115,9 @@ def _span_view(span: TraceSpan) -> dict[str, Any]:
         "layer": span.layer,
         "player": span.player,
         "text": span.text,
+        **({"origin": span.origin} if span.origin else {}),
+        **({"inherited": True} if span.inherited else {}),
+        **({"cursor": span.cursor} if span.cursor is not None else {}),
     }
 
 

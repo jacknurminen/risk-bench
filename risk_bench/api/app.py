@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import time
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -20,6 +21,7 @@ from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     CatalogModel,
     EvaluateRequest,
+    ForkRequest,
     GameListResponse,
     GameSummary,
     ModelCatalogResponse,
@@ -36,6 +38,8 @@ from risk_bench.runner.evaluation_store import (
     read_evaluation,
 )
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
+from risk_bench.runner.forking import fork_game
+from risk_bench.runner.journal import read_journal, restore_game
 from risk_bench.runner.verification_store import delete_verification, write_verification
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
@@ -184,6 +188,24 @@ def create_app(games_directory: Path) -> FastAPI:
     def resume_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
         _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
+
+    @app.post("/api/games/{game_id}/fork", status_code=201)
+    def fork_game_route(game_id: str, request: ForkRequest) -> dict:
+        source = _journal_path(games_directory, game_id)
+        branch_id = f"fork-{uuid.uuid4().hex[:12]}"
+        destination = games_directory / branch_id / "game.jsonl"
+        try:
+            fork_game(source, destination, **request.model_dump(exclude={"start"}))
+        except (ValueError, KeyError, TypeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        if request.start:
+            manager.resume_game(
+                branch_id,
+                destination,
+                restore_game(destination).header.commentators,
+                destination.parent / "worker.log",
+            )
+        return {"id": branch_id, "url": f"/games/{branch_id}"}
 
     @app.delete("/api/games/{game_id}", status_code=204)
     def delete_game(game_id: str) -> None:
@@ -336,7 +358,9 @@ def _load_view_model(games_directory: Path, game_id: str) -> dict[str, Any]:
     try:
         return build_view_model(journal_path=path)
     except ValueError as error:
-        raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
+        raise HTTPException(
+            status_code=409, detail=f"The journal does not replay cleanly or is not viewable yet: {error}"
+        ) from None
     except IllegalActionError as error:
         # the journal no longer replays: it was corrupted outside the engine's control
         raise HTTPException(status_code=409, detail=f"The journal does not replay cleanly: {error}") from None
@@ -350,7 +374,9 @@ def _load_evaluation_view_model(
     try:
         view_model = build_evaluation_view_model(journal_path=path, version=version)
     except ValueError as error:
-        raise HTTPException(status_code=409, detail=f"The game is not viewable yet: {error}") from None
+        raise HTTPException(
+            status_code=409, detail=f"The journal does not replay cleanly or is not viewable yet: {error}"
+        ) from None
     view_model["running"] = manager.is_evaluating(game_id=game_id)
     view_model["progress"] = _evaluation_progress(
         journal_path=path,
@@ -579,11 +605,7 @@ def _summarize_journal(
     result: dict[str, Any] | None = None
     has_commentary = False
     latest_turn = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            break  # a partial trailing line from a crash or an in-flight write
+    for record in read_journal(path):
         match record.get("type"):
             case "header":
                 header = record
@@ -725,7 +747,9 @@ def _wait_for_journal_header(game_directory: Path, manager: GameProcessManager) 
     log_path = game_directory / "worker.log"
     deadline = time.monotonic() + _LAUNCH_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        if journal_path.is_file() and journal_path.read_text(encoding="utf-8").startswith('{"type": "header"'):
+        if journal_path.is_file() and journal_path.read_text(encoding="utf-8").startswith(
+            ('{"type": "header"', '{"type":"header"')
+        ):
             return
         if not manager.is_running(game_id=game_directory.name):
             log_tail = log_path.read_text(encoding="utf-8")[-2000:] if log_path.is_file() else ""

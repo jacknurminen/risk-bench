@@ -14,6 +14,7 @@ from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
 from risk_bench.players.rendering import describe_action, narrate_event
+from risk_bench.runner.checkpoint import decode, restore_engine
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.journal import read_journal, ruleset_for_schema_version
 
@@ -56,12 +57,42 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     }
     markers: list[dict[str, Any]] = []
     continent_controllers = _continent_controllers(state=state)
+    cursors = []
+    configuration_changes: list[str] = []
+    additional_context: dict[str, str | None] = {}
+    inherited_through = header.get("ancestry", {}).get("inherited_through", -1)
     for record in records[1:]:
         match record["type"]:
+            case "checkpoint":
+                saved = record["checkpoint"]
+                p = saved["progress"]
+                additional_context = saved.get("additional_context") or {}
+                cursors.append(
+                    {
+                        **record["cursor"],
+                        "stage": record["stage"],
+                        "next_operation": p["stage"],
+                        "next_description": _next_description(
+                            saved, player_names, header.get("max_negotiation_rounds", 1)
+                        ),
+                        "step": len(steps) - 1,
+                        "inherited": saved["sequence"] <= inherited_through,
+                    }
+                )
+                if saved["sequence"] == 0:
+                    state, rng = restore_engine(saved)
+                    steps[-1]["cursor"] = {"after": record["cursor"]["after"]}
+            case "configuration_change":
+                configuration_changes.extend(
+                    change for change in record["changes"] if change not in configuration_changes
+                )
             case "action":
                 action = action_from_json(record["action"])
                 acting_player = str(record["player"])
-                state = apply_action(state=state, action=action, rng=rng).state
+                if "_checkpoint" in record:
+                    state, rng = restore_engine(record["_checkpoint"])
+                else:
+                    state = apply_action(state=state, action=action, rng=rng).state
                 steps.append(
                     _step(
                         state=state,
@@ -71,6 +102,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                         events=[],
                     )
                 )
+                steps[-1]["cursor"] = record.get("cursor")
                 if isinstance(action, Attack):
                     combat_totals[acting_player]["attacks"] += 1
                 current_controllers = _continent_controllers(state=state)
@@ -89,7 +121,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 _accumulate_combat_totals(combat_totals=combat_totals, events=events)
                 markers.extend(_event_markers(events=events, step_index=len(steps) - 1, turn=steps[-1]["turn"]))
             case "message":
-                messages.append({**record["message"], "step": len(steps) - 1})
+                messages.append({**record["message"], "step": len(steps) - 1, "cursor": record.get("cursor")})
             case "thought":
                 thoughts.append({"player": record["player"], "text": record["text"], "step": len(steps) - 1})
             case "note":
@@ -127,6 +159,10 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
 
     return {
         "title": journal_path.name,
+        "cursors": cursors,
+        "ancestry": header.get("ancestry", {}),
+        "additional_context": additional_context,
+        "configuration_changes": configuration_changes,
         "seed": int(header["seed"]),
         "max_turns": int(header["max_turns"]),
         "players": [{"name": name, "mission": state.players[name].mission.description} for name in player_names],
@@ -453,3 +489,39 @@ def _accumulate_combat_totals(combat_totals: dict[PlayerId, dict[str, int]], eve
                 combat_totals[defender]["armies_destroyed"] += outcome.attacker_losses
             case TerritoryConquered(player_id=player_id):
                 combat_totals[player_id]["conquests"] += 1
+
+
+def _next_description(saved: dict, names: list[str], max_rounds: int) -> str:
+    progress = saved["progress"]
+    stage = progress["stage"]
+    current = saved["state"]["fields"]["current_player"]
+    if stage == "decision_request":
+        return f"{current} chooses an action"
+    if stage == "action":
+        response = decode(progress["pending"])
+        if progress["action_index"] >= len(response.actions) or current != progress["actor"]:
+            return "Complete the pending decision's rationale and table talk"
+        remaining = progress["rounds_left"]
+        if remaining is not None:
+            return f"{progress['actor']} continues the attack ({remaining} rounds remaining)"
+        return f"Apply action {progress['action_index'] + 1} from {progress['actor']}'s pending response"
+    if stage == "negotiation_request" and progress["pass"] >= max_rounds:
+        return f"Finish negotiation and request {current}'s decision"
+    if stage == "negotiation_request" and progress["speaker"] < len(progress["order"]):
+        return f"{progress['order'][progress['speaker']]} gets a speaking opportunity (pass {progress['pass'] + 1})"
+    if stage in {"negotiation_delivery", "decision_delivery"}:
+        return f"Deliver {progress['actor']}'s pending message, if any"
+    if stage == "note_request" and (progress["commented_turn"] < 1 or progress["note_index"] >= len(names)):
+        return "Complete the turn transition"
+    if stage == "note_request" and progress["note_index"] < len(names):
+        return f"{names[progress['note_index']]} updates notes for turn {progress['commented_turn']}"
+    return {
+        "route": "Check turn progress and schedule the next operation",
+        "note_apply": "Save the completed note update",
+        "negotiation_thought": "Record the speaker's private rationale",
+        "decision_thought": "Record the decision's private rationale",
+        "commentary": "Complete the previous turn's commentary",
+        "final_commentary": "Complete final commentary",
+        "result": "Publish the game result",
+        "done": "Game finished",
+    }.get(stage, stage.replace("_", " "))

@@ -98,7 +98,7 @@ def setup_game(player_ids: list[PlayerId], rng: random.Random, ruleset: Ruleset)
     return state
 
 
-def apply_action(state: GameState, action: Action, rng: random.Random) -> StepResult:
+def apply_action(state: GameState, action: Action, rng: random.Random, *, shared_rng: bool = False) -> StepResult:
     """Apply a validated action and advance phase, turn, and win bookkeeping.
 
     Handles all consequences: battle resolution (a single attack may repeat
@@ -122,7 +122,7 @@ def apply_action(state: GameState, action: Action, rng: random.Random) -> StepRe
     if rejection is not None:
         raise IllegalActionError(rejection)
 
-    next_state = copy.deepcopy(state)
+    next_state = copy.deepcopy(state, {id(state.deck._rng): rng} if shared_rng else None)
     acting_player = next_state.current_player
     events: list[GameEvent] = []
     turn_ended = False

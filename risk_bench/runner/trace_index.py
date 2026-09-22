@@ -15,7 +15,7 @@ never read another judge's judgments (only the agents' own game data). The four
 in-the-moment trace layers plus the agents' notes are what remain.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
@@ -49,6 +49,9 @@ class TraceSpan:
     layer: str
     player: PlayerId | None
     text: str
+    cursor: dict[str, str] | None = None
+    inherited: bool = False
+    origin: str | None = None
 
 
 def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
@@ -67,9 +70,12 @@ def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
         The citable spans in journal order, numbered ``0..N-1`` by position.
     """
     spans: list[TraceSpan] = []
+    ancestry = records[0].get("ancestry", {}) if records and records[0].get("type") == "header" else {}
+    inherited_through = ancestry.get("inherited_through", -1)
     current_turn = 0
     step = 0
     for record in records:
+        start = len(spans)
         match record.get("type"):
             case "action":
                 step += 1
@@ -119,6 +125,14 @@ def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
                     text=str(record["text"]),
                 )
             # 'header', 'result', and 'commentary' are not citable and contribute no span
+        if record.get("cursor"):
+            for index in range(start, len(spans)):
+                spans[index] = replace(
+                    spans[index],
+                    cursor=record["cursor"],
+                    inherited=int(record["cursor"]["after"].split(":")[0]) <= inherited_through,
+                    origin=record.get("origin"),
+                )
     return tuple(spans)
 
 

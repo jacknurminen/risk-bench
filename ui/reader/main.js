@@ -7,7 +7,7 @@ async function refreshFromJournal() {
   renderGameControl();
   document.dispatchEvent(new CustomEvent("reader:game-status"));
   const fingerprint = JSON.stringify([updated.steps.length, updated.steps.at(-1), updated.messages.length,
-    updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.result]);
+    updated.thoughts.length, updated.notes.length, updated.commentary.length, updated.cursors?.length, updated.result]);
   if (fingerprint === lastFingerprint) return; lastFingerprint = fingerprint;
   const following = index === steps.length - 1;
   steps.splice(0, steps.length, ...updated.steps);
@@ -17,6 +17,8 @@ async function refreshFromJournal() {
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.commentators = updated.commentators ?? GAME.commentators;
   GAME.result = updated.result;
+  GAME.cursors = updated.cursors;
+  GAME.ancestry = updated.ancestry;
   GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();

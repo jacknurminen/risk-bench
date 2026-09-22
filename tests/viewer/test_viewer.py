@@ -6,7 +6,7 @@ import pytest
 
 from risk_bench.game.types import Territory
 from risk_bench.runner.evaluation_versions import version_for
-from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
+from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal, restore_game
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import render_reader_export_html, render_reader_html
 from risk_bench.viewer.snapshots import build_view_model
@@ -19,11 +19,35 @@ def journal_with_game(tmp_path: Path) -> Path:
     return path
 
 
+@pytest.mark.parametrize("game_id", ["20260909-123257-seed1", "20260910-092103-seed7", "20260911-071339-seed8"])
+def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
+    path = Path(__file__).parents[2] / "data" / "games" / game_id / "game.jsonl"
+    if not path.exists():
+        pytest.skip("the committed reference game is not checked out")
+    records = read_journal(path)
+    assert records[0]["schema_version"] == 3
+
+    # Applying the pre-v3 troop-advance rule changes the board and makes later attacks illegal.
+    model = build_view_model(path)
+    restored = restore_game(path)
+    assert restored.state.ruleset.minimum_advance_on_capture
+    assert model["steps"][-1]["turn"] == restored.state.turn_number
+    seats = {name: index for index, name in enumerate(restored.state.players)}
+    assert model["steps"][-1]["board"] == {
+        str(territory): [seats[owner], restored.state.armies[territory]]
+        for territory, owner in restored.state.owner.items()
+    }
+    result = next((record for record in records if record["type"] == "result"), None)
+    if result is not None:
+        assert model["result"] == {"winner": result["winner"], "turn_count": result["turn_count"]}
+        assert restored.state.winner == result["winner"]
+
+
 def test_view_model_has_one_snapshot_per_action_plus_the_start(tmp_path: Path):
     path = journal_with_game(tmp_path=tmp_path)
     model = build_view_model(journal_path=path)
 
-    action_count = sum(1 for line in path.read_text().splitlines() if '"type": "action"' in line)
+    action_count = sum(record["type"] == "action" for record in read_journal(path))
     assert len(model["steps"]) == action_count + 1
     assert model["steps"][0]["action"] is None
     assert all(step["action"] for step in model["steps"][1:])
@@ -64,7 +88,7 @@ def test_human_hands_follow_draws_and_trades_in_historical_snapshots(tmp_path: P
 
     step_index = 0
     draws = trades = 0
-    for record in records:
+    for record in read_journal(path):
         if record["type"] == "action":
             step_index += 1
             if record["player"] == human and record["action"]["kind"] == "trade_cards":
