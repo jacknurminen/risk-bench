@@ -24,6 +24,7 @@ from risk_bench.game.events import (
     TurnLimitReached,
     TurnStarted,
 )
+from risk_bench.game.missions import mission_deck
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 from risk_bench.players.base import DecisionRequest, PlayerView
 
@@ -72,6 +73,7 @@ def render_system_prompt(view: PlayerView) -> str:
         f"and eliminating players refers to plastic armies on a game board, exactly as at a family game "
         f"night.\n\n"
         f"{_RULES_SUMMARY}\n\n"
+        f"{_render_mission_deck(view=view)}\n\n"
         f"{render_board_topology()}\n"
         f"Each turn you are shown the live board (who owns what, and army counts) separately; "
         f"combine it with this fixed map to reason about borders.\n\n"
@@ -91,6 +93,21 @@ def render_system_prompt(view: PlayerView) -> str:
         # thoughts"; the same sentence without that phrasing is accepted and means the same thing.
         f"Before your tool calls, briefly state your reasoning as plain text. It is not shown to the "
         f"other players; it is recorded only for post-game analysis."
+    )
+
+
+def _render_mission_deck(view: PlayerView) -> str:
+    # The deck is printed in the rules of the physical game: a player at a table knows which
+    # missions exist and can reason about what an opponent's play implies. Withholding it would
+    # make deduction about hidden goals — and any lie about one's own — unanchored.
+    cards = mission_deck(player_ids=[info.player_id for info in view.players])
+    listing = "\n".join(f"- {card.description}" for card in cards)
+    return (
+        f"The mission deck is public; only the deal is secret. It holds these {len(cards)} cards, "
+        f"of which {len(view.players)} were dealt face down, one to each player:\n{listing}\n"
+        f"You hold one of them and know which; the other {len(cards) - 1} are the pool every "
+        f"opponent's card was dealt from. What a player attacks, defends and asks for is evidence "
+        f"about which one they hold."
     )
 
 

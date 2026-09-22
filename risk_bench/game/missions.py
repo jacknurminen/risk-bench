@@ -33,6 +33,21 @@ class Mission:
     target_player: PlayerId | None
 
 
+def mission_deck(player_ids: list[PlayerId]) -> tuple[Mission, ...]:
+    """The deck every mission is dealt from: the conquest cards plus one per player.
+
+    Which card a player drew is secret, but the deck itself is not — it is printed in the
+    rules of the physical game, so every player may be shown it and reason over it.
+
+    Args:
+        player_ids: The players in the game, in turn order.
+
+    Returns:
+        The deck in its canonical (unshuffled) order.
+    """
+    return (*_CONQUEST_MISSIONS, *(_eliminate_mission(target_player=player_id) for player_id in player_ids))
+
+
 def deal_missions(player_ids: list[PlayerId], rng: random.Random) -> dict[PlayerId, Mission]:
     """Deal one random mission to each player from the classic mission deck.
 
@@ -47,9 +62,9 @@ def deal_missions(player_ids: list[PlayerId], rng: random.Random) -> dict[Player
     Returns:
         The mission dealt to each player.
     """
-    mission_deck = list(_CONQUEST_MISSIONS) + [_eliminate_mission(target_player=player_id) for player_id in player_ids]
-    rng.shuffle(mission_deck)
-    return {player_id: mission for player_id, mission in zip(player_ids, mission_deck)}
+    shuffled = list(mission_deck(player_ids=player_ids))
+    rng.shuffle(shuffled)
+    return {player_id: mission for player_id, mission in zip(player_ids, shuffled)}
 
 
 def is_mission_complete(mission: Mission, player_id: PlayerId, state: GameState) -> bool:

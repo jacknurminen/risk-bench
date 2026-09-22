@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+from risk_bench.game.missions import mission_deck
 from risk_bench.game.types import Phase
 from risk_bench.players.rendering import (
     render_decision_prompt,
@@ -21,6 +22,22 @@ def test_system_prompt_contains_identity_rules_and_secret_mission():
     assert "Other players are not shown your mission" in prompt
     assert "Rules summary" in prompt
     assert "borders:" in prompt  # the fixed map (topology) is part of the cached system prompt
+
+
+def test_the_whole_mission_deck_is_listed_so_hidden_goals_can_be_reasoned_about():
+    request = attack_request()
+    deck = mission_deck(player_ids=[info.player_id for info in request.view.players])
+
+    prompt = render_system_prompt(view=request.view)
+
+    # the deck is printed in the rules of the physical game; only the deal is secret
+    for card in deck:
+        assert card.description in prompt
+    assert f"It holds these {len(deck)} cards" in prompt
+    # an eliminate card names every player at the table, including the reader
+    assert "Eliminate the player 'alice'" in prompt and "Eliminate the player 'bob'" in prompt
+    # the deal itself stays hidden: nobody else's dealt mission appears
+    assert prompt.count(request.view.own_mission.description) >= 1
 
 
 def test_system_prompt_tells_players_to_use_exact_ids_in_messages():
