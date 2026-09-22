@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any
 
@@ -290,3 +291,36 @@ def test_the_sidecar_round_trips_tags_and_coverage_through_the_store(tmp_path):
         "no_behaviour": ["bob"],
         "missing": [],
     }
+
+
+def test_a_synthesis_delivered_as_a_json_string_is_still_read():
+    # Providers hand back the raw string when their own accumulation of a large tool argument
+    # fails to parse; a stray NUL escape has been seen in exactly that payload. Dropping it
+    # silently loses the whole per-player analysis of an expensive call.
+    syntheses = [
+        {
+            "player": "alice",
+            "profile": [
+                {"dimension": "diplomacy", "characterization": "blunt", "evidence": [{"span": 1, "quote": "allies"}]}
+            ],
+            "key_episodes": [{"span": 2}],
+            "summary": "held the line",
+        }
+    ]
+    # the escape lands between a comma and the next key, exactly where the corrupt payload carried it
+    payload = json.dumps(syntheses).replace('{"span": 1, "quote"', '{"span": 1,\\u0000"quote"')
+    agent = ScriptedAgent(
+        turn_calls={},
+        synthesis=Response(
+            text=None, tool_calls=(ToolCall(id="s", name="synthesize", arguments={"syntheses": payload}),)
+        ),
+    )
+
+    result = _evaluate(agent)
+
+    assert result is not None
+    assert [synthesis.player for synthesis in result.evaluation.syntheses] == ["alice"]
+    synthesis = result.evaluation.syntheses[0]
+    assert synthesis.summary == "held the line"
+    assert synthesis.profile[0].evidence == (Evidence(span=1, quote="allies", resolved=True, quote_matched=True),)
+    assert synthesis.key_episodes == (Evidence(span=2, quote=None, resolved=True, quote_matched=None),)

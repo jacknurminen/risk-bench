@@ -1,6 +1,6 @@
 from typing import Any
 
-from risk_bench.agents.base import Tool, ToolCall
+from risk_bench.agents.base import Tool, ToolCall, list_argument
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
 from risk_bench.game.actions import (
     Action,
@@ -339,8 +339,8 @@ def _fortify_tool(fortifications: list[Fortify]) -> Tool:
 
 
 def _parse_place_armies(call: ToolCall, request: DecisionRequest) -> list[PlaceArmies]:
-    raw_placements = _required_argument(call=call, key="placements")
-    if not isinstance(raw_placements, list) or not raw_placements:
+    raw_placements = list_argument(_required_argument(call=call, key="placements"))
+    if not raw_placements:
         raise InvalidToolCallError("'placements' must be a non-empty array of {territory, count} objects.")
     owned_territories = {
         placement.territory for placement in _actions_of_type(request=request, action_type=PlaceArmies)
@@ -376,8 +376,8 @@ def _parse_trade_cards(call: ToolCall, request: DecisionRequest) -> TradeCards:
 
 
 def _parse_attack_launches(call: ToolCall, request: DecisionRequest) -> list[Attack]:
-    raw_launches = _required_argument(call=call, key="launches")
-    if not isinstance(raw_launches, list) or not raw_launches:
+    raw_launches = list_argument(_required_argument(call=call, key="launches"))
+    if not raw_launches:
         raise InvalidToolCallError("'launches' must be a non-empty array of attack objects.")
     return [_parse_attack_launch(raw_launch=raw_launch, request=request) for raw_launch in raw_launches]
 

@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Final
 
-from risk_bench.agents.base import Agent, Message, Tool
+from risk_bench.agents.base import Agent, Message, Tool, list_argument
 from risk_bench.game.types import PlayerId
 from risk_bench.runner.commentary import BEHAVIOR_AXIS, BEHAVIOR_DEFINITIONS, BEHAVIORS
 from risk_bench.runner.trace_index import TraceSpan
@@ -236,9 +236,18 @@ class Evaluator:
             return None
         for call in response.tool_calls:
             if call.name == "synthesize" and isinstance(call.arguments, dict):
-                return _valid_syntheses(
+                syntheses = _valid_syntheses(
                     raw_syntheses=call.arguments.get("syntheses"), span_by_id=span_by_id, players=players
                 )
+                if not syntheses:
+                    # Otherwise the run simply finishes with tags and no player profiles, and the
+                    # reader shows the gap without anything anywhere explaining it.
+                    print(
+                        "[evaluator-error] synthesis: the call returned no usable per-player synthesis; "
+                        "this evaluation will have per-turn tags but no player profiles",
+                        file=sys.stderr,
+                    )
+                return syntheses
         return ()
 
 
@@ -492,10 +501,11 @@ def _valid_no_behaviour(raw: Any, players: set[PlayerId]) -> tuple[PlayerId, ...
 def _valid_syntheses(
     raw_syntheses: Any, span_by_id: dict[int, TraceSpan], players: set[PlayerId]
 ) -> tuple[PlayerSynthesis, ...]:
-    if not isinstance(raw_syntheses, list):
+    raw_list = list_argument(raw_syntheses)
+    if raw_list is None:
         return ()
     syntheses = []
-    for raw_synthesis in raw_syntheses:
+    for raw_synthesis in raw_list:
         if not isinstance(raw_synthesis, dict) or raw_synthesis.get("player") not in players:
             continue
         syntheses.append(
@@ -510,10 +520,11 @@ def _valid_syntheses(
 
 
 def _valid_profile(raw_profile: Any, span_by_id: dict[int, TraceSpan]) -> tuple[DimensionProfile, ...]:
-    if not isinstance(raw_profile, list):
+    raw_list = list_argument(raw_profile)
+    if raw_list is None:
         return ()
     profile = []
-    for raw_dimension in raw_profile:
+    for raw_dimension in raw_list:
         if not isinstance(raw_dimension, dict) or not raw_dimension.get("dimension"):
             continue
         profile.append(
@@ -527,9 +538,12 @@ def _valid_profile(raw_profile: Any, span_by_id: dict[int, TraceSpan]) -> tuple[
 
 
 def _resolve_all(raw: Any, span_by_id: dict[int, TraceSpan]) -> tuple[Evidence, ...]:
-    if not isinstance(raw, list):
+    raw_list = list_argument(raw)
+    if raw_list is None:
         return ()
-    return tuple(evidence for item in raw if (evidence := _resolve_one(raw=item, span_by_id=span_by_id)) is not None)
+    return tuple(
+        evidence for item in raw_list if (evidence := _resolve_one(raw=item, span_by_id=span_by_id)) is not None
+    )
 
 
 def _resolve_one(raw: Any, span_by_id: dict[int, TraceSpan]) -> Evidence | None:

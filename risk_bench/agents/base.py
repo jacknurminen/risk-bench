@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -82,6 +83,33 @@ class Response:
     output_tokens: int | None = None
     cache_write_tokens: int | None = None
     cache_read_tokens: int | None = None
+
+
+def list_argument(value: Any) -> list[Any] | None:
+    """Read a tool-call argument that should be a list, accepting a JSON-encoded one.
+
+    Models sometimes serialize a nested array as a string, and a provider hands the raw
+    string back when its own accumulation of a large argument fails to parse. A stray NUL
+    escape — seen in oversized arguments — is dropped before the second attempt, since a
+    NUL is never part of a legitimate value here.
+
+    Args:
+        value: The argument exactly as the provider delivered it.
+
+    Returns:
+        The list, or None when the value is neither a list nor a JSON-encoded list.
+    """
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return None
+    for candidate in (value, value.replace("\\u0000", "").replace("\x00", "")):
+        try:
+            decoded = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        return decoded if isinstance(decoded, list) else None
+    return None
 
 
 @runtime_checkable

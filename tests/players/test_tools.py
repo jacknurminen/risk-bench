@@ -176,6 +176,18 @@ def test_placements_split_across_territories_become_a_batch_in_order():
     ]
 
 
+def test_a_list_argument_serialized_as_a_json_string_is_accepted():
+    # Models sometimes stringify a nested array, and a provider returns the raw string when its
+    # own accumulation of a large argument fails; either way the move itself is well formed.
+    request = reinforce_request_with_tradeable_set()
+
+    placements = parse_tool_call(
+        call=call("place_armies", placements='[{"territory": "alberta", "count": 5}]'), request=request
+    )
+
+    assert placements == [PlaceArmies(territory=Territory.ALBERTA, count=5)]
+
+
 def test_placement_batches_are_validated_as_a_whole():
     request = reinforce_request_with_tradeable_set()
     rejections = {
