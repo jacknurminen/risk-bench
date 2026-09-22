@@ -54,6 +54,8 @@ def view_to_json(view: PlayerView) -> dict[str, Any]:
         "player_id": view.player_id,
         "phase": view.phase,
         "turn_number": view.turn_number,
+        "round_number": view.round_number,
+        "previous_round_number": view.previous_round_number,
         "current_player": view.current_player,
         "private_messages_allowed": view.private_messages_allowed,
         "armies": view.armies,
@@ -226,6 +228,7 @@ class HumanPlayer:
         prompt["view"]["notes"] = view.notes if view.notes is not None else self._saved_notes
         if kind == "notes":
             prompt["finished_turn"] = view.turn_number - 1
+            prompt["finished_round"] = view.previous_round_number
         _write_atomic(self.mailbox / "request.json", prompt)
         reply_path = self.mailbox / f"{prompt['request_id']}.json"
         while True:

@@ -5,7 +5,7 @@ const boardFrame = {};
 function renderBoardStatus() {
   const step = steps[index];
   const location = index === steps.length - 1 && !timer ? readerStatus() : "Replay";
-  el("status").textContent = `step ${index}/${steps.length - 1} · turn ${step.turn} · ${pretty(step.phase)} · ${location}`;
+  el("status").textContent = `step ${index}/${steps.length - 1} · ${gameTimeLabel(step.turn, step.round)} · ${pretty(step.phase)} · ${location}`;
 }
 
 /* Zoom the SVG itself so text stays sharp. Dragging never submits a territory click. */
@@ -146,7 +146,7 @@ function show(newIndex) {
     `<span style="color:${COLORS[seat]}${s.eliminated ? ";opacity:.45;text-decoration:line-through" : ""}">${tagOf(GAME.players[seat].name)} ${s.territories}▪ ${s.armies}⚔ ${s.cards}◈ +${s.income}</span>`).join("");
   el("slider").value = index;
   renderBoardStatus();
-  el("boardTurnLabel").textContent = "Board · turn " + String(step.turn).padStart(2, "0");
+  el("boardTurnLabel").textContent = "Board · " + gameTimeLabel(step.turn, step.round);
   state.focusTurn = step.turn;
   document.querySelectorAll(".tcard").forEach(card => card.classList.toggle("focus", Number(card.dataset.turn) === step.turn));
   // update rail stat lines

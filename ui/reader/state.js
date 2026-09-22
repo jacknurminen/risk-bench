@@ -31,6 +31,7 @@ let index = 0, timer = null;
 const el = id => document.getElementById(id);
 const pretty = name => (name ?? "").replaceAll("_", " ");
 const placeName = name => pretty(name).replace(/\b\w/g, letter => letter.toUpperCase());
+const gameTimeLabel = (turn, round) => turn === 0 ? "Setup" : `${round ? `Round ${round} · ` : ""}Turn ${turn}`;
 let humanPending = false;
 function readerStatus() {
   if (GAME.result) return GAME.result.winner ? "Game over" : "Draw";
@@ -114,7 +115,7 @@ function tagVisible(t) {
 }
 
 /* ---- trace spans grouped by turn (rebuilt on every evaluation refresh, so the trace grows live) ---- */
-let spanById = new Map(), spansByTurn = new Map(), turns = [], actorByTurn = {}, lastNoteSpanByPlayer = {};
+let spanById = new Map(), spansByTurn = new Map(), turns = [], actorByTurn = {}, roundByTurn = {}, lastNoteSpanByPlayer = {};
 function rebuildTrace() {
   spanById = new Map((EVAL.spans || []).map(s => [s.span, s]));
   spansByTurn = new Map();
@@ -123,7 +124,9 @@ function rebuildTrace() {
   // the acting player of a turn is whoever the engine had take the board actions — not whoever
   // happened to speak first during negotiation (which was pinning every card to one player)
   actorByTurn = {};
+  roundByTurn = {};
   steps.forEach(s => { if (s.current_player != null) actorByTurn[s.turn] = s.current_player; });
+  steps.forEach(s => { if (s.round != null) roundByTurn[s.turn] = s.round; });
   // remember each player's most recent note span; only that one stays in the feed (spans are in order)
   lastNoteSpanByPlayer = {};
   (EVAL.spans || []).forEach(s => { if (s.layer === "note" && s.player != null) lastNoteSpanByPlayer[s.player] = s.span; });

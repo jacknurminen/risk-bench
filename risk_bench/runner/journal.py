@@ -287,21 +287,63 @@ def raw_journal(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+class _RoundHistory:
+    """Recover round metadata from the recorded turn order, without changing the raw prefix."""
+
+    def __init__(self, player_ids: list[str]) -> None:
+        self.seats = {name: index for index, name in enumerate(player_ids)}
+        self.turn = 0
+        self.seat = -1
+        self.round = 0
+        self.previous_round = 0
+
+    def observe(self, turn: int, player: str) -> None:
+        if turn <= self.turn:
+            return
+        seat = self.seats[player]
+        self.previous_round = self.round
+        if self.turn == 0 or seat <= self.seat:
+            self.round += 1
+        self.turn, self.seat = turn, seat
+
+    def checkpoint(self, saved: dict) -> dict:
+        fields = saved["state"]["fields"]
+        if not self.seats:
+            self.seats = {name: index for index, (name, _) in enumerate(fields["players"]["$map"])}
+        self.observe(fields["turn_number"], fields["current_player"])
+        if "round_number" in fields:
+            self.round = fields["round_number"]
+            self.previous_round = fields["previous_round_number"]
+            return saved
+        # Copy only the changed branches: historical deltas and their prefix hashes stay intact.
+        return {
+            **saved,
+            "state": {
+                **saved["state"],
+                "fields": {**fields, "round_number": self.round, "previous_round_number": self.previous_round},
+            },
+        }
+
+
 def expand_records(records: list[dict]) -> list[dict]:
     result = []
+    rounds = _RoundHistory(list(records[0].get("player_specs", {})) if records else [])
     for record in records:
         if record["type"] != "transition":
+            if record["type"] == "events":
+                for event in record["events"]:
+                    if event.get("kind") == "turn_started":
+                        rounds.observe(event["turn_number"], event["player_id"])
             result.append(record)
             continue
+        saved = rounds.checkpoint(record["checkpoint"])
         cursor = {"before": f"{record['id']}:before", "after": f"{record['id']}:after"}
         start = len(result)
         result.extend(
-            {**entry, "cursor": cursor, **({"_checkpoint": record["checkpoint"]} if entry["type"] == "action" else {})}
+            {**entry, "cursor": cursor, **({"_checkpoint": saved} if entry["type"] == "action" else {})}
             for entry in record["records"]
         )
-        result.append(
-            {"type": "checkpoint", "checkpoint": record["checkpoint"], "cursor": cursor, "stage": record["stage"]}
-        )
+        result.append({"type": "checkpoint", "checkpoint": saved, "cursor": cursor, "stage": record["stage"]})
         if record["records"] and record["records"][-1]["type"] == "result":
             result.insert(start, result.pop())
     return result

@@ -72,7 +72,18 @@ Each game runs the standard Risk turn structure to completion:
 3. **Attack** — the player declares attacks; combat is resolved with dice, and conquering a territory may eliminate an opponent.
 4. **Fortify** — the player moves armies between two adjacent territories to consolidate.
 
-Between turns, a **reaction window** opens the group chat so every surviving agent can negotiate before play continues. The game ends when an agent completes its secret mission (or is the last one standing), and the result feeds the tournament's Elo rankings.
+A **turn** belongs to one player. A **round** is one pass through the fixed seating order,
+skipping eliminated players; round 1 begins after setup. The reader and player prompts show
+both, for example **Round 3 · Turn 8**. Turn numbers remain continuous and turn limits still
+count individual turns. A round advances when the seating order wraps, even if its original
+first player has been eliminated. Round tracking is preserved by resume and forks; older
+journals reconstruct it from their recorded turn order.
+
+Before each turn, a **negotiation session** opens the group chat so every surviving agent can
+negotiate before play continues. Prompts encourage explicit commitment deadlines such as
+“until the end of round 4” or “until the start of Bob's next turn.” These agreements remain
+unenforced. The game ends when an agent completes its secret mission (or is the last one
+standing), and the result feeds the tournament's Elo rankings.
 
 Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. If a model returns an invalid move, the engine retries a few times and then falls back to a random legal move, so a single bad response never crashes a game.
 

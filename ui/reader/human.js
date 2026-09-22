@@ -159,7 +159,7 @@
         : !draft.target ? `Choose ${mode === "attack" ? "an enemy target" : "a friendly destination"}.`
         : mode === "attack" ? "Ready to attack. Choose how many times to roll." : `Move ${draft.count} ${draft.count === 1 ? "army" : "armies"}. Review and commit.`)
       : mode === "trade_cards" ? "Choose a card set to trade."
-      : mode === "notes" ? `Record what you learned from turn ${draft.request.finished_turn}.`
+      : mode === "notes" ? `Record what you learned from ${gameTimeLabel(draft.request.finished_turn, draft.request.finished_round)}.`
       : mode === "negotiation" ? "Your diplomacy response." : "No moves available. Finish this phase.";
   }
   function renderPlan() {
@@ -222,8 +222,8 @@
     const view = draft.request.view, mode = draft.mode;
     el("humanTitle").textContent = mode === "notes" ? "Your private notebook" : mode === "negotiation" ? "Your diplomacy response" : "Your turn";
     control.textContent = el("humanTitle").textContent;
-    el("humanContext").textContent = mode === "notes" ? `${view.player_id} · after turn ${draft.request.finished_turn}`
-      : `${view.player_id} · turn ${view.turn_number} · ${pretty(view.phase)}`;
+    el("humanContext").textContent = mode === "notes" ? `${view.player_id} · after ${gameTimeLabel(draft.request.finished_turn, draft.request.finished_round)}`
+      : `${view.player_id} · ${gameTimeLabel(view.turn_number, view.round_number)} · ${pretty(view.phase)}`;
     el("humanMission").textContent = view.mission;
     el("humanCards").textContent = "Cards: " + (view.own_cards.map(cardLabel).join(", ") || "none");
     el("humanMessage").value = ""; el("humanThought").value = ""; el("humanError").textContent = "";

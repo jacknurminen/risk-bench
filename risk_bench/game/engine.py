@@ -178,6 +178,10 @@ def _advance_setup(state: GameState) -> list[GameEvent]:
 
 
 def _start_turn(state: GameState, player_id: PlayerId) -> list[GameEvent]:
+    state.previous_round_number = state.round_number
+    seats = list(state.players)
+    if state.turn_number == 0 or seats.index(player_id) <= seats.index(state.current_player):
+        state.round_number += 1
     state.current_player = player_id
     state.phase = Phase.REINFORCE
     state.turn_number += 1

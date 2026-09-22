@@ -32,6 +32,7 @@ def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
     restored = restore_game(path)
     assert restored.state.ruleset.minimum_advance_on_capture
     assert model["steps"][-1]["turn"] == restored.state.turn_number
+    assert model["steps"][-1]["round"] == restored.state.round_number
     seats = {name: index for index, name in enumerate(restored.state.players)}
     assert model["steps"][-1]["board"] == {
         str(territory): [seats[owner], restored.state.armies[territory]]

@@ -208,6 +208,7 @@ def _step(
     player_index = {name: index for index, name in enumerate(player_names)}
     return {
         "turn": state.turn_number,
+        "round": state.round_number,
         "phase": str(state.phase),
         "current_player": state.current_player,
         "action": action_text,

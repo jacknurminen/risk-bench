@@ -49,7 +49,7 @@ function renderPlayerHands(step) {
     if (!container) return;
     const cards = step.hands?.[player.name];
     const historical = index !== steps.length - 1;
-    el("handContext-" + seat).textContent = historical ? `Turn ${step.turn} · step ${index}` : "Latest board";
+    el("handContext-" + seat).textContent = historical ? `${gameTimeLabel(step.turn, step.round)} · step ${index}` : "Latest board";
     container.innerHTML = cards?.length ? cards.map(card =>
       `<div class="heldCard"><span class="cardDesign">${escapeHtml(placeName(card.design))}</span><span>${card.territory ? `<span class="tlink" data-place="${card.territory}">${escapeHtml(placeName(card.territory))}</span>` : "Wild card"}</span></div>`).join("")
       : `<p class="handEmpty">${cards ? "No cards held." : "Card details unavailable for this snapshot."}</p>`;
@@ -137,7 +137,7 @@ function turnCard(turn) {
       <span class="tmeta">
         <span class="line1">
           <span class="ttag" style="color:${accent}">${setup ? "setup placement" : tagOf(actor)}</span>
-          <span class="tturn">turn ${String(turn).padStart(2, "0")}</span>
+          <span class="tturn">${gameTimeLabel(turn, roundByTurn[turn])}</span>
           ${hasGap && showTags ? `<span class="gapbadge">⚡ deception gap</span>` : ""}
         </span>
         <span class="tsummary">${richText(turnSummary(turn))}</span>

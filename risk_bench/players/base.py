@@ -59,6 +59,8 @@ class PlayerView:
     # history, scoped to the current turn — everything older lives only in ``notes``
     visible_chat: tuple[ChatMessage, ...]
     recent_events: tuple[GameEvent, ...]
+    round_number: int = 0
+    previous_round_number: int = 0
 
 
 @dataclass(frozen=True)

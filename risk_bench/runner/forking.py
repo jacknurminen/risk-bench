@@ -15,6 +15,7 @@ from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.journal import (
     JournalWriter,
     _header_from_json,
+    expand_records,
     prefix_hash,
     raw_journal,
     select_prefix,
@@ -40,7 +41,7 @@ def fork_game(
     transitions = [r for r in prefix if r["type"] == "transition"]
     if not transitions:
         raise ValueError("Exact forks require execution checkpoints; this legacy cursor is unrecoverable.")
-    saved = copy.deepcopy(transitions[-1]["checkpoint"])
+    saved = copy.deepcopy(next(r["checkpoint"] for r in reversed(expand_records(prefix)) if r["type"] == "checkpoint"))
     state, rng = checkpoint.restore_engine(saved)
     p = saved["progress"]
     if state.phase is Phase.GAME_OVER or p["stage"] in {"done", "result", "final_commentary"}:
@@ -214,7 +215,9 @@ def _apply_additional_context(journal: Path, context: dict[str, str], append: bo
     unknown = context.keys() - header.player_specs.keys()
     if unknown:
         raise ValueError(f"Unknown player identities: {sorted(unknown)}")
-    saved = copy.deepcopy(transitions[-1]["checkpoint"])
+    saved = copy.deepcopy(
+        next(r["checkpoint"] for r in reversed(expand_records(records)) if r["type"] == "checkpoint")
+    )
     if saved["progress"]["stage"] == "done":
         raise ValueError("This game has finished; there is no later prompt left to change.")
     saved["additional_context"] = _merged_context(

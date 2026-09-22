@@ -42,6 +42,8 @@ def build_player_view(
         player_id=player_id,
         phase=state.phase,
         turn_number=state.turn_number,
+        round_number=state.round_number,
+        previous_round_number=state.previous_round_number,
         current_player=state.current_player,
         private_messages_allowed=private_messages_allowed,
         armies=visible_armies,

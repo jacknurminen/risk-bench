@@ -42,14 +42,14 @@ class GameRecord:
 class GameRunner:
     """Runs one full game from setup to a completed mission or the turn limit.
 
-    Owns the game flow: each turn starts with a negotiation round of up to
+    Owns the game flow: each turn starts with a negotiation session of up to
     ``max_negotiation_rounds`` passes. In every pass the active player speaks
     first and each other living player may react; a pass in which nobody says
     anything ends the round, so quiet turns cost one pass while genuine
     exchanges (proposal, counter, acceptance) resolve within a single turn.
     Negotiation is followed by the decide/apply loop through the turn's phases,
     where a decision may carry one broadcast table-talk message alongside its
-    action; replies to it have to wait for the next negotiation round.
+    action; replies to it have to wait for the next negotiation session.
     A game that reaches ``max_turns`` without a completed mission is recorded
     as a draw. Setup placements happen before any negotiation, and their events
     are delivered only to the placing player, keeping starting placements blind.

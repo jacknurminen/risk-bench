@@ -77,11 +77,17 @@ def render_system_prompt(view: PlayerView) -> str:
         f"{render_board_topology()}\n"
         f"Each turn you are shown the live board (who owns what, and army counts) separately; "
         f"combine it with this fixed map to reason about borders.\n\n"
-        f"Diplomacy: at the start of every turn there is a negotiation round where players may exchange "
-        f"messages. The round runs in passes: as long as someone said something, everyone gets another "
+        "Timing: a turn is one player's reinforcement, attack and fortification sequence. "
+        "A round is one pass through the fixed seating order, skipping eliminated players. "
+        "Round 1 starts after setup; a new round begins when the order wraps back to its first living player. "
+        "Turn numbers count individual turns throughout the game and do not reset each round. "
+        "For commitments, state an explicit deadline such as 'until the end of round 4' or "
+        "'until the start of Alice's next turn', using the actual player id.\n\n"
+        f"Diplomacy: at the start of every turn there is a negotiation session where players may exchange "
+        f"messages. The session runs in passes: as long as someone said something, everyone gets another "
         f"chance to reply (up to a limit), so proposals can be answered and agreed within the same turn. "
         f"You may also attach one short message to any action you take during your turn — table talk that "
-        f"others see but can only answer in the next negotiation round. "
+        f"others see but can only answer in the next negotiation session. "
         f"{privacy_note} Promises are not enforced by the rules. In messages, refer to players by their "
         f"exact ids (e.g. '{opponents.split(', ')[0]}') and to territories and continents by their exact "
         f"ids (e.g. 'middle_east', 'north_america'), so everyone knows precisely what you mean.\n\n"
@@ -126,7 +132,8 @@ def render_decision_prompt(request: DecisionRequest) -> str:
     """
     view = request.view
     sections = [
-        f"Turn {view.turn_number}, {view.phase} phase. It is your move.",
+        _render_timing(view),
+        f"{view.phase} phase. It is your move.",
         _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
@@ -152,12 +159,13 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         The user-turn prompt text inviting diplomacy messages.
     """
     speaker_note = (
-        "It is your turn; you may open the negotiation round."
+        "It is your turn; you may open the negotiation session."
         if view.current_player == view.player_id
         else f"It is {view.current_player}'s turn; you may react."
     )
     sections = [
-        f"Turn {view.turn_number} negotiation round. {speaker_note}",
+        _render_timing(view),
+        f"Negotiation session. {speaker_note}",
         _render_notes(view=view),
         _render_events(view=view),
         _render_chat(view=view),
@@ -166,7 +174,7 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         _render_board(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
         "Send a message to the other players, or say nothing. If anyone speaks, everyone gets "
-        "another chance to reply; staying silent helps end the round. Keep it short.",
+        "another chance to reply; staying silent helps end the session. Keep it short.",
     ]
     return "\n\n".join(section for section in sections if section)
 
@@ -187,8 +195,10 @@ def render_noting_prompt(view: PlayerView) -> str:
         The user-turn prompt text inviting a notes rewrite.
     """
     sections = [
-        "The turn that just ended is summarised below. Update the private notes you keep for your "
-        "future self before the next turn begins.",
+        f"Round {view.previous_round_number} · Turn {view.turn_number - 1} just ended. "
+        "Update the private notes you keep for your "
+        "future self before the next turn proceeds.",
+        "Current board: " + _render_timing(view),
         _render_events(view=view),
         _render_chat(view=view),
         _render_additional_context(view=view),
@@ -198,6 +208,16 @@ def render_noting_prompt(view: PlayerView) -> str:
         _NOTING_INSTRUCTION,
     ]
     return "\n\n".join(section for section in sections if section)
+
+
+def _render_timing(view: PlayerView) -> str:
+    position = (
+        "Setup placement, before round 1."
+        if view.turn_number == 0
+        else f"Round {view.round_number} · Turn {view.turn_number} · {view.current_player}'s turn."
+    )
+    order = " → ".join(player.player_id for player in view.players if not player.is_eliminated)
+    return f"{position}\nTurn order (living players): {order}."
 
 
 # soft target the noting prompt suggests, so a long game's notes stay bounded; not enforced
