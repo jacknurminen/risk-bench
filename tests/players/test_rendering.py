@@ -18,7 +18,7 @@ def test_system_prompt_contains_identity_rules_and_secret_mission():
     assert "You are 'alice'" in prompt
     assert "bob" in prompt
     assert request.view.own_mission.description in prompt
-    assert "Never reveal your mission" in prompt
+    assert "Other players are not shown your mission" in prompt
     assert "Rules summary" in prompt
     assert "borders:" in prompt  # the fixed map (topology) is part of the cached system prompt
 

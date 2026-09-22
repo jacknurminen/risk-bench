@@ -84,10 +84,13 @@ def render_system_prompt(view: PlayerView) -> str:
         f"exact ids (e.g. '{opponents.split(', ')[0]}') and to territories and continents by their exact "
         f"ids (e.g. 'middle_east', 'north_america'), so everyone knows precisely what you mean.\n\n"
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
-        f"Never reveal your mission. Play to complete it as fast as possible; helping others costs you the game.\n"
+        f"Other players are not shown your mission. Your objective is to win by completing your secret "
+        f"mission under the game rules.\n"
         f"Always act by calling exactly one action tool, optionally adding one message tool call.\n"
-        f"Before your tool calls, briefly state your private reasoning as plain text — other players never "
-        f"see it; it is recorded only for post-game analysis."
+        # Anthropic models refuse a system prompt that asks for "private reasoning" or "private
+        # thoughts"; the same sentence without that phrasing is accepted and means the same thing.
+        f"Before your tool calls, briefly state your reasoning as plain text. It is not shown to the "
+        f"other players; it is recorded only for post-game analysis."
     )
 
 
@@ -143,7 +146,7 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         _render_players(view=view),
         _render_board(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
-        "Send a message to influence the other players, or say nothing. If anyone speaks, everyone gets "
+        "Send a message to the other players, or say nothing. If anyone speaks, everyone gets "
         "another chance to reply; staying silent helps end the round. Keep it short.",
     ]
     return "\n\n".join(section for section in sections if section)

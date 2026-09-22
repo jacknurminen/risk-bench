@@ -169,6 +169,13 @@ class LLMPlayer:
                 ) from error
             return None
         self._consecutive_provider_failures = 0
+        if response.text is None and not response.tool_calls:
+            # A provider can answer with nothing at all — a content refusal, or an output budget
+            # spent entirely on hidden reasoning. Silently that costs every retry and ends in a
+            # random fallback, so name it: the trace holds the exact request that produced it.
+            print(
+                f"[empty-response] {self.player_id}: the provider returned no text and no tool calls", file=sys.stderr
+            )
         return response
 
 
