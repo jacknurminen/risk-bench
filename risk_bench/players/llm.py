@@ -87,6 +87,15 @@ class LLMPlayer:
             Message(role="system", content=render_system_prompt(view=request.view)),
             Message(role="user", content=render_decision_prompt(request=request)),
         ]
+        if self._retry_conversation:
+            # An information edit applies to the next call, including a paused retry.
+            # Keep the correction exchange, provider signatures and retry budget intact;
+            # only refresh the game-context message, in its original user-role position.
+            conversation = [
+                conversation[0],
+                replace(conversation[1], content=render_decision_prompt(request=request)),
+                *conversation[2:],
+            ]
         tools = tools_for_decision(request=request)
 
         self._retry_conversation = conversation

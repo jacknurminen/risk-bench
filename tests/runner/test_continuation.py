@@ -514,3 +514,102 @@ def test_context_given_at_launch_reaches_the_first_prompt_and_a_fork_adds_to_it(
     )
     alice = next(p for p in preview_next_prompts(journal_path=child, additional_context={}) if p.player == "alice")
     assert "The table has met before." in alice.before and "Carla just broke the pact." in alice.before
+
+
+def test_concurrent_context_edits_preserve_both_updates(completed, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, BrokenBarrierError
+
+    from risk_bench.runner import forking
+
+    source, _, _ = completed
+    branch = tmp_path / "concurrent" / "game.jsonl"
+    fork_game(source, branch, "0:after")
+    read = forking.raw_journal
+    readers = Barrier(2)
+
+    def overlapping_reads(path):
+        records = read(path)
+        # Without serialization both editors read the same sequence before either commits.
+        # With serialization the first times out, commits, and the second sees that commit.
+        try:
+            readers.wait(timeout=0.2)
+        except BrokenBarrierError:
+            pass
+        return records
+
+    monkeypatch.setattr(forking, "raw_journal", overlapping_reads)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        edits = [pool.submit(apply_additional_context, branch, {"alice": text}, True) for text in ("one", "two")]
+        for edit in edits:
+            edit.result(timeout=5)
+
+    restored = restore_game(branch)
+    assert restored.checkpoint is not None
+    assert restored.checkpoint["additional_context"]["alice"] in {"one\n\ntwo", "two\n\none"}
+    assert [r["id"] for r in raw_journal(branch)[1:]] == list(range(4))
+
+
+@pytest.mark.parametrize("edit", ["append", "replace", "clear", "fork"])
+def test_retry_receives_previewed_context_edit_without_losing_corrections(tmp_path, monkeypatch, edit):
+    from tests.players.test_llm import INVALID_ATTACK_RESPONSE
+
+    monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
+    signed_call = replace(INVALID_ATTACK_RESPONSE.tool_calls[0], provider_data={"signature": b"\x00\xff"})
+
+    class Outage:
+        def __init__(self):
+            self.calls = []
+
+        def respond(self, messages, tools):
+            self.calls.append(copy.deepcopy(messages))
+            if len(self.calls) == 1:
+                return replace(INVALID_ATTACK_RESPONSE, tool_calls=(signed_call,))
+            raise RuntimeError("offline")
+
+    class Capture:
+        def __init__(self):
+            self.calls = []
+
+        def respond(self, messages, tools):
+            self.calls.append(copy.deepcopy(messages))
+            raise RuntimeError("stop after capturing the resumed request")
+
+    source = tmp_path / "outage" / "game.jsonl"
+    writer = JournalWriter(source, False)
+    writer.write_header(JournalHeader(4, 19, dict.fromkeys(NAMES, "random"), 2, True, 3, []))
+    group = {name: LLMPlayer(name, Outage(), 2, 1, random.Random(name)) for name in NAMES}
+    with pytest.raises(ProviderUnavailableError):
+        GameRunner(group, {"alice": "Original briefing."}, 19, 2, True, 3, (), 1, writer, None, False).run()
+    writer.close()
+    parent_bytes = source.read_bytes()
+    original = restore_game(source)
+    assert original.checkpoint is not None
+    actor = original.state.current_player
+    retry = checkpoint.decode(original.checkpoint["players"][actor]["_retry_conversation"])
+    assert retry[2].tool_calls[0].provider_data == {"signature": b"\x00\xff"}
+    assert original.checkpoint["players"][actor]["_retry_index"] == 1
+
+    branch = tmp_path / "edited" / "game.jsonl"
+    text = "" if edit == "clear" else "Protect the eastern border."
+    fork_game(
+        source, branch, f"{raw_journal(source)[-1]['id']}:after", context={actor: text} if edit == "fork" else {}
+    )
+    if edit != "fork":
+        proposed = "Original briefing.\n\n" + text if edit == "append" else text
+        preview = next(p for p in preview_next_prompts(branch, {actor: proposed}) if p.is_next_request)
+        apply_additional_context(branch, {actor: text}, append=edit == "append")
+    else:
+        preview = next(p for p in preview_next_prompts(branch, {}) if p.is_next_request)
+
+    capture = Capture()
+    resumed = {name: LLMPlayer(name, capture, 99, 99, random.Random(name)) for name in NAMES}
+    with pytest.raises(ProviderUnavailableError):
+        runner(resumed).resume(restore_game(branch))
+    sent = capture.calls[0]
+    assert sent[1].content == preview.after
+    assert sent[0] == retry[0] and sent[2:] == retry[2:]
+    assert resumed[actor]._retry_index == 1
+    assert resumed[actor]._rng.getstate() == group[actor]._rng.getstate()
+    assert resumed[actor].invalid_action_count == group[actor].invalid_action_count
+    assert source.read_bytes() == parent_bytes

@@ -11,6 +11,7 @@ from risk_bench.game.rules import validate_action
 from risk_bench.game.serialization import action_from_json, chat_message_from_json
 from risk_bench.game.types import Phase
 from risk_bench.runner import checkpoint
+from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.journal import (
     JournalWriter,
     _header_from_json,
@@ -200,6 +201,11 @@ def apply_additional_context(journal: Path, context: dict[str, str], append: boo
         ValueError: If the journal predates execution checkpoints, the game has already
             finished, or a player identity is unknown.
     """
+    with journal_control_lock(journal):
+        _apply_additional_context(journal, context, append)
+
+
+def _apply_additional_context(journal: Path, context: dict[str, str], append: bool) -> None:
     records = raw_journal(journal)
     transitions = [record for record in records if record["type"] == "transition"]
     if not transitions:

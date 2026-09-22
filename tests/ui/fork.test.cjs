@@ -124,3 +124,65 @@ test('the panel edits context only on a paused branch, and previews what the nex
   assert.equal(status.textContent, 'Running.');
   assert.deepEqual(boxes.map(box => box.value), ['', ''], 'committed additions leave the boxes empty');
 });
+
+test('overlapping save clicks send one edit and polling cannot duplicate its text', async () => {
+  const boxes = [{dataset: {player: 'alice'}, value: 'new information'}];
+  const panel = {hidden: false, innerHTML: 'editor', querySelectorAll: () => boxes, contains: () => false};
+  const status = {textContent: ''};
+  const posted = [];
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const sandbox = fork({
+    elements: {forkPanel: panel, forkStatus: status},
+    context: {
+      fetch: async (url, options) => {
+        posted.push({url, payload: options.body ? JSON.parse(options.body) : null});
+        if (url.endsWith('/context')) await pending;
+        return {status: 204, ok: true};
+      },
+    },
+  });
+  sandbox.GAME.ancestry = {parent_game_id: 'parent'};
+  sandbox.GAME.additional_context = {alice: 'inherited'};
+  const save = vm.runInContext('saveForkContext', sandbox);
+  const button = {disabled: false};
+  const first = save(button);
+  assert.equal(button.disabled, true);
+  assert.equal(boxes[0].disabled, true);
+  await save(button);
+  assert.equal(posted.length, 1);
+  // A poll can see the committed edit before its POST response reaches the browser.
+  sandbox.GAME.additional_context = {alice: 'inherited\n\nnew information'};
+  vm.runInContext('renderForkPanel()', sandbox);
+  assert.equal(panel.innerHTML, 'editor');
+  release();
+  await first;
+  assert.equal(posted.length, 2);
+  assert.equal(posted[1].url, '/api/games/parent/resume');
+  assert.equal(sandbox.GAME.additional_context.alice, 'inherited\n\nnew information');
+  assert.equal(button.disabled, false);
+  assert.equal(boxes[0].disabled, false);
+});
+
+test('a failed context save keeps the draft and allows retrying', async () => {
+  const boxes = [{dataset: {player: 'alice'}, value: 'new information'}];
+  const panel = {querySelectorAll: () => boxes};
+  const status = {textContent: ''};
+  let attempts = 0;
+  const sandbox = fork({
+    elements: {forkPanel: panel, forkStatus: status},
+    context: {fetch: async () => {
+      attempts++;
+      return {ok: false, json: async () => ({detail: 'Pause the game first.'})};
+    }},
+  });
+  const save = vm.runInContext('saveForkContext', sandbox);
+  const button = {disabled: false};
+  await save(button);
+  assert.equal(button.disabled, false);
+  assert.equal(boxes[0].disabled, false);
+  assert.equal(boxes[0].value, 'new information');
+  assert.equal(status.textContent, 'Pause the game first.');
+  await save(button);
+  assert.equal(attempts, 2);
+});

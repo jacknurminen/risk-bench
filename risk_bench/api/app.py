@@ -34,6 +34,7 @@ from risk_bench.api.schemas import (
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
+from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.evaluation_store import (
     evaluation_path_for_journal,
     evaluation_trace_path_for_journal,
@@ -186,43 +187,48 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.post("/api/games/{game_id}/pause", status_code=204)
     def pause_game(game_id: str) -> None:
-        _journal_path(games_directory=games_directory, game_id=game_id)
-        if not manager.pause_game(game_id=game_id):
-            raise HTTPException(status_code=409, detail="The game is not running.")
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
+        with journal_control_lock(journal_path):
+            if not manager.pause_game(game_id=game_id):
+                raise HTTPException(status_code=409, detail="The game is not running.")
 
     @app.post("/api/games/{game_id}/resume", status_code=204)
     def resume_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
+        with journal_control_lock(journal_path):
+            _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
 
     @app.post("/api/games/{game_id}/fork", status_code=201)
     def fork_game_route(game_id: str, request: ForkRequest) -> dict:
         source = _journal_path(games_directory, game_id)
         branch_id = f"fork-{uuid.uuid4().hex[:12]}"
         destination = games_directory / branch_id / "game.jsonl"
-        try:
-            fork_game(source, destination, **request.model_dump(exclude={"start"}))
-        except (ValueError, KeyError, TypeError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        if request.start:
-            manager.resume_game(
-                branch_id,
-                destination,
-                restore_game(destination).header.commentators,
-                destination.parent / "worker.log",
-            )
-            _confirm_worker_started(game_directory=destination.parent, manager=manager)
+        with journal_control_lock(destination):
+            try:
+                fork_game(source, destination, **request.model_dump(exclude={"start"}))
+            except (ValueError, KeyError, TypeError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            if request.start:
+                manager.resume_game(
+                    branch_id,
+                    destination,
+                    restore_game(destination).header.commentators,
+                    destination.parent / "worker.log",
+                )
+                _confirm_worker_started(game_directory=destination.parent, manager=manager)
+
         return {"id": branch_id, "url": f"/games/{branch_id}"}
 
     @app.post("/api/games/{game_id}/context", status_code=204)
     def set_player_context(game_id: str, request: PlayerContextRequest) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        if manager.is_running(game_id=game_id):
-            raise HTTPException(status_code=409, detail="Pause the game before changing what its players know.")
-        try:
-            apply_additional_context(journal=journal_path, context=request.context, append=request.append)
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
+        with journal_control_lock(journal_path):
+            if manager.is_running(game_id=game_id):
+                raise HTTPException(status_code=409, detail="Pause the game before changing what its players know.")
+            try:
+                apply_additional_context(journal=journal_path, context=request.context, append=request.append)
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.post("/api/games/{game_id}/prompt-preview")
     def prompt_preview(game_id: str, request: PlayerContextRequest) -> dict[str, Any]:
@@ -236,14 +242,15 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.delete("/api/games/{game_id}", status_code=204)
     def delete_game(game_id: str) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        if manager.is_running(game_id=game_id):
-            raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
-        if manager.is_evaluating(game_id=game_id):
-            raise HTTPException(
-                status_code=409, detail="An evaluation is running for this game; wait for it to finish."
-            )
-        # removes the whole game folder: journal, trace, evaluation, and annotation sidecars alike
-        shutil.rmtree(journal_path.parent)
+        with journal_control_lock(journal_path):
+            if manager.is_running(game_id=game_id):
+                raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
+            if manager.is_evaluating(game_id=game_id):
+                raise HTTPException(
+                    status_code=409, detail="An evaluation is running for this game; wait for it to finish."
+                )
+            # removes the whole game folder: journal, trace, evaluation, and annotation sidecars alike
+            shutil.rmtree(journal_path.parent)
 
     @app.post("/api/games/{game_id}/evaluate", status_code=202)
     def evaluate_game(game_id: str, request: EvaluateRequest) -> dict[str, bool]:

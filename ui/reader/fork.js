@@ -4,7 +4,7 @@
    random streams, so the only thing left to decide is what — if anything — to change before
    resuming it. */
 
-let cursorNextOperation = null, indexedCursors = null;
+let cursorNextOperation = null, indexedCursors = null, forkSavingContext = false;
 function forkNextOperation(cursorId) {
   const cursors = GAME.cursors || [];
   if (indexedCursors !== cursors) {
@@ -71,7 +71,7 @@ function renderForkPanel() {
   panel.hidden = !editable;
   // live polling calls this every second. Rebuilding would discard whatever is half-written, and
   // focus alone is not enough to tell: someone types, clicks the board to check it, and comes back.
-  if (!editable || panel.contains(document.activeElement) || forkContextBoxes().some(box => box.value.trim())) return;
+  if (!editable || forkSavingContext || panel.contains(document.activeElement) || forkContextBoxes().some(box => box.value.trim())) return;
   const stored = GAME.additional_context || {};
   panel.innerHTML = `<div class="forkHead"><span class="serif">Forked copy · paused</span>
       <span class="mono">from <a href="/games/${encodeURIComponent(ancestry.parent_game_id)}">${escapeHtml(ancestry.parent_game_id)}</a>
@@ -87,7 +87,7 @@ function renderForkPanel() {
       </label>`).join("")}</div>
     <div class="forkActions">
       <button class="btn" type="button" onclick="previewForkPrompts()">Preview next prompts</button>
-      <button class="btn dark" type="button" onclick="saveForkContext()">Save &amp; resume game</button>
+      <button class="btn dark" type="button" onclick="saveForkContext(this)">Save &amp; resume game</button>
       <span class="mono" id="forkStatus"></span></div>
     <div id="forkPreview"></div>`;
 }
@@ -144,12 +144,18 @@ function markInsertion(before, after) {
     + escapeHtml(after.slice(after.length - end));
 }
 
-async function saveForkContext() {
+async function saveForkContext(button) {
+  if (forkSavingContext) return;
+  forkSavingContext = true;
+  if (button) button.disabled = true;
+  const boxes = forkContextBoxes();
+  const additions = forkContextAdditions();
+  const joined = forkContextAdditions({joined: true});
+  boxes.forEach(box => box.disabled = true);
   el("forkStatus").textContent = "Saving…";
   try {
-    const additions = forkContextAdditions();
     await postForkContext("/context", additions, {append: true});
-    GAME.additional_context = {...GAME.additional_context, ...forkContextAdditions({joined: true})};
+    GAME.additional_context = {...GAME.additional_context, ...joined};
     // the additions are committed, so the boxes are empty again and the panel may rebuild freely
     forkContextBoxes().forEach(box => box.value = "");
     el("forkStatus").textContent = "Saved. Starting the branch…";
@@ -164,6 +170,11 @@ async function saveForkContext() {
     renderForkPanel();
     document.dispatchEvent(new CustomEvent("reader:game-status"));
   } catch (error) { el("forkStatus").textContent = error.message; }
+  finally {
+    forkSavingContext = false;
+    if (button) button.disabled = false;
+    boxes.forEach(box => box.disabled = false);
+  }
 }
 
 async function postForkContext(path, context, extra = {}) {
