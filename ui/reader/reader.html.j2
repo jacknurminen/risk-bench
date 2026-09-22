@@ -28,6 +28,23 @@
 
 <div class="shell">
   <aside class="rail">
+    {% if mission_cards %}
+    <details class="card missionReference">
+      <summary><span aria-hidden="true">ⓘ</span> Mission reference</summary>
+      <p>All possible mission cards. Each player has one secret mission.</p>
+      <p>Click a continent or card to briefly highlight it on the map.</p>
+      <ul tabindex="0" aria-label="Possible mission cards">
+        {% for mission in mission_cards %}
+        <li{% if mission.continents %} data-mission-continents="{{ mission.continents | e }}"{% endif %}>
+          {% for part in mission.parts -%}
+            {% if part.continent %}<button class="tlink missionContinent" type="button" data-place="{{ part.continent | e }}">{{ part.text | e }}</button>{% else %}{{ part.text | e }}{% endif %}
+          {%- endfor %}
+          {% if mission.continents %}<button class="missionMap" type="button" aria-label="Highlight {{ mission.continents | replace('_', ' ') | e }} on the map">Show on map</button>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
     <div class="section">
       <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
       <button class="toggle missionToggle" id="missionToggle" type="button" role="switch" aria-checked="false" hidden>

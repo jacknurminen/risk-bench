@@ -5,6 +5,8 @@ from typing import Any
 
 import jinja2
 
+from risk_bench.game.missions import mission_deck
+
 UI_DIRECTORY = Path(__file__).parents[2] / "ui"
 _BOARD_SVG_PATH = UI_DIRECTORY / "board.svg"
 
@@ -63,8 +65,29 @@ def render_reader_html(
         analysis_url_json=json.dumps(analysis_url),
         human_url=human_url,
         human_url_json=json.dumps(human_url),
+        mission_cards=_mission_reference([player["name"] for player in game_view_model["players"]])
+        if game_view_model.get("human_players")
+        else [],
         board_svg=_BOARD_SVG,
     )
+
+
+def _mission_reference(player_ids: list[str]) -> list[dict[str, Any]]:
+    cards = []
+    for mission in mission_deck(player_ids):
+        continents = {str(c).replace("_", " ").title(): str(c) for c in sorted(mission.target_continents)}
+        parts = (
+            re.split("(" + "|".join(re.escape(name) for name in continents) + ")", mission.description)
+            if continents
+            else [mission.description]
+        )
+        cards.append(
+            {
+                "parts": [{"text": text, "continent": continents.get(text)} for text in parts],
+                "continents": " ".join(continents.values()),
+            }
+        )
+    return cards
 
 
 def render_reader_export_html(game_view_model: dict[str, Any], evaluation_view_model: dict[str, Any]) -> str:

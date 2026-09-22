@@ -23,6 +23,20 @@
   .section { margin-bottom: 16px; }
   .filters { padding: 15px; }
 
+  .missionReference { margin-bottom: 14px; padding: 11px 13px; }
+  .missionReference summary { cursor: pointer; font: 500 11px var(--font-mono); color: var(--ink); }
+  .missionReference summary:focus-visible, .missionReference ul:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+  .missionReference p { margin: 10px 0; font-size: 12px; line-height: 1.5; color: var(--mute-2); }
+  .missionReference ul { max-height: min(360px, 45vh); overflow-y: auto; overscroll-behavior: contain;
+                         margin: 0; padding: 0 6px 0 18px; font-size: 12px; line-height: 1.5; color: var(--body); }
+  .missionReference li { padding: 6px 0; overflow-wrap: anywhere; }
+  .missionReference li + li { border-top: 1px solid var(--line); }
+  .missionReference [data-mission-continents] { cursor: pointer; border-radius: 4px; }
+  .missionReference [data-mission-continents]:hover { background: var(--subtle); }
+  .missionContinent { font: inherit; color: inherit; background: none; padding: 0; border: 0; border-bottom: 1px dotted var(--mute); }
+  .missionMap { display: block; margin-top: 5px; padding: 2px 0; border: 0; background: none;
+                font: 10px var(--font-mono); color: var(--mute-2); cursor: pointer; text-decoration: underline; }
+
   /* player rail card */
   .pcard { padding: 13px; margin-bottom: 10px; border-top: 3px solid var(--line); }
   .pcard .top { display: flex; gap: 11px; align-items: flex-start; }

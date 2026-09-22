@@ -123,7 +123,12 @@ function flashPlace(place) {
     shape.path.classList.remove("flash"); void shape.path.getBoundingClientRect(); shape.path.classList.add("flash");
   }
 }
-document.addEventListener("click", e => { const link = e.target.closest(".tlink"); if (link) flashPlace(link.dataset.place); });
+document.addEventListener("click", e => {
+  const link = e.target.closest(".tlink");
+  if (link) { flashPlace(link.dataset.place); return; }
+  const card = e.target.closest("[data-mission-continents]");
+  if (card) card.dataset.missionContinents.split(" ").forEach(flashPlace);
+});
 
 function show(newIndex) {
   index = Math.max(0, Math.min(steps.length - 1, newIndex));
