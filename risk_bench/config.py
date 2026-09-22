@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     allow_private_messages: bool = False
     max_negotiation_rounds: int = 3
     elo_k_factor: float = 32.0
-    output_directory: Path = Path("data")
+    output_directory: Path = Path("data/v2")
 
 
 def load_settings() -> Settings:

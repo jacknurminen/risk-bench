@@ -105,7 +105,9 @@ def tournament(
     games: Annotated[int, typer.Option(help="Number of games to play.")] = 10,
     players_per_game: Annotated[int, typer.Option(help="Players seated per game (3-6).")] = 3,
     seed: Annotated[int, typer.Option(help="Base seed; per-game seeds are derived from it.")] = 0,
-    report_path: Annotated[Path, typer.Option(help="Where to write the JSON report.")] = Path("data/tournament.json"),
+    report_path: Annotated[Path, typer.Option(help="Where to write the JSON report.")] = Path(
+        "data/v2/tournament.json"
+    ),
     verbose: Annotated[bool, typer.Option(help="Print events and chat as they happen.")] = False,
 ) -> None:
     """Run a tournament, print final standings, and write the JSON report."""

@@ -21,7 +21,7 @@ def journal_with_game(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("game_id", ["20260909-123257-seed1", "20260910-092103-seed7", "20260911-071339-seed8"])
 def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
-    path = Path(__file__).parents[2] / "data" / "games" / game_id / "game.jsonl"
+    path = Path(__file__).parents[2] / "data" / "v2" / "games" / game_id / "game.jsonl"
     if not path.exists():
         pytest.skip("the committed reference game is not checked out")
     records = read_journal(path)

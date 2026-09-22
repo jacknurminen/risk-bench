@@ -21,7 +21,9 @@ from risk_bench.runner.evaluation import (
 from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
 
 # the reference game shipped in the repo; the integration smoke test asserts against it
-_REFERENCE_GAME = Path(__file__).resolve().parents[2] / "data" / "games" / "20260707-143545-seed0" / "game.jsonl"
+_REFERENCE_GAME = (
+    Path(__file__).resolve().parents[2] / "data" / "v2" / "games" / "20260707-143545-seed0" / "game.jsonl"
+)
 
 
 def _write_journal(path: Path) -> None:

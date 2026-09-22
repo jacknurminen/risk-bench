@@ -19,7 +19,7 @@ from risk_bench.runner.journal import (
 )
 
 PLAYER_NAMES = ["alice", "bob", "carla"]
-REFERENCE_GAME_JOURNAL = Path(__file__).parents[2] / "data" / "games" / "20260908-092609-seed0" / "game.jsonl"
+REFERENCE_GAME_JOURNAL = Path(__file__).parents[2] / "data" / "v2" / "games" / "20260908-092609-seed0" / "game.jsonl"
 
 
 def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -> GameRunner:

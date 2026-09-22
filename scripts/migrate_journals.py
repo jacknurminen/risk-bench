@@ -14,7 +14,7 @@ are atomic (temp file + replace), so an interrupted run never leaves a
 half-written journal.
 
 Usage (run from the repository root):
-    uv run python -m scripts.migrate_journals [--games-dir data/games] [--dry-run]
+    uv run python -m scripts.migrate_journals [--games-dir data/v2/games] [--dry-run]
 """
 
 import argparse
@@ -31,7 +31,9 @@ _FOLDED_SCHEMA_VERSION: Final[int] = 2
 def main() -> None:
     """Parse arguments and migrate every journal under the games directory."""
     parser = argparse.ArgumentParser(description="Rewrite pre-fold game journals to the current schema.")
-    parser.add_argument("--games-dir", type=Path, default=Path("data/games"), help="Directory holding game journals.")
+    parser.add_argument(
+        "--games-dir", type=Path, default=Path("data/v2/games"), help="Directory holding game journals."
+    )
     parser.add_argument("--dry-run", action="store_true", help="Report what would change without writing.")
     arguments = parser.parse_args()
     _migrate_directory(games_directory=arguments.games_dir, dry_run=arguments.dry_run)

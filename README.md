@@ -35,7 +35,28 @@ Start the web app:
 uv run python -m risk_bench.main serve --port 8420
 ```
 
-Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/games/`.
+Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/v2/games/`.
+
+## Versioned datasets
+
+The Git tag `v2` preserves the game engine, evaluator, and reader for the existing
+experiments. Its default output directory is `data/v2/`, including game journals,
+model traces, evaluations, and analysis. These experiment versions are separate
+from the schema version numbers inside individual files.
+
+To open the v2 application alongside ongoing development, use a separate checkout
+and point it at the existing dataset:
+
+```bash
+git worktree add --detach ../risk-bench-v2 v2
+cd ../risk-bench-v2
+uv sync
+OUTPUT_DIRECTORY=../risk-bench/data/v2 uv run python -m risk_bench.main serve --port 8421
+```
+
+V3 development starts from this release and will use fresh games in `data/v3/`.
+Existing v2 games belong to the v2 application; they will not be resumed or forked
+in v3. The revised codebook and analysis interface are planned v3 work.
 
 ## Example games
 
@@ -44,10 +65,10 @@ Browsing their replays and saved evaluations requires no API keys.
 
 | Game | Players | Saved evaluation |
 | --- | --- | --- |
-| [20260908-092609-seed0](data/games/20260908-092609-seed0) | Gemini 3.1 Pro Preview, Claude Opus 5, GPT-5.6 Sol | Yes |
-| [20260909-123257-seed1](data/games/20260909-123257-seed1) | Human, Claude Opus 5, GPT-5.6 Sol | Yes |
-| [20260910-092103-seed7](data/games/20260910-092103-seed7) | Human, Claude Fable 5, GPT-6 Astra | Yes |
-| [20260911-071339-seed8](data/games/20260911-071339-seed8) | Human, Claude Sonnet 5, GPT-5.6 Terra, Gemini 3.8 Flash | No |
+| [20260908-092609-seed0](data/v2/games/20260908-092609-seed0) | Gemini 3.1 Pro Preview, Claude Opus 5, GPT-5.6 Sol | Yes |
+| [20260909-123257-seed1](data/v2/games/20260909-123257-seed1) | Human, Claude Opus 5, GPT-5.6 Sol | Yes |
+| [20260910-092103-seed7](data/v2/games/20260910-092103-seed7) | Human, Claude Fable 5, GPT-6 Astra | Yes |
+| [20260911-071339-seed8](data/v2/games/20260911-071339-seed8) | Human, Claude Sonnet 5, GPT-5.6 Terra, Gemini 3.8 Flash | No |
 
 Each includes its game journal and model-call trace, plus evaluation and analysis files where available.
 
@@ -142,14 +163,14 @@ offline (a finished or paused game) and emit cited per-turn tags and a per-playe
 synthesis into a re-runnable `game.eval.jsonl` sidecar:
 
 ```bash
-uv run python -m risk_bench.main evaluate data/games/<game-folder>/game.jsonl \
+uv run python -m risk_bench.main evaluate data/v2/games/<game-folder>/game.jsonl \
     --evaluator anthropic:claude-opus-5 --evaluator google:gemini-3.1-pro-preview
 ```
 
 Render a finished game into a standalone HTML replay:
 
 ```bash
-uv run python -m risk_bench.main view data/games/<game-folder>/game.jsonl
+uv run python -m risk_bench.main view data/v2/games/<game-folder>/game.jsonl
 ```
 
 ## Status
