@@ -181,6 +181,26 @@ def test_cost_estimates_price_the_cached_shares_at_their_own_rates():
     assert cached is not None and cached < 5.00 + 1.00
 
 
+@pytest.mark.parametrize(
+    "model,rates",
+    [
+        ("claude-opus-5-5", (4.0, 5.0, 0.20, 20.0)),
+        ("gpt-6-sol", (2.0, 2.5, 0.20, 10.0)),
+        ("gpt-6-luna", (0.10, 0.125, 0.01, 0.50)),
+    ],
+)
+def test_new_models_use_current_input_cache_and_output_rates(model, rates):
+    cost = estimate_cost_usd(
+        model=model,
+        input_tokens=1_000_000,
+        cache_write_tokens=200_000,
+        cache_read_tokens=700_000,
+        output_tokens=40_000,
+    )
+    input_rate, write_rate, read_rate, output_rate = rates
+    assert cost == pytest.approx(0.1 * input_rate + 0.2 * write_rate + 0.7 * read_rate + 0.04 * output_rate)
+
+
 def test_usage_by_caller_aggregates_cache_shares_into_the_cost(tmp_path: Path):
     writer = TraceWriter(path=tmp_path / "game.trace.jsonl", append=False)
     cached_response = Response(

@@ -1,4 +1,3 @@
-import random
 import sys
 from dataclasses import replace
 
@@ -23,12 +22,11 @@ from risk_bench.players.tools import (
 
 
 class ProviderUnavailableError(Exception):
-    """Raised when a player's provider fails persistently (quota, outage, auth).
+    """A failed provider call pauses the pending operation without substituting gameplay."""
 
-    Distinct from transient failures, which only consume a retry: this aborts
-    the game so it pauses cleanly instead of silently degrading into random
-    play. The journal keeps the game resumable once the provider recovers.
-    """
+
+class InvalidResponseError(ProviderUnavailableError):
+    """The model has not supplied a usable response; retry the pending call on resume."""
 
 
 class LLMPlayer:
@@ -38,15 +36,9 @@ class LLMPlayer:
     scratch (with recent events and visible chat) rather than growing one long
     conversation, so cost is bounded and long games cannot overflow context.
 
-    Invalid tool calls are answered with the validation error and retried up to
-    ``max_invalid_retries`` times, then a random legal action is substituted so
-    a misbehaving model can never deadlock a game. Fallbacks are counted in
-    ``invalid_action_count`` — itself a benchmark signal. A provider API
-    failure (outage, rate limit, content-policy flag) consumes a retry the
-    same way, but ``max_consecutive_provider_failures`` failures in a row —
-    the signature of an exhausted quota rather than a flaky call — raise
-    ``ProviderUnavailableError`` to pause the game instead of letting it
-    degrade into random play. Any successful call resets the streak.
+    Invalid tool calls receive a bounded correction exchange. Exhaustion pauses
+    the game with the exchange preserved; any provider error pauses immediately.
+    Resume retries the same operation without substituting an action or silence.
     """
 
     def __init__(
@@ -54,16 +46,12 @@ class LLMPlayer:
         player_id: PlayerId,
         agent: Agent,
         max_invalid_retries: int,
-        max_consecutive_provider_failures: int,
-        rng: random.Random,
     ) -> None:
         self.player_id = player_id
         self.invalid_action_count = 0
         self._agent = agent
         self._max_invalid_retries = max_invalid_retries
-        self._max_consecutive_provider_failures = max_consecutive_provider_failures
         self._consecutive_provider_failures = 0
-        self._rng = rng
         self._retry_conversation = None
         self._retry_index = 0
         self.additional_instructions = ""
@@ -72,7 +60,7 @@ class LLMPlayer:
         """Ask the model to choose an action via tool calling, optionally with table talk.
 
         Alongside the action tool call the model may include messaging tool
-        calls; the first valid message is kept (one per decision), and only
+        calls; at most one valid message is accepted per decision, and only
         from the response whose action was legal — chatter on failed attempts
         is never delivered. Plain text accompanying the successful response is
         captured as the decision's private thought.
@@ -81,7 +69,7 @@ class LLMPlayer:
             request: The player's view and the legal actions.
 
         Returns:
-            The decision, or a silent random legal action after exhausted retries.
+            The model's validated decision; otherwise raise a resumable pause.
         """
         conversation = self._retry_conversation or [
             Message(role="system", content=render_system_prompt(view=request.view)),
@@ -101,30 +89,43 @@ class LLMPlayer:
         self._retry_conversation = conversation
         for index in range(self._retry_index, self._max_invalid_retries + 1):
             self._retry_index = index
-            response = self._respond_or_none(conversation=conversation, tools=tools)
-            if response is None:
-                continue
+            response = self._respond(conversation=conversation, tools=tools)
             action_calls = [call for call in response.tool_calls if not is_message_tool_call(call=call)]
             if not action_calls:
                 conversation += _action_demand_messages(response=response)
+                continue
+            if len(action_calls) != 1:
+                conversation += _correction_messages(
+                    response=response,
+                    failed_call=action_calls[0],
+                    error=InvalidToolCallError("Choose exactly one action tool; use its batch arguments."),
+                )
                 continue
             try:
                 actions = parse_tool_call(call=action_calls[0], request=request)
             except InvalidToolCallError as error:
                 conversation += _correction_messages(response=response, failed_call=action_calls[0], error=error)
                 continue
+            try:
+                chat_message = _validated_message(response=response, view=request.view)
+            except InvalidToolCallError as error:
+                failed = next(call for call in response.tool_calls if is_message_tool_call(call=call))
+                conversation += _correction_messages(response=response, failed_call=failed, error=error)
+                continue
             self._retry_conversation = None
             self._retry_index = 0
             return Decision(
                 actions=tuple(actions),
-                chat_message=_first_valid_message(response=response, view=request.view),
+                chat_message=chat_message,
                 thought=_thought_text(response=response),
             )
 
-        self._retry_conversation = None
+        # A later resume gets another bounded retry batch with the entire correction exchange.
+        # Never apply a move that the controller did not choose.
+        self._retry_conversation = conversation
         self._retry_index = 0
         self.invalid_action_count += 1
-        return Decision(actions=(self._rng.choice(request.legal_actions),), chat_message=None, thought=None)
+        raise InvalidResponseError(f"{self.player_id} returned no valid action. Game paused; resume to retry.")
 
     def compose_messages(self, view: PlayerView) -> NegotiationTurn:
         """Ask the model whether to send diplomacy messages.
@@ -135,47 +136,71 @@ class LLMPlayer:
             view: The player's current view of the game.
 
         Returns:
-            The negotiation turn; empty messages mean silence (also the
-            fallback on invalid calls).
+            The negotiation turn; silence requires an explicit pass tool call.
         """
-        conversation = [
+        conversation = self._retry_conversation or [
             Message(role="system", content=render_system_prompt(view=view)),
             Message(role="user", content=render_negotiation_prompt(view=view)),
         ]
-        response = self._respond_or_none(conversation=conversation, tools=tools_for_negotiation(view=view))
-        if response is None:
-            return NegotiationTurn(messages=(), thought=None)
-        thought = _thought_text(response=response)
-        try:
-            parsed = [parse_negotiation_tool_call(call=call, view=view) for call in response.tool_calls]
-        except InvalidToolCallError:
-            return NegotiationTurn(messages=(), thought=thought)
-        return NegotiationTurn(messages=tuple(message for message in parsed if message is not None), thought=thought)
+        if self._retry_conversation:
+            # Context edits and a newly restored view apply even to a pending retry.
+            conversation = [
+                replace(conversation[0], content=render_system_prompt(view=view)),
+                replace(conversation[1], content=render_negotiation_prompt(view=view)),
+                *conversation[2:],
+            ]
+        self._retry_conversation = conversation
+        for index in range(self._retry_index, self._max_invalid_retries + 1):
+            self._retry_index = index
+            response = self._respond(conversation=conversation, tools=tools_for_negotiation(view=view))
+            if not response.tool_calls:
+                # An empty response is not a pass. Ask again and preserve the correction
+                # across a pause so Resume does not replay the same ineffective request.
+                conversation += _negotiation_demand_messages(response)
+                continue
+            try:
+                parsed = []
+                for call in response.tool_calls:
+                    parsed.append(parse_negotiation_tool_call(call=call, view=view))
+            except InvalidToolCallError as error:
+                conversation += _correction_messages(response=response, failed_call=call, error=error)
+                continue
+            self._retry_conversation = None
+            self._retry_index = 0
+            return NegotiationTurn(
+                messages=tuple(message for message in parsed if message is not None),
+                thought=_thought_text(response=response),
+            )
 
-    def update_notes(self, view: PlayerView) -> str | None:
+        self._retry_index = 0
+        raise InvalidResponseError(
+            f"{self.player_id} did not send a valid message or explicitly pass after "
+            f"{self._max_invalid_retries + 1} attempts. Game paused; resume to retry with the correction history."
+        )
+
+    def update_notes(self, view: PlayerView) -> str:
         """Ask the model to rewrite its private notes for the turn that just ended.
 
         A dedicated, tool-free call: the model's plain-text reply becomes its new
-        notepad. On a provider failure (or an empty reply) the existing notes are
-        kept by returning None, so noting never blocks the game.
+        notepad. Failure or an empty reply pauses the pending noting operation.
 
         Args:
             view: The noting player's view of the just-ended turn and its current notes.
 
         Returns:
-            The rewritten notes, or None to keep the existing notes.
+            The rewritten notes; a failed response raises a resumable pause.
         """
         conversation = [
             Message(role="system", content=render_system_prompt(view=view)),
             Message(role="user", content=render_noting_prompt(view=view)),
         ]
-        response = self._respond_or_none(conversation=conversation, tools=[])
-        if response is None:
-            return None
+        response = self._respond(conversation=conversation, tools=[])
         notes = (response.text or "").strip()
-        return notes or None
+        if not notes or response.tool_calls:
+            raise InvalidResponseError(f"{self.player_id} returned no usable private notes. Game paused.")
+        return notes
 
-    def _respond_or_none(self, conversation: list[Message], tools: list[Tool]) -> Response | None:
+    def _respond(self, conversation: list[Message], tools: list[Tool]) -> Response:
         if self.additional_instructions:
             conversation = [
                 replace(
@@ -191,17 +216,12 @@ class LLMPlayer:
         except Exception as error:  # noqa: BLE001 - transient provider failures must not kill the game
             self._consecutive_provider_failures += 1
             print(f"[agent-error] {self.player_id}: {error}", file=sys.stderr)
-            if self._consecutive_provider_failures >= self._max_consecutive_provider_failures:
-                raise ProviderUnavailableError(
-                    f"{self.player_id}'s provider failed {self._consecutive_provider_failures} times in a row "
-                    f"(last error: {error}). Pausing the game; resume it once the provider recovers."
-                ) from error
-            return None
+            raise ProviderUnavailableError(
+                f"{self.player_id}'s provider failed: {error}. Game paused; resume to retry the pending call."
+            ) from error
         self._consecutive_provider_failures = 0
         if response.text is None and not response.tool_calls:
-            # A provider can answer with nothing at all — a content refusal, or an output budget
-            # spent entirely on hidden reasoning. Silently that costs every retry and ends in a
-            # random fallback, so name it: the trace holds the exact request that produced it.
+            # Keep the exact failed request visible in the API trace.
             print(
                 f"[empty-response] {self.player_id}: the provider returned no text and no tool calls", file=sys.stderr
             )
@@ -213,17 +233,11 @@ def _thought_text(response: Response) -> str | None:
     return text or None
 
 
-def _first_valid_message(response: Response, view: PlayerView) -> ChatMessage | None:
-    for call in response.tool_calls:
-        if not is_message_tool_call(call=call):
-            continue
-        try:
-            message = parse_negotiation_tool_call(call=call, view=view)
-        except InvalidToolCallError:
-            continue
-        if message is not None:
-            return message
-    return None
+def _validated_message(response: Response, view: PlayerView) -> ChatMessage | None:
+    calls = [call for call in response.tool_calls if is_message_tool_call(call=call)]
+    if len(calls) > 1:
+        raise InvalidToolCallError("Send at most one message alongside an action.")
+    return parse_negotiation_tool_call(call=calls[0], view=view) if calls else None
 
 
 def _action_demand_messages(response: Response) -> list[Message]:
@@ -242,6 +256,19 @@ def _action_demand_messages(response: Response) -> list[Message]:
         for call in response.tool_calls
     ]
     return demands
+
+
+def _negotiation_demand_messages(response: Response) -> list[Message]:
+    messages = [Message(role="assistant", content=response.text)] if response.text else []
+    messages.append(
+        Message(
+            role="user",
+            content="You have not answered this negotiation opportunity. Call send_public_message, "
+            "send_private_message if offered, or say_nothing. Silence requires an explicit "
+            "say_nothing tool call; do not choose a board action here.",
+        )
+    )
+    return messages
 
 
 def _correction_messages(response: Response, failed_call: ToolCall, error: InvalidToolCallError) -> list[Message]:

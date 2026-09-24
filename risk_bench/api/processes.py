@@ -8,6 +8,7 @@ resumed later. Child stdout/stderr go to the game's ``.log`` file, which only
 carries errors since workers run non-verbose: the journal is the record.
 """
 
+import json
 import multiprocessing
 import sys
 from collections.abc import Callable
@@ -29,7 +30,7 @@ class GameProcessManager:
         # evaluation workers are tracked apart from game workers: a game may be evaluated while
         # it is itself paused, so the two must not collide on the same game id. Each worker is
         # kept with its panel specs so progress reporting knows how many calls to expect.
-        self._evaluations: dict[str, tuple[BaseProcess, list[str]]] = {}
+        self._evaluations: dict[str, tuple[BaseProcess, list[str], bool]] = {}
 
     def launch_game(
         self,
@@ -71,7 +72,8 @@ class GameProcessManager:
         arguments = (str(log_path), str(journal_path), commentators)
         self._start(game_id=game_id, target=_resume_game_in_worker, arguments=arguments)
 
-    def evaluate_game(self, game_id: str, journal_path: Path, evaluator_specs: list[str], log_path: Path) -> None:
+    def evaluate_game(self, game_id: str, journal_path: Path, evaluator_specs: list[str], log_path: Path,
+                      live: bool = False) -> None:
         """Run a whole-game evaluator panel over a stored game in its own worker process.
 
         Off the game's critical path: the game need not be running (a paused or finished
@@ -83,10 +85,10 @@ class GameProcessManager:
             evaluator_specs: The evaluator panel as one model spec per member.
             log_path: Where the worker's output goes.
         """
-        arguments = (str(log_path), str(journal_path), evaluator_specs)
+        arguments = (str(log_path), str(journal_path), evaluator_specs, live)
         process = self._context.Process(target=_run_evaluation_in_worker, args=arguments, daemon=True)
         process.start()
-        self._evaluations[game_id] = (process, list(evaluator_specs))
+        self._evaluations[game_id] = (process, list(evaluator_specs), live)
 
     def is_running(self, game_id: str) -> bool:
         """Tell whether the game's worker process is currently alive.
@@ -135,6 +137,10 @@ class GameProcessManager:
             return None
         return self._evaluations[game_id][1]
 
+    def evaluating_live(self, game_id: str) -> bool:
+        """Whether the running evaluation follows completed turns."""
+        return self.is_evaluating(game_id) and bool(self._evaluations.get(game_id, (None, None, False))[2])
+
     def pause_game(self, game_id: str) -> bool:
         """Terminate the game's worker; the per-line-flushed journal keeps it resumable.
 
@@ -155,10 +161,26 @@ class GameProcessManager:
         del self._processes[game_id]
         return True
 
+    def pause_evaluation(self, game_id: str) -> bool:
+        """Stop a live panel; its last atomic turn snapshot remains resumable."""
+        entry = self._evaluations.get(game_id)
+        if entry is None or not entry[0].is_alive():
+            return False
+        process = entry[0]
+        process.terminate()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+            process.join(timeout=5)
+        del self._evaluations[game_id]
+        return True
+
     def shutdown(self) -> None:
         """Pause every running game; called when the server shuts down."""
         for game_id in list(self._processes):
             self.pause_game(game_id=game_id)
+        for game_id in list(self._evaluations):
+            self.pause_evaluation(game_id=game_id)
 
     def _start(self, game_id: str, target: Callable[..., object], arguments: tuple[object, ...]) -> None:
         process = self._context.Process(target=target, args=arguments, daemon=True)
@@ -206,14 +228,27 @@ def _resume_game_in_worker(log_path: str, journal_path: str, commentators: list[
         print(f"[paused] {error}")
 
 
-def _run_evaluation_in_worker(log_path: str, journal_path: str, evaluator_specs: list[str]) -> None:
-    _redirect_output(log_path=log_path, append=False)
+def _run_evaluation_in_worker(
+    log_path: str, journal_path: str, evaluator_specs: list[str], live: bool = False
+) -> None:
+    _redirect_output(log_path=log_path, append=live)
+    error_path = Path(journal_path).with_suffix(".eval.error.json")
+    error_path.unlink(missing_ok=True)
     try:
-        launch.run_evaluation(
-            journal_path=Path(journal_path), evaluator_specs=evaluator_specs, settings=load_settings()
-        )
+        if live:
+            from risk_bench.runner.live_evaluation import run_live_evaluation
+
+            run_live_evaluation(Path(journal_path), evaluator_specs, load_settings())
+        else:
+            launch.run_evaluation(
+                journal_path=Path(journal_path), evaluator_specs=evaluator_specs, settings=load_settings()
+            )
     except ProviderUnavailableError as error:
         print(f"[evaluation-aborted] {error}")
+        error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
+    except Exception as error:
+        print(f"[evaluation-aborted] {type(error).__name__}: {error}")
+        error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
 
 
 def _redirect_output(log_path: str, append: bool) -> None:

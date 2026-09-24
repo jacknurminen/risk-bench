@@ -21,6 +21,7 @@ from risk_bench.runner.journal import (
     select_prefix,
 )
 from risk_bench.specs import resolve_model
+from risk_bench.version import require_v3
 
 
 def fork_game(
@@ -37,7 +38,9 @@ def fork_game(
     continuation_seed: int | None = None,
 ) -> Path:
     # Read once: a live parent's subsequent growth cannot enter this branch.
-    prefix = select_prefix(raw_journal(source), cursor)
+    raw = raw_journal(source)
+    require_v3(raw[0])
+    prefix = select_prefix(raw, cursor)
     transitions = [r for r in prefix if r["type"] == "transition"]
     if not transitions:
         raise ValueError("Exact forks require execution checkpoints; this legacy cursor is unrecoverable.")
@@ -70,6 +73,8 @@ def fork_game(
     )
     discarded = None
     if redecide:
+        p.pop("decision_id", None)
+        p.pop("decision_context", None)
         if p["stage"] in {"action", "decision_thought", "decision_delivery", "decision_request"}:
             next_stage = "decision_request"
         elif p["stage"] in {"negotiation_request", "negotiation_thought", "negotiation_delivery"}:

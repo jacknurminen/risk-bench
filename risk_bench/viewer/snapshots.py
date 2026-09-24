@@ -61,11 +61,13 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     configuration_changes: list[str] = []
     additional_context: dict[str, str | None] = {}
     inherited_through = header.get("ancestry", {}).get("inherited_through", -1)
+    pause_error = None
     for record in records[1:]:
         match record["type"]:
             case "checkpoint":
                 saved = record["checkpoint"]
                 p = saved["progress"]
+                pause_error = p.get("pause_error")
                 additional_context = saved.get("additional_context") or {}
                 cursors.append(
                     {
@@ -159,6 +161,8 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
 
     return {
         "title": journal_path.name,
+        "experiment_version": 3,
+        "pause_error": pause_error,
         "cursors": cursors,
         "ancestry": header.get("ancestry", {}),
         "additional_context": additional_context,

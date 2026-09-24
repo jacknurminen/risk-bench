@@ -13,7 +13,7 @@
 <body>
 <header class="masthead">
   <div class="inner">
-    <div><span class="brand">risk-bench</span><small>evaluation reader</small></div>
+    <div><span class="brand">risk-bench v3</span> <small>commitments &amp; claims</small></div>
     <div class="mastmeta">
       <span id="mastStatus"></span>
       <span style="color:#c7c1b3">·</span>
@@ -46,7 +46,7 @@
     </details>
     {% endif %}
     <div class="section">
-      <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
+      <div class="railHead"><span class="eyebrow">Players</span></div>
       <button class="toggle missionToggle" id="missionToggle" type="button" role="switch" aria-checked="false" hidden>
         <span class="switch" aria-hidden="true"><span class="knob"></span></span>
         <span>Hide opponent missions</span>
@@ -54,18 +54,16 @@
       <div id="railPlayers"></div>
     </div>
     <div class="card filters">
-      <div id="axisSection">
-        <div class="flabel">Behaviour axis</div>
-        <div class="axisrow" id="axisRow"></div>
-      </div>
-      <div class="flabel">Min confidence</div>
-      <div class="seg" id="confSeg"></div>
+      <label class="flabel">Player<select id="actorFilter"></select></label>
+      <label class="flabel">Code<select id="codeFilter"></select></label>
+      <label class="flabel">Status<select id="statusFilter"></select></label>
+      <label class="flabel">Evidence basis<select id="basisFilter"></select></label>
       <div class="flabel">Annotators</div>
       <div id="annList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px"></div>
       <div class="toggle" id="privToggle" style="margin-top:0"><span class="switch"><span class="knob"></span></span>
         <span class="mono" style="font-size:11.5px">Private layers (thoughts · notes)</span></div>
       <div class="toggle" id="commToggle"><span class="switch"><span class="knob"></span></span>
-        <span class="mono" style="font-size:11.5px">Live commentary</span></div>
+        <span class="mono" style="font-size:11.5px">Show research annotations</span></div>
     </div>
   </aside>
 

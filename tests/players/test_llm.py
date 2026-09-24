@@ -1,11 +1,9 @@
-import random
-
 import pytest
 
 from risk_bench.agents.base import Message, Response, Tool, ToolCall
 from risk_bench.game.actions import Attack, PlaceArmies
 from risk_bench.game.types import Phase, Territory
-from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
+from risk_bench.players.llm import InvalidResponseError, LLMPlayer, ProviderUnavailableError
 from tests.players.test_tools import ALICE, attack_request, reinforce_request_with_tradeable_set, request_for_phase
 
 
@@ -47,9 +45,7 @@ EXPECTED_ATTACK = Attack(
 
 
 def llm_player(agent: StubAgent) -> LLMPlayer:
-    return LLMPlayer(
-        player_id=ALICE, agent=agent, max_invalid_retries=2, max_consecutive_provider_failures=6, rng=random.Random(0)
-    )
+    return LLMPlayer(player_id=ALICE, agent=agent, max_invalid_retries=2)
 
 
 def test_a_valid_tool_call_becomes_the_action():
@@ -79,26 +75,24 @@ def test_an_invalid_call_is_corrected_with_the_error_and_retried():
     assert tool_results[0].content is not None and "Invalid action" in tool_results[0].content
 
 
-def test_exhausted_retries_fall_back_to_a_random_legal_action():
+def test_exhausted_retries_pause_without_an_action():
     agent = StubAgent(responses=[INVALID_ATTACK_RESPONSE] * 3)
     player = llm_player(agent=agent)
     request = attack_request()
 
-    decision = player.decide_action(request)
-
-    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
+    with pytest.raises(ProviderUnavailableError):
+        player.decide_action(request)
     assert player.invalid_action_count == 1
     assert len(agent.conversations) == 3
 
 
-def test_responses_without_tool_calls_are_nudged_then_fall_back():
+def test_responses_without_tool_calls_are_nudged_then_pause():
     agent = StubAgent(responses=[Response(text="I think I shall attack Kamchatka!", tool_calls=())] * 3)
     player = llm_player(agent=agent)
     request = attack_request()
 
-    decision = player.decide_action(request)
-
-    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
+    with pytest.raises(ProviderUnavailableError):
+        player.decide_action(request)
     assert player.invalid_action_count == 1
     nudges = [message for message in agent.conversations[1] if message.role == "user"]
     assert any(message.content is not None and "calling exactly one" in message.content for message in nudges)
@@ -111,21 +105,17 @@ class FailingAgent:
         raise RuntimeError("400 invalid_prompt: flagged as potentially violating our usage policy")
 
 
-def test_provider_failures_fall_back_instead_of_crashing_the_game():
+def test_provider_failure_pauses_immediately():
     player = LLMPlayer(
         player_id=ALICE,
         agent=FailingAgent(),
         max_invalid_retries=2,
-        max_consecutive_provider_failures=10,
-        rng=random.Random(0),
     )
     request = attack_request()
 
-    decision = player.decide_action(request)
-
-    assert len(decision.actions) == 1 and decision.actions[0] in request.legal_actions
-    assert decision.chat_message is None and decision.thought is None
-    assert player.invalid_action_count == 1
+    with pytest.raises(ProviderUnavailableError):
+        player.decide_action(request)
+    assert player.invalid_action_count == 0
 
 
 def test_persistent_provider_failure_pauses_the_game_instead_of_playing_randomly():
@@ -133,14 +123,12 @@ def test_persistent_provider_failure_pauses_the_game_instead_of_playing_randomly
         player_id=ALICE,
         agent=FailingAgent(),
         max_invalid_retries=2,
-        max_consecutive_provider_failures=6,
-        rng=random.Random(0),
     )
     request = attack_request()
 
-    player.decide_action(request)  # three failures: still transient, falls back to a random action
-    with pytest.raises(ProviderUnavailableError, match="failed 6 times in a row"):
-        player.decide_action(request)  # failures four through six trip the breaker
+    for _ in range(2):
+        with pytest.raises(ProviderUnavailableError, match="provider failed"):
+            player.decide_action(request)
 
 
 def test_a_successful_call_resets_the_provider_failure_streak():
@@ -160,30 +148,28 @@ def test_a_successful_call_resets_the_provider_failure_streak():
         player_id=ALICE,
         agent=FlakyAgent(),
         max_invalid_retries=2,
-        max_consecutive_provider_failures=6,
-        rng=random.Random(0),
     )
     request = attack_request()
 
-    for _ in range(4):  # eight failures in total, but never six in a row
+    for _ in range(4):
+        for _ in range(2):
+            with pytest.raises(ProviderUnavailableError):
+                player.decide_action(request)
         assert player.decide_action(request).actions == (EXPECTED_ATTACK,)
+        assert player._consecutive_provider_failures == 0
     assert player.invalid_action_count == 0
 
 
-def test_provider_failures_during_negotiation_mean_silence():
+def test_provider_failures_during_negotiation_pause():
     player = LLMPlayer(
         player_id=ALICE,
         agent=FailingAgent(),
         max_invalid_retries=2,
-        max_consecutive_provider_failures=10,
-        rng=random.Random(0),
     )
     view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
 
-    negotiation_turn = player.compose_messages(view=view)
-
-    assert negotiation_turn.messages == ()
-    assert negotiation_turn.thought is None
+    with pytest.raises(ProviderUnavailableError):
+        player.compose_messages(view=view)
 
 
 def test_a_placement_split_becomes_a_batch_of_actions_from_one_response():
@@ -228,7 +214,7 @@ def test_a_message_call_alongside_the_action_becomes_table_talk():
     assert decision.chat_message.sender == ALICE
 
 
-def test_only_the_first_message_call_per_decision_is_kept():
+def test_multiple_messages_require_correction():
     response = Response(
         text=None,
         tool_calls=(
@@ -237,10 +223,17 @@ def test_only_the_first_message_call_per_decision_is_kept():
             tool_call("send_public_message", text="Second!"),
         ),
     )
-    decision = llm_player(agent=StubAgent(responses=[response])).decide_action(attack_request())
+    with pytest.raises(InvalidResponseError):
+        llm_player(agent=StubAgent(responses=[response] * 3)).decide_action(attack_request())
 
-    assert decision.actions == (EXPECTED_ATTACK,)
-    assert decision.chat_message is not None and decision.chat_message.text == "First!"
+
+def test_extra_action_tools_are_not_silently_discarded():
+    response = Response(text=None, tool_calls=VALID_ATTACK_RESPONSE.tool_calls * 2)
+    agent = StubAgent([response, VALID_ATTACK_RESPONSE])
+    player = llm_player(agent)
+    assert player.decide_action(attack_request()).actions == (EXPECTED_ATTACK,)
+    assert len(agent.conversations) == 2
+    assert any("exactly one action tool" in (m.content or "") for m in agent.conversations[1])
 
 
 def test_a_message_only_response_is_pushed_back_for_an_action():
@@ -275,7 +268,7 @@ def test_messages_on_responses_with_invalid_actions_are_not_delivered():
     assert any(message.content is not None and "Not delivered" in message.content for message in pushbacks)
 
 
-def test_an_invalid_message_does_not_invalidate_a_legal_action():
+def test_an_invalid_message_is_corrected_before_any_action():
     response = Response(
         text=None,
         tool_calls=(
@@ -283,7 +276,7 @@ def test_an_invalid_message_does_not_invalidate_a_legal_action():
             tool_call("send_private_message", recipient="bob", text="Psst"),  # private messages are off
         ),
     )
-    player = llm_player(agent=StubAgent(responses=[response]))
+    player = llm_player(agent=StubAgent(responses=[response, VALID_ATTACK_RESPONSE]))
 
     decision = player.decide_action(attack_request())
 
@@ -323,15 +316,67 @@ def test_compose_messages_parses_negotiation_calls_and_captures_the_thought():
     assert negotiation_turn.thought == "A truce buys me time."
 
 
-def test_compose_messages_falls_back_to_silence():
+def test_silence_requires_an_explicit_pass():
     view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
     silent = StubAgent(responses=[Response(text=None, tool_calls=(tool_call("say_nothing"),))])
-    broken = StubAgent(responses=[Response(text=None, tool_calls=(tool_call("send_telegram", text="?"),))])
-    chatty_text_only = StubAgent(responses=[Response(text="Hello everyone!", tool_calls=())])
+    broken = StubAgent(responses=[Response(text=None, tool_calls=(tool_call("send_telegram", text="?"),))] * 3)
+    chatty_text_only = StubAgent(responses=[Response(text="Hello everyone!", tool_calls=())] * 3)
 
     assert llm_player(agent=silent).compose_messages(view=view).messages == ()
-    assert llm_player(agent=broken).compose_messages(view=view).messages == ()
-    # text without a message tool call stays private: a thought, not a message
-    chatty_turn = llm_player(agent=chatty_text_only).compose_messages(view=view)
-    assert chatty_turn.messages == ()
-    assert chatty_turn.thought == "Hello everyone!"
+    for agent in (broken, chatty_text_only):
+        with pytest.raises(InvalidResponseError):
+            llm_player(agent=agent).compose_messages(view=view)
+
+
+def test_empty_negotiation_is_corrected_then_explicitly_passes():
+    view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
+    agent = StubAgent([
+        Response(text=None, tool_calls=()),
+        Response(text="I have nothing to add.", tool_calls=(tool_call("say_nothing"),)),
+    ])
+    player = llm_player(agent)
+
+    turn = player.compose_messages(view)
+
+    assert turn.messages == ()
+    assert turn.thought == "I have nothing to add."
+    assert any("explicit say_nothing" in (m.content or "") for m in agent.conversations[1])
+    assert player._retry_conversation is None
+
+
+def test_negotiation_correction_survives_pause_and_checkpoint():
+    from risk_bench.runner import checkpoint
+
+    view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
+    empty = Response(text=None, tool_calls=())
+    player = llm_player(StubAgent([empty] * 3))
+    with pytest.raises(InvalidResponseError):
+        player.compose_messages(view)
+    saved = checkpoint.player_state(player)
+    restored_agent = StubAgent([Response(text=None, tool_calls=(tool_call("say_nothing"),))])
+    restored = llm_player(restored_agent)
+    checkpoint.restore_player(restored, saved)
+
+    assert restored.compose_messages(view).messages == ()
+    assert len(restored_agent.conversations[0]) > 2
+    assert any("explicit say_nothing" in (m.content or "") for m in restored_agent.conversations[0])
+
+
+def test_invalid_retries_preserve_context_and_resume_with_model_choice():
+    agent = StubAgent([INVALID_ATTACK_RESPONSE] * 3 + [VALID_ATTACK_RESPONSE])
+    player = llm_player(agent)
+    with pytest.raises(InvalidResponseError):
+        player.decide_action(attack_request())
+    assert player.decide_action(attack_request()).actions == (EXPECTED_ATTACK,)
+    assert len(agent.conversations[-1]) > 2
+
+
+@pytest.mark.parametrize("bad", [Response(text=""), Response(text="notes", tool_calls=(tool_call("say_nothing"),))])
+def test_invalid_notes_pause_and_later_resume(bad):
+    agent = StubAgent([bad, Response(text="Remember Bob's promise.")])
+    player = llm_player(agent)
+    view = attack_request().view
+    with pytest.raises(InvalidResponseError):
+        player.update_notes(view)
+    assert player.update_notes(view) == "Remember Bob's promise."
+    assert agent.conversations[0] == agent.conversations[1]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, cast
 
 import anthropic
 
@@ -51,7 +51,7 @@ class AnthropicAgent:
 
 def _with_usage(parsed: Response, usage: anthropic.types.Usage) -> Response:
     # Anthropic reports cache traffic apart from input_tokens (a cache write at 1.25x the input
-    # rate, a cache read at 0.1x); normalize input_tokens to the call's total prompt tokens so
+    # rate, a cache read at a model-specific discount); normalize to total prompt tokens so
     # token counts mean the same thing across providers, and keep the cached shares for pricing
     cache_write_tokens = usage.cache_creation_input_tokens or 0
     cache_read_tokens = usage.cache_read_input_tokens or 0
@@ -93,6 +93,17 @@ def _to_anthropic_message(message: Message) -> anthropic.types.MessageParam:
         }
 
     if message.role == "assistant" and message.tool_calls:
+        provider_data = message.tool_calls[0].provider_data
+        if isinstance(provider_data, dict) and "anthropic_content" in provider_data:
+            # Echo the exact assistant turn, including signed thinking and block order.
+            # ToolCall provider data is also persisted by execution checkpoints.
+            return {
+                "role": "assistant",
+                "content": cast(
+                    list[anthropic.types.ContentBlockParam],
+                    cast(dict[str, object], provider_data)["anthropic_content"],
+                ),
+            }
         blocks: list[anthropic.types.ContentBlockParam] = []
         if message.content:
             blocks.append({"type": "text", "text": message.content})
@@ -124,5 +135,12 @@ def _parse_response(content_blocks: Sequence[anthropic.types.ContentBlock]) -> R
             arguments = block.input if isinstance(block.input, dict) else {}
             tool_calls.append(ToolCall(id=block.id, name=block.name, arguments=arguments))
 
+    if tool_calls and any(block.type in {"thinking", "redacted_thinking"} for block in content_blocks):
+        tool_calls[0] = dataclasses.replace(
+            tool_calls[0],
+            provider_data={
+                "anthropic_content": [block.model_dump(mode="json", exclude_none=True) for block in content_blocks]
+            },
+        )
     text = "".join(text_parts) or None
     return Response(text=text, tool_calls=tuple(tool_calls))

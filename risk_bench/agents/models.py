@@ -2,7 +2,8 @@
 
 ``MODELS`` is the single source of truth: adding an entry there is all it takes for a model to be
 selectable from the CLI, the setup form and the evaluation panel, and to be priced in every usage
-report. Prices are USD per million tokens, checked 2026-09-08 against the providers' pricing pages:
+report. Prices are USD per million tokens, checked 2026-09-08; Opus 5.5 and GPT-6 Sol/Luna
+updated 2026-09-23 against the providers' pricing pages:
 https://platform.claude.com/docs/en/about-claude/pricing
 https://ai.google.dev/gemini-api/docs/pricing
 https://developers.openai.com/api/docs/pricing
@@ -42,9 +43,7 @@ class BenchmarkModel:
     pricing: ModelPricing
 
 
-# Cache rates are formulas, not per-model figures: every current provider discounts a cached read
-# to a tenth of its input rate, and only Anthropic charges a premium to write a 5-minute cache
-# entry. Deriving them keeps a new model's entry down to the two prices its pricing page lists.
+# Default cache rates, with model-specific overrides for newer pricing schedules.
 _CACHE_WRITE_MULTIPLIER: Final[dict[Provider, float]] = {
     Provider.ANTHROPIC: 1.25,
     Provider.GOOGLE: 1.00,
@@ -53,14 +52,23 @@ _CACHE_WRITE_MULTIPLIER: Final[dict[Provider, float]] = {
 _CACHE_READ_MULTIPLIER: Final[float] = 0.10
 
 
-def _model(model_id: str, provider: Provider, input_usd: float, output_usd: float) -> BenchmarkModel:
+def _model(
+    model_id: str,
+    provider: Provider,
+    input_usd: float,
+    output_usd: float,
+    *,
+    cache_read_multiplier: float = _CACHE_READ_MULTIPLIER,
+    cache_write_multiplier: float | None = None,
+) -> BenchmarkModel:
     return BenchmarkModel(
         id=model_id,
         provider=provider,
         pricing=ModelPricing(
             input_usd_per_million=input_usd,
-            cache_write_usd_per_million=input_usd * _CACHE_WRITE_MULTIPLIER[provider],
-            cache_read_usd_per_million=input_usd * _CACHE_READ_MULTIPLIER,
+            cache_write_usd_per_million=input_usd
+            * (_CACHE_WRITE_MULTIPLIER[provider] if cache_write_multiplier is None else cache_write_multiplier),
+            cache_read_usd_per_million=input_usd * cache_read_multiplier,
             output_usd_per_million=output_usd,
         ),
     )
@@ -71,7 +79,13 @@ def _model(model_id: str, provider: Provider, input_usd: float, output_usd: floa
 MODELS: Final[tuple[BenchmarkModel, ...]] = (
     # anthropic
     _model(model_id="claude-fable-5", provider=Provider.ANTHROPIC, input_usd=10.00, output_usd=50.00),
-    _model(model_id="claude-opus-5", provider=Provider.ANTHROPIC, input_usd=5.00, output_usd=25.00),
+    _model(
+        model_id="claude-opus-5-5",
+        provider=Provider.ANTHROPIC,
+        input_usd=4.00,
+        output_usd=20.00,
+        cache_read_multiplier=0.05,
+    ),
     _model(model_id="claude-sonnet-5", provider=Provider.ANTHROPIC, input_usd=2.00, output_usd=10.00),
     _model(model_id="claude-haiku-4-5", provider=Provider.ANTHROPIC, input_usd=1.00, output_usd=5.00),
     # google; the pro rate is for prompts up to 200k tokens ($4.00 / $18.00 above that), and the
@@ -81,12 +95,24 @@ MODELS: Final[tuple[BenchmarkModel, ...]] = (
     _model(model_id="gemini-3.5-flash-lite", provider=Provider.GOOGLE, input_usd=0.30, output_usd=2.50),
     # openai
     _model(model_id="gpt-6-astra", provider=Provider.OPENAI, input_usd=10.00, output_usd=50.00),
-    _model(model_id="gpt-5.6-sol", provider=Provider.OPENAI, input_usd=4.00, output_usd=20.00),
+    _model(
+        model_id="gpt-6-sol", provider=Provider.OPENAI, input_usd=2.00, output_usd=10.00, cache_write_multiplier=1.25
+    ),
     _model(model_id="gpt-5.6-terra", provider=Provider.OPENAI, input_usd=2.00, output_usd=12.00),
-    _model(model_id="gpt-5.6-luna", provider=Provider.OPENAI, input_usd=0.20, output_usd=1.20),
+    _model(
+        model_id="gpt-6-luna", provider=Provider.OPENAI, input_usd=0.10, output_usd=0.50, cache_write_multiplier=1.25
+    ),
 )
 
-_PRICING_BY_MODEL_ID: Final[dict[str, ModelPricing]] = {model.id: model.pricing for model in MODELS}
+# Retired picker entries still need their original rates when viewing existing runs.
+_HISTORICAL_MODELS = (
+    _model(model_id="claude-opus-5", provider=Provider.ANTHROPIC, input_usd=5.00, output_usd=25.00),
+    _model(model_id="gpt-5.6-sol", provider=Provider.OPENAI, input_usd=4.00, output_usd=20.00),
+    _model(model_id="gpt-5.6-luna", provider=Provider.OPENAI, input_usd=0.20, output_usd=1.20),
+)
+_PRICING_BY_MODEL_ID: Final[dict[str, ModelPricing]] = {
+    model.id: model.pricing for model in (*_HISTORICAL_MODELS, *MODELS)
+}
 
 
 def estimate_cost_usd(

@@ -74,9 +74,12 @@ def test_negotiation_prompt_invites_a_message():
     request = attack_request()
 
     prompt = render_negotiation_prompt(view=request.view)
+    system = render_system_prompt(view=request.view)
 
     assert "Negotiation session" in prompt
     assert "Send a message" in prompt
+    assert "For a negotiation opportunity, call a message tool or say_nothing" in system
+    assert "Always act by calling exactly one action tool" not in system
 
 
 def test_prompts_distinguish_round_turn_and_negotiation_session():

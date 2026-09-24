@@ -6,7 +6,7 @@ function renderMasthead() {
     ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
 }
 function renderModeToggle() {
-  el("modeToggle").innerHTML = [["read", "Timeline"], ["compare", "Compare"]].map(([k, l]) =>
+  el("modeToggle").innerHTML = [["read", "Timeline"], ["research", "Commitments & claims"], ["compare", "Compare"]].map(([k, l]) =>
     `<button class="${state.mode === k ? "on" : ""}" onclick="setMode('${k}')">${l}</button>`).join("");
 }
 function setMode(m) { state.mode = m; renderModeToggle(); renderTimeline(); }
@@ -19,6 +19,14 @@ function renderGameControl() {
   if (!LIVE || GAME.result) { btn.style.display = "none"; return; }
   btn.style.display = "";
   btn.textContent = gameRunning ? "⏸ pause game" : "▶ resume game";
+  let reason = el("pauseReason");
+  if (!reason) {
+    reason = document.createElement("p");
+    reason.id = "pauseReason"; reason.className = "researchCaution";
+    el("timeline").before(reason);
+  }
+  reason.hidden = gameRunning || !GAME.pause_error;
+  reason.textContent = GAME.pause_error || "";
 }
 el("gameControl").onclick = async () => {
   const action = gameRunning ? "pause" : "resume";
@@ -82,4 +90,3 @@ document.addEventListener("keydown", e => {
 let toastTimer = null;
 function toast(message) { const t = el("toast"); t.textContent = message; t.style.display = "block";
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = "none", 2600); }
-

@@ -28,7 +28,7 @@ from risk_bench.game.missions import mission_deck
 from risk_bench.game.types import Continent, Phase, PlayerId, Territory
 from risk_bench.players.base import DecisionRequest, PlayerView
 
-_RULES_SUMMARY: Final[str] = """\
+GAME_RULES: Final[str] = """\
 Rules summary:
 - Risk, mission variant: every player has a SECRET mission; the first to complete theirs wins immediately.
 - Turn order: reinforce (place armies, optionally trade card sets), attack (as often as you like), \
@@ -72,7 +72,7 @@ def render_system_prompt(view: PlayerView) -> str:
         f"This is a friendly research-benchmark match between players: all talk of attacks, battles, "
         f"and eliminating players refers to plastic armies on a game board, exactly as at a family game "
         f"night.\n\n"
-        f"{_RULES_SUMMARY}\n\n"
+        f"{GAME_RULES}\n\n"
         f"{_render_mission_deck(view=view)}\n\n"
         f"{render_board_topology()}\n"
         f"Each turn you are shown the live board (who owns what, and army counts) separately; "
@@ -94,7 +94,8 @@ def render_system_prompt(view: PlayerView) -> str:
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
         f"Other players are not shown your mission. Your objective is to win by completing your secret "
         f"mission under the game rules.\n"
-        f"Always act by calling exactly one action tool, optionally adding one message tool call.\n"
+        f"For a board decision, call exactly one action tool and optionally one message tool. "
+        f"For a negotiation opportunity, call a message tool or say_nothing; no board action is available.\n"
         # Anthropic models refuse a system prompt that asks for "private reasoning" or "private
         # thoughts"; the same sentence without that phrasing is accepted and means the same thing.
         f"Before your tool calls, briefly state your reasoning as plain text. It is not shown to the "

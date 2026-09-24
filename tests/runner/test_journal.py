@@ -177,9 +177,8 @@ def test_headers_from_before_multi_pass_negotiation_restore_with_one_round(tmp_p
     del legacy_header["max_negotiation_rounds"]
     path.write_text("\n".join([json.dumps(legacy_header)] + lines[1:]) + "\n", encoding="utf-8")
 
-    restored = restore_game(path=path)
-
-    assert restored.header.max_negotiation_rounds == 1
+    with pytest.raises(KeyError):
+        restore_game(path=path)
 
 
 def test_journals_from_before_schema_three_replay_under_the_legacy_ruleset(tmp_path: Path):
@@ -197,17 +196,14 @@ def test_journals_from_before_schema_three_replay_under_the_legacy_ruleset(tmp_p
     header.update({"max_turns": 10, "allow_private_messages": False, "max_negotiation_rounds": 1, "commentators": []})
     path.write_text(json.dumps(header) + "\n", encoding="utf-8")
 
-    assert restore_game(path=path).state.ruleset is LEGACY_RULESET
+    with pytest.raises(ValueError, match="v2 Git tag"):
+        restore_game(path=path)
 
 
 @pytest.mark.skipif(not REFERENCE_GAME_JOURNAL.exists(), reason="the committed reference game is not checked out")
 def test_the_committed_reference_game_replays_cleanly():
-    # played under the legacy ruleset before the minimum-advance and forced-trade clauses were enforced
-    restored = restore_game(path=REFERENCE_GAME_JOURNAL)
-
-    assert restored.is_finished
-    assert restored.state.winner == "gpt-5.6-sol"
-    assert restored.state.turn_number == 15
+    with pytest.raises(ValueError, match="v2 Git tag"):
+        restore_game(path=REFERENCE_GAME_JOURNAL)
 
 
 def test_restore_rejects_files_without_a_header(tmp_path: Path):
@@ -235,7 +231,5 @@ def test_note_records_are_observational_and_ignored_on_restore(tmp_path: Path):
     journal.write_note(player_id="alice", turn_number=2, text="bob is massing on my border")
     journal.close()
 
-    restored = restore_game(path=path)
-
-    assert restored.header.seed == 1
-    assert not restored.is_finished  # notes never replay into game state
+    with pytest.raises(ValueError, match="requires execution checkpoints"):
+        restore_game(path=path)

@@ -24,24 +24,9 @@ def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
     path = Path(__file__).parents[2] / "data" / "v2" / "games" / game_id / "game.jsonl"
     if not path.exists():
         pytest.skip("the committed reference game is not checked out")
-    records = read_journal(path)
-    assert records[0]["schema_version"] == 3
-
-    # Applying the pre-v3 troop-advance rule changes the board and makes later attacks illegal.
-    model = build_view_model(path)
-    restored = restore_game(path)
-    assert restored.state.ruleset.minimum_advance_on_capture
-    assert model["steps"][-1]["turn"] == restored.state.turn_number
-    assert model["steps"][-1]["round"] == restored.state.round_number
-    seats = {name: index for index, name in enumerate(restored.state.players)}
-    assert model["steps"][-1]["board"] == {
-        str(territory): [seats[owner], restored.state.armies[territory]]
-        for territory, owner in restored.state.owner.items()
-    }
-    result = next((record for record in records if record["type"] == "result"), None)
-    if result is not None:
-        assert model["result"] == {"winner": result["winner"], "turn_count": result["turn_count"]}
-        assert restored.state.winner == result["winner"]
+    for read in (read_journal, build_view_model, restore_game):
+        with pytest.raises(ValueError, match="v2 Git tag"):
+            read(path)
 
 
 def test_view_model_has_one_snapshot_per_action_plus_the_start(tmp_path: Path):

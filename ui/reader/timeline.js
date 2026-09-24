@@ -55,222 +55,263 @@ function renderPlayerHands(step) {
       : `<p class="handEmpty">${cards ? "No cards held." : "Card details unavailable for this snapshot."}</p>`;
   });
 }
+
 function renderFilters() {
-  // only offer axis chips for axes that actually occur in the present tags; with no tags at all
-  // (nothing evaluated or annotated yet) the whole axis filter disappears rather than sit inert
-  const presentAxes = new Set(allTags().map(t => axisOf(t.behavior)));
-  if (state.filters.showCommentary)
-    GAME.commentary.forEach(c => (c.tags || []).forEach(t => presentAxes.add(axisOf(t.behavior))));
-  const offeredAxes = AXES.filter(([key]) => presentAxes.has(key));
-  el("axisSection").style.display = offeredAxes.length ? "" : "none";
-  el("axisRow").innerHTML = offeredAxes.map(([key, label, color]) => {
-    const on = state.filters.axes.has(key);
-    return `<button class="axischip" onclick="toggleAxis('${key}')" style="${on ? `border-color:${color};background:color-mix(in srgb, ${color} 12%, #fff);color:var(--ink)` : ""}">
-      <span class="swatch" style="background:${color}"></span>${label}</button>`;
-  }).join("");
-  el("confSeg").innerHTML = [[1, "≥1"], [2, "≥2"], [3, "3"]].map(([n, l]) =>
-    `<button class="${state.filters.minConf === n ? "on" : ""}" onclick="setMinConf(${n})">${l}</button>`).join("");
-  const counts = {}; allTags().forEach(t => counts[t.annotator] = (counts[t.annotator] || 0) + 1);
-  el("annList").innerHTML = annotators().map(a => {
-    const on = state.filters.annotators.has(a.index);
-    return `<button class="annrow ${on ? "on" : "off"}" onclick="toggleAnnotator(${a.index})">
-      <span class="swatch" style="width:9px;height:9px;border-radius:2px;background:${annotatorColor(a.index)}"></span>
-      <span class="mono" style="font-size:11.5px;flex:1;text-align:left">${escapeHtml(a.label)}</span>
-      <span class="mono" style="font-size:10px;color:var(--faintest)">${counts[a.index] || 0}</span>
-      <span class="checkbox ${on ? "on" : ""}"></span></button>`;
-  }).join("");
-  el("privToggle").className = "toggle" + (state.filters.showPrivate ? " on" : "");
-  el("privToggle").querySelector(".switch").className = "switch" + (state.filters.showPrivate ? " on" : "");
-  el("privToggle").querySelector(".switch").style.background = state.filters.showPrivate ? "var(--deceptive)" : "";
-  el("commToggle").className = "toggle" + (state.filters.showCommentary ? " on" : "");
-  el("commToggle").querySelector(".switch").className = "switch" + (state.filters.showCommentary ? " on" : "");
-  el("commToggle").querySelector(".switch").style.background = state.filters.showCommentary ? "var(--blue)" : "";
+  const select = (id, values, current, label) => {
+    el(id).innerHTML = '<option value="">All ' + label + '</option>' +
+      values.map(v => '<option value="' + escapeHtml(v) + '"' + (v === current ? " selected" : "") + '>' + escapeHtml(pretty(v)) + '</option>').join("");
+  };
+  select("actorFilter", GAME.players.map(p => p.name), state.filters.actor, "players");
+  select("codeFilter", EVAL.codes || [], state.filters.code, "codes");
+  select("statusFilter", ["open","fulfilled","violated","released","not_triggered","unassessable","assessable","unclear","insufficient_evidence"], state.filters.status, "statuses");
+  select("basisFilter", ["stated_plan","recorded_fact","unknown"], state.filters.basis, "evidence bases");
+  el("annList").innerHTML = annotators().map(a => '<button class="annrow ' + (state.filters.annotators.has(a.index) ? "on" : "off") + '" onclick="toggleAnnotator(' + a.index + ')">' +
+    '<span class="swatch" style="background:' + annotatorColor(a.index) + '"></span>' +
+    '<span class="annname">' + escapeHtml(a.label) + '</span><span class="checkbox ' + (state.filters.annotators.has(a.index) ? "on" : "") + '"></span></button>').join("");
+  for (const [id, key] of [["privToggle","showPrivate"],["commToggle","showCommentary"]]) {
+    el(id).className = "toggle" + (state.filters[key] ? " on" : "");
+    el(id).querySelector(".switch").className = "switch" + (state.filters[key] ? " on" : "");
+  }
 }
-function toggleAxis(key) { const s = state.filters.axes; s.has(key) ? (s.size > 1 && s.delete(key)) : s.add(key); renderFilters(); renderTimeline(); }
-function setMinConf(n) { state.filters.minConf = n; renderFilters(); renderTimeline(); }
-function toggleAnnotator(idx) { const s = state.filters.annotators; s.has(idx) ? s.delete(idx) : s.add(idx); renderFilters(); renderTimeline(); }
-el("privToggle").onclick = () => { state.filters.showPrivate = !state.filters.showPrivate; renderFilters(); renderTimeline(); };
-el("commToggle").onclick = () => { state.filters.showCommentary = !state.filters.showCommentary; renderFilters(); renderTimeline(); };
-
-/* ================= TIMELINE ================= */
-const KINDS = {
-  thought: ["thinks · private", "var(--deceptive)"], message: ["public · table-talk", "var(--blue)"],
-  action: ["board action", "#8a7b57"], event: ["engine", "#9aa3ae"], note: ["memory · private", "#b07d2e"],
+for (const key of ["actor","code","status","basis"]) el(key + "Filter").onchange = e => {
+  state.filters[key] = e.target.value; renderTimeline();
 };
-function tagsForTurn(turn) { return allTags().filter(t => t.turn === turn && tagVisible(t)); }
-
-function pill(t) {
-  const [vc, vt] = valenceStyle(t.behavior);
-  const ac = annotatorColor(t.annotator);
-  return `<span class="pill" onclick="openTagDrawer(${t.annotator}, '${t.behavior}', ${t.turn})"
-    style="background:${vt};color:${vc};border-color:${t.verified ? "var(--coop)" : "transparent"}">
-    <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>${t.behavior}
-    <span class="mono" style="font-size:9px;color:${colorOf(t.player)};font-weight:600">${tagOf(t.player)}</span>
-    <span class="mono" style="font-size:9px;opacity:.7">${t.confidence}/3</span>
-    ${t.verified ? '<span class="mono" style="font-size:9px;color:var(--coop);font-weight:700" title="human-verified">✓</span>' : ""}
-    <span style="width:14px;height:14px;border-radius:3px;background:${ac};color:#fff;font-family:var(--font-mono);font-size:8px;font-weight:600;display:inline-flex;align-items:center;justify-content:center">${annotatorBadge(t.annotator)}</span>
-  </span>`;
+function toggleAnnotator(idx) {
+  const s = state.filters.annotators; s.has(idx) ? s.delete(idx) : s.add(idx);
+  renderFilters(); renderTimeline();
 }
-
+el("privToggle").onclick = () => { state.filters.showPrivate = !state.filters.showPrivate; renderFilters(); renderTimeline(); };
+el("commToggle").onclick = () => {
+  researchVisibilityChosen = true;
+  state.filters.showCommentary = !state.filters.showCommentary;
+  renderFilters(); renderEvalBar(); renderSynthesis(); renderTimeline();
+};
+const KINDS = {
+  thought: ["private reasoning", "var(--deceptive)"], message: ["delivered message", "var(--blue)"],
+  action: ["applied action", "#8a7b57"], event: ["engine event", "#9aa3ae"], note: ["private note", "#b07d2e"],
+};
 function renderTimeline() {
-  if (state.mode === "compare") { renderCompare(); return; }
-  const container = el("timeline");
-  const visible = turns.filter(turn => state.filters.annotators.size || true);
-  container.innerHTML = visible.map(turn => turnCard(turn)).join("");
-  updateSubBar();
-  show(index); // re-apply focus highlight
+  const root = el("timeline");
+  if (state.mode === "research") root.innerHTML = researchHtml();
+  else if (state.mode === "compare") root.innerHTML = comparisonHtml();
+  else root.innerHTML = turns.map(turnCard).join("");
+  el("turnCount").textContent = turns.length + " turns";
+  el("subStat").textContent = EVAL.has_evaluation
+    ? allUnits().filter(u => u.kind === "episode").length + " commitment assessments · " + allUnits().filter(u => u.kind === "claim").length + " claim assessments"
+    : "No evaluation yet";
+  show(index);
 }
-
 function turnCard(turn) {
-  const setup = isSetupTurn(turn);
-  const actor = turnActor(turn) || GAME.players[0].name;
-  const accent = setup ? "var(--mute)" : colorOf(actor);  // setup belongs to no seat — a neutral accent
-  const expanded = state.expanded.has(turn);
-  const pills = tagsForTurn(turn);
-  const hasGap = pills.some(t => valenceOf(t.behavior) === "deceptive");
-  // the live-commentary toggle also hides the panel's read (tag pills + deception badge) so a human can read unbiased
-  const showTags = state.filters.showCommentary;
-  const commentary = state.filters.showCommentary ? GAME.commentary.filter(c => c.turn === turn) : [];
-  return `<article class="tcard" data-turn="${turn}" style="border-left-color:${accent}">
-    <button class="thead" onclick="toggleExpand(${turn})">
-      <span class="tbadge" style="background:${accent}">${setup ? "⚑" : initialsOf(actor)}</span>
-      <span class="tmeta">
-        <span class="line1">
-          <span class="ttag" style="color:${accent}">${setup ? "setup placement" : tagOf(actor)}</span>
-          <span class="tturn">${gameTimeLabel(turn, roundByTurn[turn])}</span>
-          ${hasGap && showTags ? `<span class="gapbadge">⚡ deception gap</span>` : ""}
-        </span>
-        <span class="tsummary">${richText(turnSummary(turn))}</span>
-        <span class="turnHighlights">${turnHighlights(turn).map(h => `<span class="moveChip ${h.kind}">${h.label}</span>`).join("")}</span>
-      </span>
-      <span class="chev" style="transform:rotate(${expanded ? 180 : 0}deg)">⌄</span>
-    </button>
-    ${showTags && pills.length ? `<div class="tpills">${pills.map(pill).join("")}</div>` : ""}
-    ${expanded ? expandedBody(turn) : ""}
-    ${commentary.length ? commentaryBlock(commentary) : ""}
-  </article>`;
+  const setup = isSetupTurn(turn), actor = turnActor(turn), accent = setup ? "var(--mute)" : colorOf(actor);
+  const units = state.filters.showCommentary ? allUnits().filter(u => unitVisible(u) && u.turn === turn) : [];
+  const notes = state.filters.showCommentary && EVAL.coverage?.source_matches
+    ? (EVAL.live_commentary || []).filter(note => note.turn === turn && state.filters.annotators.has(note.evaluator_index)) : [];
+  const finalNotes = state.filters.showCommentary && EVAL.coverage?.source_matches
+    ? (EVAL.live_final || []).filter(note => note.turn === turn && state.filters.annotators.has(note.evaluator_index)) : [];
+  return '<article class="tcard" data-turn="' + turn + '" style="border-left-color:' + accent + '">' +
+    '<button class="thead" onclick="toggleExpand(' + turn + ')"><span class="tbadge" style="background:' + accent + '">' +
+    (setup ? "⚑" : initialsOf(actor)) + '</span><span class="tmeta"><span class="line1">' +
+    '<span class="ttag">' + (setup ? "Setup placement" : escapeHtml(tagOf(actor))) + '</span><span class="tturn">' +
+    gameTimeLabel(turn, roundByTurn[turn]) + '</span></span><span class="tsummary">' + richText(turnSummary(turn)) +
+    '</span><span class="turnHighlights">' + turnHighlights(turn).map(h => '<span class="moveChip">' + h.label + '</span>').join("") +
+    '</span></span><span class="chev">⌄</span></button>' +
+    (units.length ? '<div class="tpills">' + units.map(unitPill).join("") + '</div>' : "") +
+    notes.map(note => '<div class="commentary"><span class="live">research · ' +
+      escapeHtml(annotatorLabel(note.evaluator_index)) + '</span> <span class="ctext">' +
+      escapeHtml(note.text) + '</span></div>').join("") +
+    finalNotes.map(note => '<div class="commentary"><span class="live">final review · ' +
+      escapeHtml(annotatorLabel(note.evaluator_index)) + '</span> <span class="ctext">' +
+      escapeHtml(note.text) + '</span></div>').join("") +
+    (state.expanded.has(turn) ? expandedBody(turn) : "") + '</article>';
 }
-
 function expandedBody(turn) {
   const lines = (spansByTurn.get(turn) || []).filter(s =>
-    (state.filters.showPrivate || (s.layer !== "thought" && s.layer !== "note"))
-    && !(s.layer === "event" && eventEchoesAction(s.text))
-    && !(s.layer === "note" && lastNoteSpanByPlayer[s.player] !== s.span));
-  const liveBySpan = commentatorTagsBySpan(turn);
-  // Several entries can come out of one committed transition, so a seam is only offered where the
-  // cursor actually changes — one per forkable boundary rather than one per line.
-  const rows = [];
-  let cursor = null;
-  lines.forEach(s => {
+    state.filters.showPrivate || !["thought","note"].includes(s.layer));
+  const rows = []; let cursor = null;
+  for (const s of lines) {
     if (s.cursor && s.cursor.before !== cursor?.before) rows.push(forkSeparator(s.cursor.before));
     cursor = s.cursor || cursor;
-    rows.push(traceLine(turn, s, liveBySpan.get(s.span) || []));
-  });
-  // The final boundary is the game's head; later turns open with it as their own leading seam.
-  if (cursor && turn === turns[turns.length - 1]) rows.push(forkSeparator(cursor.after));
-  return `<div class="expand">${rows.join("")}</div>`;
-}
-// engine events that merely restate the board action above them (place/fortify), or the turn header
-// the card already shows — hidden from the timeline, but still present in the raw-trace evidence drawer
-function eventEchoesAction(text) { return /\bplaced\b|\bfortified\b/.test(text) || /^Turn \d+ started/.test(text); }
-
-/* A commentator tags a (turn, player) pair, not a line, so its bubble is anchored to the tagged
-   player's first public span that turn — the message or action a spectator actually saw. Tags whose
-   player never spoke or acted that turn stay visible in the commentary block only. */
-function commentatorTagsBySpan(turn) {
-  const bySpan = new Map();
-  if (!state.filters.showCommentary) return bySpan;
-  const lines = spansByTurn.get(turn) || [];
-  const anchorOf = player =>
-    (lines.find(s => s.player === player && (s.layer === "message" || s.layer === "action")) || {}).span;
-  GAME.commentary.filter(c => c.turn === turn).forEach(c => (c.tags || []).forEach(t => {
-    if (!state.filters.axes.has(axisOf(t.behavior))) return;
-    const span = anchorOf(t.player);
-    if (span == null) return;
-    if (!bySpan.has(span)) bySpan.set(span, []);
-    bySpan.get(span).push({ ...t, live: true, commentator: c.commentator, commentator_index: c.commentator_index });
-  }));
-  return bySpan;
-}
-
-function traceLine(turn, s, liveAnno) {
-  let [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
-  if (s.layer === "action" || s.layer === "event") {
-    const kind = /\bconquered\b/.test(s.text) ? ["conquest", "var(--coop)"]
-      : /\bELIMINATED\b/.test(s.text) ? ["elimination", "var(--adversarial)"]
-      : /\battacks?\b|\battacked\b/.test(s.text) && !/ends the attack/.test(s.text) ? ["attack", "var(--adversarial)"]
-      : /\bplaces?\b|\bplaced\b/.test(s.text) ? ["placement", "var(--coop)"]
-      : /\bfortifies\b|\bfortified\b/.test(s.text) ? ["fortification", "var(--blue)"] : null;
-    if (kind) [kindLabel, kindColor] = kind;
+    // State records remain citable in the raw trace; retain their fork boundaries here.
+    if (s.layer !== "state") rows.push(traceLine(turn, s));
   }
-  const isMsg = s.layer === "message", isPrivate = s.layer === "thought" || s.layer === "note";
-  const anno = [...tagsForTurn(turn).filter(t => t.evidence?.some(e => e.span === s.span)), ...liveAnno];
-  const annoOpen = state.openAnno.has(turn + ":" + s.span);
-  const bodyColor = s.layer === "event" ? "var(--mute)" : (isPrivate ? "#57534a" : "var(--ink-soft)");
-  const dots = anno.slice(0, 5).map((t, i) => `<span class="annodot" style="background:${valenceStyle(t.behavior)[0]};margin-left:${i ? -3 : 0}px"></span>`).join("");
-  const content = `<div>
-    <div class="traceline" onclick="lineClick(event, ${s.step})" title="wind the board to this moment">
-      <button class="chip" onclick="chipClick(${s.span})" title="open in the raw trace">[${s.span}]</button>
-      <span class="kindbar" style="background:${kindColor}"></span>
-      <span style="flex:1;min-width:0">
-        <span class="kindlabel">${kindLabel}${s.inherited ? " · inherited" : ""}${s.origin === "human" ? " · intervention" : ""}</span>
-        ${s.player ? `<span class="tracewho" style="color:${colorOf(s.player)}">${tagOf(s.player)}</span>` : ""}
-        <span class="tracetext ${isMsg ? "msg" : "mono"}" style="color:${bodyColor}">${richText(s.text)}</span>
-      </span>
-      ${anno.length ? `<button class="iconbtn" onclick="toggleAnno(${turn}, ${s.span})" title="annotations on this line" style="display:flex;align-items:center;gap:6px">
-        <span class="annodots">${dots}</span><span class="chev" style="font-size:13px;transform:rotate(${annoOpen ? 180 : 0}deg)">⌄</span></button>` : ""}
-    </div>
-    ${annoOpen ? `<div style="margin:3px 0 9px 42px;display:flex;flex-direction:column;gap:6px">${anno.map(annoCard).join("")}</div>` : ""}
-  </div>`;
-  if (!isPrivate) return content;
-  return `<details class="privateTrace" ${state.openPrivate.has(s.span) ? "open" : ""} ontoggle="this.open ? state.openPrivate.add(${s.span}) : state.openPrivate.delete(${s.span})">
-    <summary>${s.layer === "thought" ? "Private reasoning" : "Private memory"}${s.player ? ` · ${escapeHtml(tagOf(s.player))}` : ""}</summary>${content}</details>`;
+  if (cursor && turn === turns.at(-1)) rows.push(forkSeparator(cursor.after));
+  return '<div class="expand">' + rows.join("") + '</div>';
 }
-
-function annoCard(t) {
-  if (t.live) return liveAnnoCard(t);
-  const [vc, vt] = valenceStyle(t.behavior);
-  const ac = annotatorColor(t.annotator);
-  const evidence = (t.evidence || []).map(e => evidenceQuote(t, e)).join("");
-  return `<div class="annocard" style="background:${vt};border-color:${t.verified ? "var(--coop)" : "transparent"};border-left:3px solid ${vc}">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-      <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
-      <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
-      <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)} · ${t.confidence}/3</span>
-      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${ac};background:color-mix(in srgb, ${ac} 12%, #fff)">${annotatorLabel(t.annotator)}</span>
-      <span style="margin-left:auto">${verifyControl(t)}</span>
-    </div>
-    <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note)}</div>
-    ${evidence ? `<div style="margin-top:7px"><span class="mono" style="font-size:9px;color:var(--faint)">evidence</span>${evidence}</div>` : ""}
-  </div>`;
+function traceLine(turn, s) {
+  const label = s.layer === "message" ? (s.visibility === "private" ? "private message · to " + s.recipients[0] : "public message") : (KINDS[s.layer]?.[0] || s.layer);
+  const content = '<div class="traceline" onclick="lineClick(event,' + s.step + ')"><button class="chip" title="Open in raw trace" onclick="openLineDrawer(' + s.span + ')">[' + s.span + ']</button>' +
+    '<span><span class="kindlabel">' + escapeHtml(label) + (s.inherited ? " · inherited" : "") +
+    (s.origin ? " · " + escapeHtml(pretty(s.origin)) : "") + '</span>' +
+    '<span class="tracetext ' + (s.layer === "message" ? "msg" : "mono") + '">' + richText(s.text) + '</span></span></div>';
+  return ["thought","note"].includes(s.layer) ? '<details class="privateTrace"><summary>' + escapeHtml(label) +
+    ' · ' + escapeHtml(s.player || "") + '</summary>' + content + '</details>' : content;
 }
-
-/* the human's verdict on a panel tag: one toggle that marks it checked-and-correct. In a static
-   export there is nowhere to save, so only an already-earned mark is shown. */
-function verifyControl(t) {
-  if (!VERIFICATIONS_URL)
-    return t.verified ? '<span class="mono" style="font-size:9.5px;color:var(--coop);font-weight:600">✓ verified</span>' : "";
-  return `<button class="verifybtn ${t.verified ? "on" : ""}"
-    onclick="setTagVerified(${t.annotator}, '${t.behavior}', '${t.player}', ${t.turn}, ${!t.verified})"
-    title="${t.verified ? "click to remove your verification" : "mark this tag as human-verified"}">${t.verified ? "✓ verified" : "✓ verify"}</button>`;
+function unitPill(u) {
+  return '<button class="pill researchTone-' + unitTone(u) + '" title="' + escapeHtml(unitTitle(u)) + '" onclick="openUnitDrawer(\'' + unitKey(u) + '\')">' +
+    escapeHtml(unitType(u) + " · " + tagOf(u.actor || u.initiator) + " · " + unitStatus(u)) +
+    (u.valid ? "" : " · needs review") + '</button>';
 }
-
-/* Each citation is printed in place — the cited line's kind, speaker, and text — so a tag reads
-   without leaving the feed. Long lines collapse to the cited quote (or a leading snippet) behind
-   a toggle; the [n] chip still opens the raw-trace drawer for full surrounding context. */
+function unitType(u) { return {agreement:"Proposal / agreement", episode:"Commitment", claim:"Claim"}[u.kind]; }
+function unitTitle(u) {
+  return u.kind === "episode" ? u.terms.action : u.kind === "claim" ? u.proposition :
+    (u.proposals.at(-1)?.terms || "Proposal terms not recorded");
+}
+function unitStatus(u) {
+  if (u.kind === "claim") {
+    if (u.codes?.includes("message_contradicted")) return "Contradicted";
+    if (u.codes?.includes("message_supported")) return "Supported";
+  }
+  if (u.kind !== "agreement") return pretty(u.status);
+  const responses = u.proposals.at(-1)?.responses || [];
+  const statuses = [...new Set(responses.map(r => r.status))];
+  return statuses.length === 1 ? ({accepted:"Accepted", rejected:"Rejected", no_response:"No response",
+    counterproposed:"Counterproposal", unclear:"Unclear response"}[statuses[0]]) :
+    (statuses.length ? "Mixed responses" : "Proposal");
+}
+function unitTone(u) {
+  if (!u.valid) return "neutral";
+  if (u.codes?.includes("deceptive_communication")) return "deceptive";
+  if (u.status === "violated" || u.codes?.includes("message_contradicted")) return "adversarial";
+  if (u.status === "fulfilled" || u.codes?.includes("message_supported")) return "coop";
+  if (u.status === "open") return "open";
+  return "neutral";
+}
+function linkedUnitButton(u, kind, id, label) {
+  const linked = allUnits().find(v => v.annotator === u.annotator && v.kind === kind && v.id === id);
+  return '<button class="btn researchLink" onclick="openUnitDrawer(\'' + u.annotator + ':' + kind + ':' + id + '\')">' +
+    escapeHtml(label + (linked ? ': ' + unitTitle(linked) : '')) + '</button>';
+}
+function researchHtml() {
+  if (!state.filters.showCommentary) return '<p class="empty">Enable annotations to see the research assessments.</p>';
+  const units = allUnits().filter(unitVisible);
+  const kindOptions = [["","All records"],["episode","Commitments"],["agreement","Proposals"],["claim","Claims"]];
+  const active = [state.filters.validOnly ? "valid records" : "", state.filters.status && pretty(state.filters.status),
+    state.filters.code && pretty(state.filters.code), state.filters.basis && pretty(state.filters.basis)].filter(Boolean);
+  const toolbar = '<div class="researchToolbar"><div class="researchKinds">' + kindOptions.map(([kind,label]) =>
+    '<button class="' + (state.filters.kind === kind ? 'on' : '') + '" onclick="setResearchKind(\'' + kind + '\')">' + label + '</button>').join('') +
+    '</div>' + (active.length ? '<span class="researchActive">Showing ' + escapeHtml(active.join(' · ')) +
+    ' <button onclick="clearResearchFilters()">Clear filters</button></span>' : '') + '</div>';
+  const screening = '<details class="card researchCard"><summary>Message screening · candidates, ordinary messages and missing work</summary>' +
+    (EVAL.members || []).filter(m => state.filters.annotators.has(m.index)).map(m =>
+      '<h3>' + escapeHtml(m.label) + '</h3>' + m.coverage.filter(c => !state.filters.actor ||
+        spanById.get(c.span)?.player === state.filters.actor).map(c =>
+        '<p><button class="chip" onclick="openLineDrawer(' + c.span + ')">[' + c.span + ']</button> <strong>' +
+        escapeHtml(pretty(c.status)) + '</strong> · ' + escapeHtml(c.explanation) + '</p>').join("")).join("") + '</details>';
+  const headings = {episode:"Commitments", agreement:"Proposals & agreements", claim:"Claims"};
+  return toolbar + '<p class="researchGuide">Commitments track one player’s promise over time. Proposals group offers and replies, including rejected offers. Claims assess what a message says. Expand a row for terms and evidence.</p>' +
+    '<div class="researchLegend"><span class="researchTone-coop">Fulfilled / supported</span><span class="researchTone-adversarial">Violated / contradicted</span>' +
+    '<span class="researchTone-deceptive">Deceptive communication</span><span class="researchTone-open">Open</span><span class="researchTone-neutral">Other / needs review</span></div>' +
+    (units.length ? ["episode","agreement","claim"].filter(kind => units.some(u => u.kind === kind)).map(kind => '<h3 class="researchGroup">' +
+      headings[kind] + ' <span>' + units.filter(u => u.kind === kind).length + '</span></h3>' +
+      units.filter(u => u.kind === kind).map(u => unitCard(u)).join("")).join("") : '<p class="empty">No research units match these filters.</p>') +
+    (state.filters.kind || active.length ? '' : screening);
+}
+function setResearchKind(kind) { state.filters.kind = kind; renderTimeline(); }
+function clearResearchFilters() {
+  Object.assign(state.filters, {actor:"", code:"", status:"", basis:"", kind:"", validOnly:false});
+  renderFilters(); renderTimeline();
+}
+function labeledEvidence(u) {
+  const walk = (value, path) => {
+    if (!value || typeof value !== "object") return "";
+    if ("span" in value && "quote" in value) return '<p class="kindlabel">' + escapeHtml(path) + '</p>' + evidenceQuote(u, value);
+    return Object.entries(value).map(([key, child]) => walk(child, path ? path + " / " + pretty(key) : pretty(key))).join("");
+  };
+  return walk(u, "");
+}
+function unitCard(u, expanded = false) {
+  const title = unitTitle(u);
+  let details = "";
+  if (u.kind === "episode") {
+    const termLabels = {action:"Promise", target:"Target", condition:"Condition", start:"Starts", deadline:"Deadline", restraint:"Promise not to act"};
+    details = '<dl class="researchTerms">' + Object.entries(u.terms).map(([k,v]) => '<dt>' + escapeHtml(termLabels[k] || pretty(k)) +
+      '</dt><dd>' + escapeHtml(v == null ? "Not specified" : typeof v === "boolean" ? (v ? "Yes" : "No") : String(v)) + '</dd>').join("") + '</dl>' +
+      '<p>Counterparties: ' + escapeHtml(u.counterparties.join(", ") || "Not specified") +
+      ' · Third-party targets: ' + escapeHtml(u.third_party_targets.join(", ") || "None stated") + '</p>' +
+      (u.agreement_id ? linkedUnitButton(u, "agreement", u.agreement_id, "Related proposal / agreement") : "") +
+      '<p>Assessment window: <button class="chip" onclick="openInterval(' + u.interval.start_span + ',' + u.interval.end_span + ')">[' +
+      u.interval.start_span + '–' + u.interval.end_span + ']</button> ' + escapeHtml(u.interval.endpoint) +
+      ' · ' + (u.interval.complete ? "Complete window" : "Incomplete window") + '</p>' +
+      '<p>Action source: ' + escapeHtml(pretty(u.action_provenance)) + '</p>' +
+      u.revisions.map(r => '<div class="researchRevision"><strong>' + escapeHtml(r.author + " · " + pretty(r.status)) +
+        '</strong><p>' + escapeHtml(r.terms) + '</p>' +
+        (r.responses || []).map(p => '<p>' + escapeHtml(p.player + ': ' + pretty(p.status)) + '</p>').join("") + '</div>').join("");
+  } else if (u.kind === "agreement") {
+    details = u.proposals.map(p => '<section class="researchRevision"><strong>' + escapeHtml(p.author) +
+      '</strong><p>' + escapeHtml(p.terms) + '</p>' + p.responses.map(r => '<p>' +
+      escapeHtml(r.player + ": " + pretty(r.status)) + '</p>').join("") + '</section>').join("");
+  } else {
+    details = '<p>Evidence basis: ' + escapeHtml(pretty(u.basis || "unknown")) + '</p>' +
+      (u.episode_id ? linkedUnitButton(u, "episode", u.episode_id, "Related commitment") : "");
+  }
+  const key = escapeHtml(JSON.stringify((EVAL.version || "") + ':' + unitKey(u)));
+  const cite = unitCitations(u).find(c => spanById.has(c.span)), span = cite && spanById.get(cite.span);
+  const time = span ? gameTimeLabel(span.turn, span.round) : "";
+  return '<details class="card researchCard researchUnit researchTone-' + unitTone(u) + '"' +
+    (expanded || state.openUnits.has((EVAL.version || "") + ':' + unitKey(u)) ? ' open' : '') +
+    ' ontoggle="this.open ? state.openUnits.add(' + key + ') : state.openUnits.delete(' + key + ')">' +
+    '<summary><span class="researchRow"><span class="researchActor" style="color:' + colorOf(u.actor || u.initiator) + '">' +
+    escapeHtml(tagOf(u.actor || u.initiator)) + '</span><span class="researchTitle">' + escapeHtml(title) +
+    '</span><span class="researchStatus">' + escapeHtml(unitStatus(u)) + '</span></span>' +
+    '<span class="researchMeta">' + escapeHtml([unitType(u), time, annotatorLabel(u.annotator)].filter(Boolean).join(' · ')) +
+    (u.kind === 'claim' && u.basis ? ' · ' + escapeHtml(pretty(u.basis)) : '') +
+    (u.kind === 'agreement' && u.proposals.length > 1 ? ' · latest of ' + u.proposals.length + ' proposals' : '') +
+    (u.codes?.includes("deceptive_communication") ? ' · deceptive communication' : '') +
+    (u.valid ? '' : ' · needs review · excluded from counts') + (u.verified ? ' · ✓ reviewed' : '') + '</span></summary>' +
+    '<div class="researchBody"><div class="researchCodes">' + (u.codes || []).map(c => '<span class="pill">' + escapeHtml(pretty(c)) + '</span>').join("") +
+    '</div><p>' + escapeHtml(u.explanation || "") + '</p>' + details +
+    (u.uncertainty ? '<p class="researchCaution">Alternative reading: ' + escapeHtml(u.uncertainty) + '</p>' : "") +
+    (u.issues?.length ? '<div class="researchCaution">Excluded from counts: ' + u.issues.map(escapeHtml).join("; ") + '</div>' : "") +
+    '<details class="researchEvidence"><summary>Evidence · ' + unitCitations(u).length + ' citations</summary>' +
+    labeledEvidence(u) + '</details><p class="researchId">Internal reference: ' + escapeHtml(u.id) +
+    ' · identifies this record within this evaluator’s run; not a codebook code.</p>' + verifyControl(u) + '</div></details>';
+}
+function verifyControl(u) {
+  if (!VERIFICATIONS_URL) return u.verified ? '<p>✓ Reviewed</p>' : "";
+  return '<button class="verifybtn ' + (u.verified ? "on" : "") + '" onclick="setUnitVerified(\'' +
+    unitKey(u) + '\',' + !u.verified + ')">' + (u.verified ? "✓ Reviewed" : "Mark reviewed") + '</button>';
+}
+function comparisonHtml() {
+  if (!state.filters.showCommentary) return '<p class="empty">Enable annotations to compare research assessments.</p>';
+  const members = (EVAL.members || []).filter(m => state.filters.annotators.has(m.index));
+  const rows = new Map();
+  for (const u of allUnits().filter(u => unitVisible(u) && u.kind !== "agreement")) {
+    const c = u.undertaking || u.message, key = JSON.stringify([u.kind,u.actor,c.span,c.quote,u.basis]);
+    if (!rows.has(key)) rows.set(key, {unit:u, votes:{}});
+    (rows.get(key).votes[u.annotator] ??= []).push(u);
+  }
+  return '<p class="statNote">Compare assessments at the same quoted source. Multiple units in one cell indicate a split that needs review. Missing does not mean agreement or honesty.</p><div class="researchTable"><table class="statsTable"><thead><tr><th>Source / unit</th>' +
+    members.map(m => '<th>' + escapeHtml(m.label) + '</th>').join("") + '</tr></thead><tbody>' +
+    [...rows.values()].map(r => '<tr><td>' + unitPill(r.unit) + '</td>' + members.map(m =>
+      '<td>' + (r.votes[m.index] || []).map(u => escapeHtml(pretty(u.status)) +
+        (u.valid ? "" : " · invalid") + '<br>' + (u.codes || []).map(pretty).join(", ")).join("<hr>") +
+      (!(r.votes[m.index]?.length) ? "Not extracted / missing" : "") + '</td>').join("") + '</tr>').join("") + '</tbody></table></div>';
+}
+function toggleExpand(turn) { state.expanded.has(turn) ? state.expanded.delete(turn) : state.expanded.add(turn); focusTurn(turn); renderTimeline(); }
+el("expandAll").onclick = () => {
+  if (state.mode === "research") allUnits().filter(unitVisible).forEach(u => state.openUnits.add((EVAL.version || "") + ':' + unitKey(u)));
+  else turns.forEach(t => state.expanded.add(t));
+  renderTimeline();
+};
+el("collapseAll").onclick = () => {
+  if (state.mode === "research") state.openUnits.clear();
+  else state.expanded.clear();
+  renderTimeline();
+};
 const EVIDENCE_COLLAPSE_LIMIT = 280;
 function evidenceQuote(t, e) {
   const s = spanById.get(e.span);
   const chip = `<button class="chip" onclick="openLineDrawer(${e.span})" title="open in the raw trace">[${e.span}]</button>`;
-  if (!s) return `<div class="evquote">${chip} <span class="mono" style="font-size:9.5px;color:var(--faint)">not in the trace (unresolved citation)</span></div>`;
+  if (!s || !e.resolved) return `<div class="evquote">${chip} <span class="mono" style="font-size:9.5px;color:var(--faint)">not in the trace (unresolved citation)</span></div>`;
   const [kindLabel, kindColor] = KINDS[s.layer] || KINDS.event;
-  const key = `${t.annotator}.${t.behavior}.${t.player}.${t.turn}:${e.span}`;
+  const key = `${unitKey(t)}:${e.span}`;
   const long = s.text.length > EVIDENCE_COLLAPSE_LIMIT;
   const open = state.openEvidence.has(key);
   return `<div class="evquote" style="border-left-color:${kindColor}">
     <div class="evhead">
       ${chip}
       <span class="kindlabel">${kindLabel}</span>
+      ${e.temporal_relationship ? '<span class="kindlabel">' + escapeHtml(pretty(e.temporal_relationship)) + '</span>' : ""}
       ${s.player ? `<span class="mono" style="font-size:9px;font-weight:600;color:${colorOf(s.player)}">${tagOf(s.player)}</span>` : ""}
       ${s.turn !== t.turn ? `<span class="mono" style="font-size:9px;color:var(--faint)">turn ${s.turn}</span>` : ""}
       ${long ? `<button class="evmore" onclick="toggleEvidence('${key}')">${open ? "▴ collapse" : "▸ show full line"}</button>` : ""}
@@ -291,105 +332,5 @@ function evidenceText(s, e, collapsed) {
 
 function toggleEvidence(key) {
   state.openEvidence.has(key) ? state.openEvidence.delete(key) : state.openEvidence.add(key);
-  renderTimeline();
-}
-
-/* a live commentator's tag in the bubble stack: no confidence, no citations, no edit — just the
-   member's read of the line, attributed with the 🎙 chip in the member's colour */
-function liveAnnoCard(t) {
-  const [vc, vt] = valenceStyle(t.behavior);
-  const mc = MEMBER_COLORS[t.commentator_index % MEMBER_COLORS.length];
-  return `<div class="annocard" style="background:${vt};border-left:3px solid ${vc}">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-      <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>
-      <span class="mono" style="font-size:10.5px;font-weight:600;color:${vc}">${t.behavior}</span>
-      <span class="mono" style="font-size:9.5px;color:var(--mute-2)">${tagOf(t.player)}</span>
-      <span class="mono" style="font-size:9px;padding:2px 7px;border-radius:999px;color:${mc};background:color-mix(in srgb, ${mc} 12%, #fff)">🎙 ${escapeHtml(t.commentator || "live")}</span>
-    </div>
-    <div style="font-size:12px;line-height:1.45;color:var(--body)">${escapeHtml(t.note || "")}</div>
-  </div>`;
-}
-
-function commentaryBlock(comments) {
-  return comments.map(c => {
-    const label = GAME.commentators.length > 1 ? `<span class="mono" style="font-size:9px;color:${MEMBER_COLORS[c.commentator_index % MEMBER_COLORS.length]}">${escapeHtml(c.commentator)}</span> ` : "";
-    // the commentator's own per-turn tags ride with its prose, so the live-commentary toggle governs both
-    const pills = (c.tags || []).filter(t => state.filters.axes.has(axisOf(t.behavior))).map(commentatorPill).join("");
-    return `<div class="commentary"><div style="display:flex;gap:9px;align-items:flex-start">
-      <span class="live"><span class="swatch" style="background:var(--blue)"></span>live</span>
-      <span style="flex:1"><span class="ctext">${richText(c.text)}</span></span></div>
-      ${pills ? `<div class="tpills" style="padding:8px 0 0">${pills}</div>` : ""}
-      <div style="margin-top:6px;font-family:var(--font-mono);font-size:9px;color:var(--faint)">${label}</div></div>`;
-  }).join("");
-}
-
-/* a commentator tag has no confidence or evidence citation, so its pill is plain: valence tint,
-   axis swatch, a 🎙 mark, and the justification in the tooltip */
-function commentatorPill(t) {
-  const [vc, vt] = valenceStyle(t.behavior);
-  return `<span class="pill" title="${escapeHtml(t.note || "")}" style="background:${vt};color:${vc};cursor:${t.note ? "help" : "default"}">
-    <span class="swatch" style="background:${AXIS_COLOR[axisOf(t.behavior)]}"></span>${t.behavior}
-    <span class="mono" style="font-size:9px;color:${colorOf(t.player)};font-weight:600">${tagOf(t.player)}</span>
-    <span style="font-size:9px;opacity:.6">🎙</span>
-  </span>`;
-}
-
-function updateSubBar() {
-  el("turnCount").textContent = turns.length + " turns";
-  const tags = allTags().filter(tagVisible);
-  const verified = tags.filter(t => t.verified).length;
-  el("subStat").textContent = EVAL.has_evaluation
-    ? `${tags.length} tags · ${verified} verified`
-    : "not yet evaluated — run the panel to generate annotations";
-}
-
-function toggleExpand(turn) { state.expanded.has(turn) ? state.expanded.delete(turn) : state.expanded.add(turn); focusTurn(turn); renderTimeline(); }
-function toggleAnno(turn, span) { const k = turn + ":" + span; state.openAnno.has(k) ? state.openAnno.delete(k) : state.openAnno.add(k); renderTimeline(); }
-el("expandAll").onclick = () => { turns.forEach(t => state.expanded.add(t)); renderTimeline(); };
-el("collapseAll").onclick = () => { state.expanded.clear(); renderTimeline(); };
-
-/* ================= COMPARE (agreement matrix) ================= */
-/* the matrix only offers the 1:1 code grains: family/axis cells stack several distinct codes per
-   turn, so matching there would over-credit agreement — those grains live on the stats sheet's
-   frequency views instead. Subfamily merges near-synonym codes into one row, so two members who
-   read the same event under different synonyms line up as a co-detection. */
-let compareGrain = "behavior";
-function renderCompare() {
-  const container = el("timeline");
-  const active = annotators().filter(a => state.filters.annotators.has(a.index));
-  const groups = new Map();
-  allTags().filter(tagVisible).forEach(t => {
-    const code = projectCode(t.behavior, compareGrain);
-    const key = t.turn + "|" + t.player + "|" + code;
-    if (!groups.has(key)) groups.set(key, { turn: t.turn, player: t.player, behavior: code, byAnn: {} });
-    const group = groups.get(key);
-    // merged synonym tags from one annotator collapse into the cell; show the strongest read
-    group.byAnn[t.annotator] = Math.max(group.byAnn[t.annotator] ?? 0, t.confidence);
-  });
-  const rows = [...groups.values()].sort((a, b) => a.turn - b.turn || a.player.localeCompare(b.player));
-  const head = `<div class="mhead"><span style="flex:1" class="eyebrow">behaviour · player · turn</span>${active.map(a =>
-    `<span class="mcell mono" style="font-size:9px;color:${annotatorColor(a.index)}">${escapeHtml(a.label).slice(0, 4)}</span>`).join("")}</div>`;
-  const body = rows.map(r => {
-    const n = active.filter(a => r.byAnn[a.index] != null).length;
-    const consensus = n >= 2;
-    const [vc] = valenceStyleAtGrain(r.behavior, compareGrain);
-    return `<div class="mrow" style="background:${consensus ? "#fafcfa" : "#fff"}">
-      <span style="flex:1;display:flex;align-items:center;gap:7px;min-width:0">
-        <span class="swatch" style="background:${AXIS_COLOR[axisAtGrain(r.behavior, compareGrain)] ?? "var(--neutral)"}"></span>
-        <span class="mono" style="font-size:10.5px;color:${vc};font-weight:500">${r.behavior}</span>
-        <span class="mono" style="font-size:9px;color:var(--mute-2)">${tagOf(r.player)} · t${r.turn}</span>
-        <span class="mono" style="font-size:8.5px;padding:1px 6px;border-radius:999px;background:${consensus ? "#e2f0e9" : "#f6eede"};color:${consensus ? "var(--coop)" : "var(--gold)"}">${consensus ? "consensus" : "lone"}</span>
-      </span>
-      ${active.map(a => { const c = r.byAnn[a.index];
-        return `<span class="mcell">${c != null ? `<span class="mmark" style="background:${annotatorColor(a.index)}">${c}</span>` : `<span class="mono" style="color:#d2ccbe">·</span>`}</span>`; }).join("")}
-    </div>`;
-  }).join("");
-  const grainToggle = `<div class="grainControls" style="margin:0 0 8px"><span>group by:</span>` +
-    ["behavior", "subfamily"].map(grain =>
-      `<button data-grain="${grain}" class="${compareGrain === grain ? "on" : ""}">${grain}</button>`).join("") + `</div>`;
-  container.innerHTML = grainToggle +
-    `<div class="matrix">${head}${body || '<div class="empty" style="padding:14px">No tags match the current filters.</div>'}</div>`;
-  container.querySelectorAll("button[data-grain]").forEach(button =>
-    button.onclick = () => { compareGrain = button.dataset.grain; renderCompare(); });
-  updateSubBar();
+  renderTimeline(); renderPanels();
 }

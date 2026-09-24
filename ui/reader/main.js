@@ -3,6 +3,7 @@ let lastFingerprint = null;
 async function refreshFromJournal() {
   const res = await fetch(POLL_URL, { cache: "no-store" }); if (!res.ok) return;
   const updated = await res.json();
+  GAME.pause_error = updated.pause_error;
   gameRunning = updated.running;
   renderGameControl();
   renderForkPanel();
@@ -17,6 +18,8 @@ async function refreshFromJournal() {
   GAME.notes.splice(0, GAME.notes.length, ...updated.notes);
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.commentators = updated.commentators ?? GAME.commentators;
+  if (updated.result && !GAME.result && humanPlayers.size && !researchVisibilityChosen)
+    state.filters.showCommentary = true;
   GAME.result = updated.result;
   GAME.cursors = updated.cursors;
   GAME.ancestry = updated.ancestry;

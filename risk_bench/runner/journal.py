@@ -8,21 +8,20 @@ from typing import Any, Final
 
 from risk_bench.chat.diplomacy import ChatMessage
 from risk_bench.game.actions import Action
-from risk_bench.game.engine import apply_action, setup_game
-from risk_bench.game.events import ArmiesPlaced, GameEvent, TurnStarted
+from risk_bench.game.engine import setup_game
+from risk_bench.game.events import GameEvent
 from risk_bench.game.ruleset import CURRENT_RULESET, LEGACY_RULESET, Ruleset
 from risk_bench.game.serialization import (
-    action_from_json,
     action_to_json,
     chat_message_from_json,
     chat_message_to_json,
-    event_from_json,
     event_to_json,
 )
 from risk_bench.game.state import GameState
 from risk_bench.game.types import PlayerId
-from risk_bench.players.rendering import narrate_event
+from risk_bench.players.rendering import GAME_RULES
 from risk_bench.runner.checkpoint import apply_changes, changes, decode, restore_engine
+from risk_bench.version import EXPERIMENT_VERSION, require_v3
 
 # v2 folded the separate occupy action into the attack that conquers; v3 games are played under the
 # current ruleset (minimum advance on capture, forced trade during attack), earlier ones under the legacy one
@@ -45,6 +44,8 @@ class JournalHeader:
 
     configuration: dict[str, Any] = field(default_factory=dict)
     ancestry: dict[str, Any] = field(default_factory=dict)
+    experiment_version: int = EXPERIMENT_VERSION
+    game_rules: str = GAME_RULES
 
 
 @dataclass
@@ -58,7 +59,6 @@ class RestoredGame:
     is_finished: bool
     checkpoint: dict[str, Any] | None = None
     records: list[dict[str, Any]] = field(default_factory=list)
-    recovery_limitations: tuple[str, ...] = ()
 
 
 class JournalWriter:
@@ -73,7 +73,9 @@ class JournalWriter:
         self.path = path
         self._pending: list[dict[str, Any]] | None = None
         self._last_checkpoint = None
+        self.evidence_context: dict[str, Any] = {}
         if append and path.exists():
+            require_v3(raw_journal(path)[0])
             raw_journal(path)  # Reject interior corruption before repairing a torn tail.
             # Remove only a torn final transaction before appending a new committed one.
             raw = path.read_bytes()
@@ -241,6 +243,8 @@ class JournalWriter:
         self._pending = None
 
     def _write_line(self, record: dict[str, Any]) -> None:
+        if record["type"] in {"thought", "message", "action", "events", "note"}:
+            record = {**self.evidence_context, **record}
         if self._pending is not None:
             self._pending.append(record)
             return
@@ -287,56 +291,13 @@ def raw_journal(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-class _RoundHistory:
-    """Recover round metadata from the recorded turn order, without changing the raw prefix."""
-
-    def __init__(self, player_ids: list[str]) -> None:
-        self.seats = {name: index for index, name in enumerate(player_ids)}
-        self.turn = 0
-        self.seat = -1
-        self.round = 0
-        self.previous_round = 0
-
-    def observe(self, turn: int, player: str) -> None:
-        if turn <= self.turn:
-            return
-        seat = self.seats[player]
-        self.previous_round = self.round
-        if self.turn == 0 or seat <= self.seat:
-            self.round += 1
-        self.turn, self.seat = turn, seat
-
-    def checkpoint(self, saved: dict) -> dict:
-        fields = saved["state"]["fields"]
-        if not self.seats:
-            self.seats = {name: index for index, (name, _) in enumerate(fields["players"]["$map"])}
-        self.observe(fields["turn_number"], fields["current_player"])
-        if "round_number" in fields:
-            self.round = fields["round_number"]
-            self.previous_round = fields["previous_round_number"]
-            return saved
-        # Copy only the changed branches: historical deltas and their prefix hashes stay intact.
-        return {
-            **saved,
-            "state": {
-                **saved["state"],
-                "fields": {**fields, "round_number": self.round, "previous_round_number": self.previous_round},
-            },
-        }
-
-
 def expand_records(records: list[dict]) -> list[dict]:
     result = []
-    rounds = _RoundHistory(list(records[0].get("player_specs", {})) if records else [])
     for record in records:
         if record["type"] != "transition":
-            if record["type"] == "events":
-                for event in record["events"]:
-                    if event.get("kind") == "turn_started":
-                        rounds.observe(event["turn_number"], event["player_id"])
             result.append(record)
             continue
-        saved = rounds.checkpoint(record["checkpoint"])
+        saved = record["checkpoint"]
         cursor = {"before": f"{record['id']}:before", "after": f"{record['id']}:after"}
         start = len(result)
         result.extend(
@@ -351,7 +312,10 @@ def expand_records(records: list[dict]) -> list[dict]:
 
 def read_journal(path: Path) -> list[dict[str, Any]]:
     """Expose the traditional journal records plus committed execution checkpoints."""
-    return expand_records(raw_journal(path))
+    records = raw_journal(path)
+    if records and records[0].get("type") == "header":
+        require_v3(records[0])
+    return expand_records(records)
 
 
 def select_prefix(records: list[dict], cursor: str | None) -> list[dict]:
@@ -394,8 +358,7 @@ def ruleset_for_schema_version(schema_version: int) -> Ruleset:
 def restore_game(path: Path, cursor: str | None = None) -> RestoredGame:
     """Restore the selected committed execution checkpoint without provider calls.
 
-    Legacy journals replay their recorded actions under the original ruleset;
-    missing legacy continuation data is reported explicitly.
+    Only v3 checkpoints and fresh header-only games are accepted.
 
     Args:
         path: The journal file to restore from.
@@ -406,7 +369,10 @@ def restore_game(path: Path, cursor: str | None = None) -> RestoredGame:
     Raises:
         ValueError: If the journal has no header line.
     """
-    records = expand_records(select_prefix(raw_journal(path), cursor))
+    raw = raw_journal(path)
+    if raw and raw[0].get("type") == "header":
+        require_v3(raw[0])
+    records = expand_records(select_prefix(raw, cursor))
     if not records or records[0].get("type") != "header":
         raise ValueError(f"{path} is not a game journal (missing header line).")
     header = _header_from_json(data=records[0])
@@ -423,56 +389,35 @@ def restore_game(path: Path, cursor: str | None = None) -> RestoredGame:
             checkpoint["progress"]["stage"] == "done",
             checkpoint,
             records,
-            tuple(checkpoint["progress"].get("legacy_assumptions", [])),
         )
 
     rng = random.Random(header.seed)
     ruleset = ruleset_for_schema_version(schema_version=header.schema_version)
     state = setup_game(player_ids=list(header.player_specs), rng=rng, ruleset=ruleset)
-    messages = []
-    is_finished = False
-    for record in records[1:]:
-        match record["type"]:
-            case "action":
-                action = action_from_json(record["action"])
-                state = apply_action(state=state, action=action, rng=rng).state
-            case "message":
-                messages.append(chat_message_from_json(record["message"]))
-            case "result":
-                is_finished = True
-
-    return RestoredGame(
-        header=header,
-        state=state,
-        rng=rng,
-        messages=messages,
-        is_finished=is_finished,
-        records=records,
-        recovery_limitations=(
-            "Reconstructed legacy scenario: operation position, pending responses and player RNG consumption "
-            "were not recorded; negotiation is assumed complete for the current turn.",
-        ),
-    )
+    if len(records) != 1:
+        raise ValueError("V3 gameplay requires execution checkpoints; incomplete state cannot be reconstructed.")
+    return RestoredGame(header, state, rng, [], False, records=records)
 
 
 def _header_from_json(data: dict[str, Any]) -> JournalHeader:
+    require_v3(data)
     return JournalHeader(
         schema_version=int(data["schema_version"]),
         seed=int(data["seed"]),
         player_specs={str(name): str(spec) for name, spec in data["player_specs"].items()},
         max_turns=int(data["max_turns"]),
         allow_private_messages=bool(data["allow_private_messages"]),
-        # journals written before multi-pass negotiation ran exactly one pass per turn
-        max_negotiation_rounds=int(data.get("max_negotiation_rounds", 1)),
-        # journals written before the commentator panel carried no roster line
-        commentators=[str(spec) for spec in data.get("commentators", [])],
+        max_negotiation_rounds=int(data["max_negotiation_rounds"]),
+        commentators=[str(spec) for spec in data["commentators"]],
         configuration=data.get("configuration", {}),
         ancestry=data.get("ancestry", {}),
+        experiment_version=data["experiment_version"],
+        game_rules=data.get("game_rules", GAME_RULES),
     )
 
 
 def restored_context(game: RestoredGame) -> dict:
-    """Canonical player knowledge, including the best recorded legacy reconstruction."""
+    """Restore canonical player knowledge, or empty context before initial setup."""
     if game.checkpoint is not None:
         return decode(game.checkpoint["context"])
     names = list(game.header.player_specs)
@@ -483,33 +428,4 @@ def restored_context(game: RestoredGame) -> dict:
         "_turn_log": [],
         "_previous_commentary": [[] for _ in game.header.commentators],
     }
-    setup = True
-    for record in game.records:
-        kind = record["type"]
-        if kind == "note":
-            context["_notes"][record["player"]] = record["text"]
-        elif kind == "events":
-            for data in record["events"]:
-                event = event_from_json(data)
-                if isinstance(event, TurnStarted):
-                    setup = False
-                    context["_last_turn_events"] = context["_current_turn_events"]
-                    context["_current_turn_events"] = {name: [] for name in names}
-                    context["_turn_log"] = []
-                context["_turn_log"].append(narrate_event(event))
-                for name in names:
-                    if not (setup and isinstance(event, ArmiesPlaced) and event.player_id != name):
-                        context["_current_turn_events"][name].append(event)
-        elif kind == "thought":
-            context["_turn_log"].append(f"{record['player']} (thinks): {record['text']}")
-        elif kind == "message":
-            message = record["message"]
-            context["_turn_log"].append(f"{message['sender']}: {message['text']}")
-        elif kind == "commentary":
-            index = record.get("commentator_index", 0)
-            if index < len(context["_previous_commentary"]):
-                context["_previous_commentary"][index] = (context["_previous_commentary"][index] + [record["text"]])[
-                    -5:
-                ]
-            context["_turn_log"] = []
     return context

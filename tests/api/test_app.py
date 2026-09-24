@@ -6,9 +6,8 @@ from fastapi.testclient import TestClient
 
 from risk_bench.api.app import create_app
 from risk_bench.api.processes import GameProcessManager
-from risk_bench.runner.evaluation import Evaluation, EvaluatorTag
-from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path_for_journal
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
+from tests.v3_fixtures import write_evaluation
 
 
 def client_for(tmp_path: Path) -> TestClient:
@@ -121,7 +120,10 @@ def test_the_model_catalog_offers_every_model_with_its_prices(tmp_path: Path):
     anthropic_models = catalog["models_by_provider"]["anthropic"]
     # the setup form offers a provider's first entry by default, so the flagship must lead
     assert anthropic_models[0]["id"] == "claude-fable-5"
-    assert {model["id"] for model in anthropic_models} >= {"claude-opus-5", "claude-haiku-4-5"}
+    assert {model["id"] for model in anthropic_models} >= {"claude-opus-5-5", "claude-haiku-4-5"}
+    ids = {model["id"] for models in catalog["models_by_provider"].values() for model in models}
+    assert {"gpt-6-sol", "gpt-6-luna"} <= ids
+    assert not {"claude-opus-5", "gpt-5.6-sol", "gpt-5.6-luna"} & ids
     haiku = next(model for model in anthropic_models if model["id"] == "claude-haiku-4-5")
     assert (haiku["input_usd_per_million"], haiku["output_usd_per_million"]) == (1.00, 5.00)
     assert catalog["baseline"] == "random"
@@ -137,6 +139,22 @@ def test_launch_requests_are_validated(tmp_path: Path):
     bad_provider = client.post("/api/games", json={"players": ["random", "random", "frontier:hi"]})
     assert bad_provider.status_code == 400
     assert "Unknown provider" in bad_provider.json()["detail"]
+
+
+def test_launch_starts_the_selected_live_evaluator(tmp_path: Path, monkeypatch):
+    from risk_bench.api import app as api_app
+
+    started = []
+    monkeypatch.setattr(api_app, "_validate_launch_request", lambda request: None)
+    monkeypatch.setattr(api_app, "_start_game_worker", lambda **kwargs: None)
+    monkeypatch.setattr(api_app, "_wait_for_journal_header", lambda **kwargs: None)
+    monkeypatch.setattr(GameProcessManager, "evaluate_game", lambda self, **kwargs: started.append(kwargs))
+    response = client_for(tmp_path).post("/api/games", json={
+        "players": ["random"] * 3, "evaluators": ["openai:gpt-6-luna:medium"]
+    })
+    assert response.status_code == 201
+    assert started[0]["evaluator_specs"] == ["openai:gpt-6-luna:medium"]
+    assert started[0]["live"] is True
 
 
 def unfinished_journal(games_directory: Path, name: str) -> Path:
@@ -354,42 +372,25 @@ def test_launching_a_game_spawns_a_process_that_plays_it_to_completion(tmp_path:
 
 def client_with_evaluated_game(tmp_path: Path) -> tuple[TestClient, str]:
     client, game_id = client_with_finished_game(tmp_path=tmp_path)
-    evaluation = Evaluation(
-        evaluator_spec="anthropic:claude-opus-5",
-        tags=(
-            EvaluatorTag(
-                player=PLAYER_NAMES[0],
-                behavior="deception",
-                turn=1,
-                evidence=(),
-                confidence=2,
-                note="a panel tag to verify",
-            ),
-        ),
-        syntheses=(),
-    )
     journal_path = tmp_path / "games" / game_id / "game.jsonl"
-    writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
-    writer.write_header(panel=["anthropic:claude-opus-5"], record_count=1, span_count=1)
-    writer.write_evaluation(evaluator_index=0, evaluation=evaluation)
-    writer.close()
+    write_evaluation(journal_path, units=[_unit("e1")])
     return client, game_id
 
 
 def test_verifying_a_tag_round_trips_through_the_api(tmp_path: Path):
     client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
-    tag_key = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "deception", "turn": 1}
+    tag_key = {"evaluator_index": 0, "unit_type": "episode", "unit_id": "e1"}
 
     set_response = client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": True})
     assert set_response.status_code == 204
-    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["episodes"]
     assert tag["verified"] is True
 
     # verifying again is idempotent, and clearing brings the tag back to unverified
     assert client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": True}).status_code == 204
     clear = client.put(f"/api/games/{game_id}/verifications", json={**tag_key, "verified": False})
     assert clear.status_code == 204
-    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    (tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["episodes"]
     assert tag["verified"] is False
 
     # clearing an already-clear tag stays a no-op, not an error
@@ -399,33 +400,27 @@ def test_verifying_a_tag_round_trips_through_the_api(tmp_path: Path):
 def test_verifying_a_tag_the_evaluation_does_not_hold_is_not_found(tmp_path: Path):
     client, game_id = client_with_evaluated_game(tmp_path=tmp_path)
 
-    wrong_turn = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "deception", "turn": 99}
+    wrong_turn = {"evaluator_index": 0, "unit_type": "episode", "unit_id": "missing"}
     response = client.put(f"/api/games/{game_id}/verifications", json={**wrong_turn, "verified": True})
 
     assert response.status_code == 404
 
 
+def _unit(unit_id):
+    return {
+        "type": "eval_episode",
+        "id": unit_id,
+        "actor": PLAYER_NAMES[0],
+        "status": "open",
+        "valid": True,
+        "codes": ["commitment_made"],
+        "action_provenance": "unknown",
+        "undertaking": {"span": 0, "quote": None},
+    }
+
+
 def _write_raw_eval(path: Path, run_id: str, panel: list[str], behavior: str) -> None:
-    header = {
-        "type": "eval_header",
-        "schema_version": 2,
-        "run_id": run_id,
-        "panel": panel,
-        "coverage": {"record_count": 1, "span_count": 1},
-        "created_at": "2026-01-01T00:00:00+00:00",
-    }
-    tag = {
-        "type": "eval_tag",
-        "evaluator_index": 0,
-        "evaluator": panel[0],
-        "player": PLAYER_NAMES[0],
-        "behavior": behavior,
-        "turn": 1,
-        "evidence": [],
-        "confidence": 2,
-        "note": "",
-    }
-    path.write_text(json.dumps(header) + "\n" + json.dumps(tag) + "\n", encoding="utf-8")
+    write_evaluation(path.parent / "game.jsonl", eval_path=path, run_id=run_id, panel=panel, units=[_unit(behavior)])
 
 
 def client_with_two_evaluation_versions(tmp_path: Path) -> tuple[TestClient, str]:
@@ -453,8 +448,8 @@ def test_the_evaluation_view_model_lists_versions_and_defaults_to_current(tmp_pa
     current = client.get(f"/api/games/{game_id}/evaluation").json()
     assert [version["run_id"] for version in current["versions"]] == ["20260102-000000", "20260101-000000"]
     assert current["version"] == "20260102-000000" and current["versions"][0]["is_current"] is True
-    (current_tag,) = current["members"][0]["tags"]
-    assert current_tag["behavior"] == "deception"
+    (current_tag,) = current["members"][0]["episodes"]
+    assert current_tag["id"] == "deception"
 
 
 def test_an_older_version_can_be_selected_by_run_id(tmp_path: Path):
@@ -462,13 +457,13 @@ def test_an_older_version_can_be_selected_by_run_id(tmp_path: Path):
 
     archived = client.get(f"/api/games/{game_id}/evaluation?version=20260101-000000").json()
     assert archived["version"] == "20260101-000000"
-    (archived_tag,) = archived["members"][0]["tags"]
-    assert archived_tag["behavior"] == "betrayal"
+    (archived_tag,) = archived["members"][0]["episodes"]
+    assert archived_tag["id"] == "betrayal"
 
 
 def test_verifications_are_kept_per_version(tmp_path: Path):
     client, game_id = client_with_two_evaluation_versions(tmp_path=tmp_path)
-    archived_key = {"evaluator_index": 0, "player": PLAYER_NAMES[0], "behavior": "betrayal", "turn": 1}
+    archived_key = {"evaluator_index": 0, "unit_type": "episode", "unit_id": "betrayal"}
 
     # verify a tag that only the archived version holds, scoped to that version
     set_response = client.put(
@@ -478,10 +473,10 @@ def test_verifications_are_kept_per_version(tmp_path: Path):
 
     # it shows verified only when viewing that version; the current run is untouched
     (archived_tag,) = client.get(f"/api/games/{game_id}/evaluation?version=20260101-000000").json()["members"][0][
-        "tags"
+        "episodes"
     ]
     assert archived_tag["verified"] is True
-    (current_tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["tags"]
+    (current_tag,) = client.get(f"/api/games/{game_id}/evaluation").json()["members"][0]["episodes"]
     assert current_tag["verified"] is False
 
     # the archived tag does not exist in the current run, so verifying it there is a 404

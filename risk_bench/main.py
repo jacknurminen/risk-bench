@@ -106,7 +106,7 @@ def tournament(
     players_per_game: Annotated[int, typer.Option(help="Players seated per game (3-6).")] = 3,
     seed: Annotated[int, typer.Option(help="Base seed; per-game seeds are derived from it.")] = 0,
     report_path: Annotated[Path, typer.Option(help="Where to write the JSON report.")] = Path(
-        "data/v2/tournament.json"
+        "data/v3/tournament.json"
     ),
     verbose: Annotated[bool, typer.Option(help="Print events and chat as they happen.")] = False,
 ) -> None:
@@ -198,13 +198,13 @@ def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
     total_citations, broken_citations = _citation_integrity(records=records)
     console.print(f"\nPanel: [bold]{', '.join(header.panel)}[/bold]")
     console.print(
-        f"Tags: {counts['eval_tag']}  Syntheses: {counts['eval_synthesis']}  "
+        f"Episodes: {counts['eval_episode']}  Claims: {counts['eval_claim']}  "
         f"(covers {header.span_count} spans across {header.record_count} records)"
     )
     console.print(f"Broken citations: {broken_citations}/{total_citations}")
 
 
-_EVAL_RECORD_KINDS = ("eval_tag", "eval_synthesis")
+_EVAL_RECORD_KINDS = ("eval_episode", "eval_claim", "eval_agreement")
 
 
 def _citation_integrity(records: list[dict[str, Any]]) -> tuple[int, int]:
@@ -217,14 +217,9 @@ def _citation_integrity(records: list[dict[str, Any]]) -> tuple[int, int]:
 
 
 def _record_evidence(record: dict[str, Any]) -> list[dict[str, Any]]:
-    match record.get("type"):
-        case "eval_tag":
-            return list(record.get("evidence", []))
-        case "eval_synthesis":
-            from_profile = [item for dimension in record.get("profile", []) for item in dimension.get("evidence", [])]
-            return from_profile + list(record.get("key_episodes", []))
-        case _:
-            return []
+    from risk_bench.runner.codebook import citations
+
+    return list(citations(record))
 
 
 def _print_standings(report: TournamentReport) -> None:

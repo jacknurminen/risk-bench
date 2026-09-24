@@ -1,28 +1,25 @@
 """Round boundaries survive old checkpoints, historical forks and note-taking pauses."""
 
-import copy
 import json
-
-import pytest
 
 from risk_bench.runner import checkpoint
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import (
     JournalHeader,
     JournalWriter,
-    expand_records,
     prefix_hash,
     raw_journal,
+    read_journal,
     restore_game,
     select_prefix,
 )
+from risk_bench.runner.trace_index import build_trace_index
 from risk_bench.viewer.prompts import preview_next_prompts
 from risk_bench.viewer.snapshots import build_view_model
 from tests.runner.test_continuation import NAMES, players, runner
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_round_boundary_restores_identical_requests_and_supports_forks(tmp_path, monkeypatch, legacy):
+def test_round_boundary_restores_identical_requests_and_supports_forks(tmp_path, monkeypatch):
     monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
     source = tmp_path / "parent" / "game.jsonl"
     writer = JournalWriter(source, False)
@@ -31,22 +28,13 @@ def test_round_boundary_restores_identical_requests_and_supports_forks(tmp_path,
     expected = runner(original, writer, turns=4).run()
     writer.close()
     records = raw_journal(source)
-    if legacy:
-        # Pre-round schema-4 checkpoints, including deltas, must remain resumable.
-        writer = JournalWriter(source, False)
-        for record in records:
-            old = copy.deepcopy(record)
-            if old["type"] == "transition":
-                old["checkpoint"]["state"]["fields"].pop("round_number")
-                old["checkpoint"]["state"]["fields"].pop("previous_round_number")
-            writer._write_line(old)
-        writer.close()
-        assert any("checkpoint_delta" in json.loads(line) for line in source.read_text().splitlines())
     original_bytes = source.read_bytes()
     source_hash = prefix_hash(raw_journal(source))
     final = restore_game(source)
     assert final.state.round_number == 2
     model = build_view_model(source)
+    rounds = {step["turn"]: step["round"] for step in model["steps"]}
+    assert all(span.round == rounds[span.turn] for span in build_trace_index(read_journal(source)))
     assert {step["turn"]: step["round"] for step in model["steps"]} == {0: 0, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2}
 
     boundary = next(
@@ -90,26 +78,3 @@ def test_round_boundary_restores_identical_requests_and_supports_forks(tmp_path,
     assert restore_game(paused).state.round_number == final.state.round_number
     assert prefix_hash(raw_journal(source)) == source_hash
     assert source.read_bytes() == original_bytes
-
-
-def test_old_checkpoint_rounds_skip_eliminated_seats_without_dividing_turn_count():
-    # Alice is eliminated during Bob's first turn. Rounds subsequently begin at Bob's seat.
-    records: list[dict] = [{"type": "header", "player_specs": dict.fromkeys(NAMES, "random")}]
-    for sequence, (turn, actor) in enumerate(
-        [(0, "alice"), (1, "alice"), (2, "bob"), (3, "carla"), (4, "bob"), (5, "carla"), (6, "bob")]
-    ):
-        records.append(
-            {
-                "type": "transition",
-                "id": sequence,
-                "stage": "action",
-                "records": [],
-                "checkpoint": {
-                    "state": {"fields": {"turn_number": turn, "current_player": actor}},
-                },
-            }
-        )
-    upgraded = [r["checkpoint"]["state"]["fields"] for r in expand_records(records) if r["type"] == "checkpoint"]
-    assert [state["round_number"] for state in upgraded] == [0, 1, 1, 1, 2, 2, 3]
-    assert [state["previous_round_number"] for state in upgraded] == [0, 0, 1, 1, 1, 2, 2]
-    assert all("round_number" not in r["checkpoint"]["state"]["fields"] for r in records[1:])

@@ -8,18 +8,17 @@ companions), and older runs are archived beside it under a run-id infix (``game.
 before — nothing moves until a re-run happens — and a run's tags, evaluator trace, analysis, and
 human verifications are versioned together.
 
-A run id is the run's per-second timestamp (sortable, legible); it is written into the eval header,
-and derived from ``created_at`` for pre-versioning runs that carry none.
+A run id includes the timestamp and microseconds. It is stored in the evaluation header;
+archive collisions receive a numeric suffix without changing their contents.
 """
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from risk_bench.runner.evaluation_store import EvaluationHeader, evaluation_header, read_evaluation
 
-_RUN_ID_PATTERN: re.Pattern[str] = re.compile(r"^\d{8}-\d{6}(?:-\d+)?$")
+_RUN_ID_PATTERN: re.Pattern[str] = re.compile(r"^\d{8}-\d{6}(?:-\d+)*$")
 
 
 @dataclass(frozen=True)
@@ -174,11 +173,4 @@ def _version(
 
 
 def _run_id_of(header: EvaluationHeader | None) -> str:
-    if header is None:
-        return "unknown"
-    if header.run_id:
-        return header.run_id
-    try:  # pre-versioning runs carry no run id, so derive the same sortable id from the timestamp
-        return datetime.fromisoformat(header.created_at).strftime("%Y%m%d-%H%M%S")
-    except ValueError:
-        return "unknown"
+    return header.run_id if header else "unknown"

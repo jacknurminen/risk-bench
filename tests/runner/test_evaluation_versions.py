@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from risk_bench.runner.evaluation_versions import archive_current, list_versions, version_for
 
 
@@ -8,7 +10,7 @@ def _write_eval(path: Path, run_id: str | None, panel: list[str]) -> None:
     # a raw sidecar so the test controls the run id deterministically (the writer stamps its own)
     header = {
         "type": "eval_header",
-        "schema_version": 2,
+        "schema_version": 3,
         "panel": panel,
         "coverage": {"record_count": 1, "span_count": 1},
         "created_at": "2026-01-01T00:00:00+00:00",
@@ -44,8 +46,8 @@ def test_run_id_is_derived_from_created_at_when_absent(tmp_path: Path):
         path=tmp_path / "game.eval.jsonl", run_id=None, panel=["anthropic:claude-opus-5"]
     )  # pre-versioning sidecar
 
-    (version,) = list_versions(journal_path=journal_path)
-    assert version.run_id == "20260101-000000"  # from the created_at timestamp
+    with pytest.raises(KeyError):
+        list_versions(journal_path=journal_path)
 
 
 def test_archiving_frees_the_flat_paths_and_a_re_run_adds_a_second_version(tmp_path: Path):
@@ -79,3 +81,14 @@ def test_archiving_frees_the_flat_paths_and_a_re_run_adds_a_second_version(tmp_p
 def test_archiving_with_no_evaluation_is_a_no_op(tmp_path: Path):
     assert archive_current(journal_path=tmp_path / "game.jsonl") is None
     assert list_versions(journal_path=tmp_path / "game.jsonl") == []
+
+
+def test_archived_microsecond_collisions_remain_addressable(tmp_path):
+    journal = tmp_path / "game.jsonl"
+    run_id = "20260101-000000-123456"
+    for _ in range(2):
+        _write_eval(tmp_path / "game.eval.jsonl", run_id, ["test:coder"])
+        archive_current(journal)
+    versions = list_versions(journal)
+    assert {v.run_id for v in versions} == {run_id, run_id + "-2"}
+    assert version_for(journal, run_id + "-2") is not None

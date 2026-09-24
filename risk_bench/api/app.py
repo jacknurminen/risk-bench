@@ -29,8 +29,8 @@ from risk_bench.api.schemas import (
     NewGameRequest,
     NewGameResponse,
     PlayerContextRequest,
-    TagVerificationBody,
     TournamentSummary,
+    UnitVerificationBody,
 )
 from risk_bench.config import load_settings
 from risk_bench.game.engine import IllegalActionError
@@ -44,6 +44,7 @@ from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
 from risk_bench.runner.verification_store import delete_verification, write_verification
+from risk_bench.version import require_v3
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
 from risk_bench.viewer.prompts import preview_next_prompts
@@ -191,6 +192,8 @@ def create_app(games_directory: Path) -> FastAPI:
         with journal_control_lock(journal_path):
             if not manager.pause_game(game_id=game_id):
                 raise HTTPException(status_code=409, detail="The game is not running.")
+            if manager.evaluating_live(game_id):
+                manager.pause_evaluation(game_id)
 
     @app.post("/api/games/{game_id}/resume", status_code=204)
     def resume_game(game_id: str) -> None:
@@ -255,7 +258,8 @@ def create_app(games_directory: Path) -> FastAPI:
     @app.post("/api/games/{game_id}/evaluate", status_code=202)
     def evaluate_game(game_id: str, request: EvaluateRequest) -> dict[str, bool]:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        _start_evaluation(manager=manager, game_id=game_id, journal_path=journal_path, request=request)
+        with journal_control_lock(journal_path):
+            _start_evaluation(manager=manager, game_id=game_id, journal_path=journal_path, request=request)
         return {"running": True}
 
     @app.get("/api/games/{game_id}/evaluation")
@@ -277,49 +281,50 @@ def create_app(games_directory: Path) -> FastAPI:
         resolved = version_for(journal_path=journal_path, run_id=version)
         if resolved is None:
             raise HTTPException(status_code=404, detail="No evaluation to analyze.")
-        if not resolved.analysis_path.is_file():
-            # the analysis is derived and cheap (no API calls), so a version that predates the
-            # artifact — or lost it — gets one computed and persisted on first request
-            try:
-                analysis.write_analysis(
-                    journal_path=journal_path, eval_path=resolved.eval_path, analysis_path=resolved.analysis_path
-                )
-            except ValueError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from None
+        # Recheck the bound source on every request; a cached report must not hide later edits.
+        try:
+            analysis.write_analysis(
+                journal_path=journal_path, eval_path=resolved.eval_path, analysis_path=resolved.analysis_path
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         return json.loads(resolved.analysis_path.read_text(encoding="utf-8"))
 
     @app.put("/api/games/{game_id}/verifications", status_code=204)
-    def set_tag_verification(game_id: str, body: TagVerificationBody) -> None:
+    def set_unit_verification(game_id: str, body: UnitVerificationBody) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        # verifications are per version: resolve the run the verdict is about (the one being viewed)
-        evaluation = version_for(journal_path=journal_path, run_id=body.version)
-        if evaluation is None:
-            raise HTTPException(status_code=404, detail="No such evaluation version.")
-        path = evaluation.verifications_path
-        if not body.verified:
-            # clearing is idempotent: un-verifying an unverified tag is a no-op, not an error
-            delete_verification(
+        with journal_control_lock(journal_path):
+            # verifications are per version: resolve the run the verdict is about (the one being viewed)
+            evaluation = version_for(journal_path=journal_path, run_id=body.version)
+            if evaluation is None:
+                raise HTTPException(status_code=404, detail="No such evaluation version.")
+            if evaluation.is_current and manager.is_evaluating(game_id=game_id):
+                raise HTTPException(
+                    status_code=409, detail="Evaluation is running; review the completed run afterward."
+                )
+            path = evaluation.verifications_path
+            if not body.verified:
+                # clearing is idempotent: un-verifying an unverified tag is a no-op, not an error
+                delete_verification(
+                    path=path,
+                    evaluator_index=body.evaluator_index,
+                    unit_type=body.unit_type,
+                    unit_id=body.unit_id,
+                )
+                return
+            # a verification must point at a tag this version's evaluation actually holds
+            if not _evaluation_has_unit(evaluation=evaluation, body=body):
+                raise HTTPException(status_code=404, detail="No such research unit in this evaluation.")
+            write_verification(
                 path=path,
-                evaluator_index=body.evaluator_index,
-                player=body.player,
-                behavior=body.behavior,
-                turn=body.turn,
+                verification={
+                    "type": "verification",
+                    "evaluator_index": body.evaluator_index,
+                    "unit_type": body.unit_type,
+                    "unit_id": body.unit_id,
+                    "verified_at": datetime.now(tz=UTC).isoformat(),
+                },
             )
-            return
-        # a verification must point at a tag this version's evaluation actually holds
-        if not _evaluation_has_tag(evaluation=evaluation, body=body):
-            raise HTTPException(status_code=404, detail="No such tag in the current evaluation.")
-        write_verification(
-            path=path,
-            verification={
-                "type": "verification",
-                "evaluator_index": body.evaluator_index,
-                "player": body.player,
-                "behavior": body.behavior,
-                "turn": body.turn,
-                "verified_at": datetime.now(tz=UTC).isoformat(),
-            },
-        )
 
     @app.get("/api/games/{game_id}/trace")
     def trace_call_list(game_id: str, source: str = "game", version: str | None = None) -> dict[str, Any]:
@@ -368,6 +373,11 @@ def _journal_path(games_directory: Path, game_id: str) -> Path:
     for game_directory in candidate_directories:
         journal_path = game_directory / "game.jsonl"
         if journal_path.is_file():
+            try:
+                with journal_path.open(encoding="utf-8") as source:
+                    require_v3(json.loads(source.readline()))
+            except (ValueError, KeyError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
             return journal_path
     raise HTTPException(status_code=404, detail="No such game.")
 
@@ -411,10 +421,19 @@ def _load_evaluation_view_model(
             status_code=409, detail=f"The journal does not replay cleanly or is not viewable yet: {error}"
         ) from None
     view_model["running"] = manager.is_evaluating(game_id=game_id)
+    if run_id is None:
+        view_model["live_evaluation"] = view_model["live_evaluation"] or manager.evaluating_live(game_id)
+    error_path = path.with_suffix(".eval.error.json")
+    view_model["error"] = None
+    if run_id is None:
+        try:
+            view_model["error"] = json.loads(error_path.read_text(encoding="utf-8")).get("detail")
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
     view_model["progress"] = _evaluation_progress(
         journal_path=path,
         panel=manager.evaluating_panel(game_id=game_id),
-        turn_count=len({span["turn"] for span in view_model["spans"]}),
+        turn_count=len({span["turn"] for span in view_model["spans"] if span["layer"] == "message"}),
         usage_cache=usage_cache,
     )
     return view_model
@@ -544,17 +563,19 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
         journal_path=journal_path,
         evaluator_specs=request.evaluators,
         log_path=journal_path.parent / "evaluation.log",
+        live=request.live,
+    )
+    (journal_path.parent / "live-evaluators.json").write_text(
+        json.dumps({"evaluators": request.evaluators if request.live else []}), encoding="utf-8"
     )
 
 
-def _evaluation_has_tag(evaluation: EvaluationVersion, body: TagVerificationBody) -> bool:
+def _evaluation_has_unit(evaluation: EvaluationVersion, body: UnitVerificationBody) -> bool:
     eval_records = read_evaluation(path=evaluation.eval_path)
     return any(
-        record.get("type") == "eval_tag"
+        record.get("type") == "eval_" + body.unit_type
         and record.get("evaluator_index") == body.evaluator_index
-        and record.get("player") == body.player
-        and record.get("behavior") == body.behavior
-        and record.get("turn") == body.turn
+        and record.get("id") == body.unit_id
         for record in eval_records
     )
 
@@ -609,6 +630,11 @@ def _summarize_game_directory(
     journal_path = game_directory / "game.jsonl"
     if not journal_path.is_file():
         return None
+    with journal_path.open(encoding="utf-8") as source:
+        try:
+            require_v3(json.loads(source.readline()))
+        except (ValueError, KeyError):
+            return None
     return _summarize_journal(
         path=journal_path,
         game_id=game_directory.name,
@@ -681,6 +707,7 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
         game_directory = games_directory / base_id
         _start_game_worker(game_directory=game_directory, manager=manager, request=request, seed=request.seed)
         _wait_for_journal_header(game_directory=game_directory, manager=manager)
+        _start_launched_live_evaluation(game_directory, manager, request.evaluators)
         return NewGameResponse(id=base_id, tournament=False)
 
     # a tournament: the same setup replicated across workers on consecutive seeds,
@@ -700,8 +727,22 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
             game_directory=tournament_directory / game_id, manager=manager, request=request, seed=request.seed + index
         )
     for game_id in game_ids:
-        _wait_for_journal_header(game_directory=tournament_directory / game_id, manager=manager)
+        game_directory = tournament_directory / game_id
+        _wait_for_journal_header(game_directory=game_directory, manager=manager)
+        _start_launched_live_evaluation(game_directory, manager, request.evaluators)
     return NewGameResponse(id=base_id, tournament=True)
+
+
+def _start_launched_live_evaluation(game_directory: Path, manager: GameProcessManager, evaluators: list[str]) -> None:
+    if evaluators and not manager.is_evaluating(game_directory.name):
+        game_directory.mkdir(parents=True, exist_ok=True)
+        (game_directory / "live-evaluators.json").write_text(
+            json.dumps({"evaluators": evaluators}), encoding="utf-8"
+        )
+        manager.evaluate_game(
+            game_id=game_directory.name, journal_path=game_directory / "game.jsonl",
+            evaluator_specs=evaluators, log_path=game_directory / "evaluation.log", live=True,
+        )
 
 
 def _start_game_worker(game_directory: Path, manager: GameProcessManager, request: NewGameRequest, seed: int) -> None:
@@ -743,6 +784,12 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
         log_path=game_directory / "worker.log",
     )
     _confirm_worker_started(game_directory=game_directory, manager=manager)
+    live_config = game_directory / "live-evaluators.json"
+    launch_path = game_directory / "launch.json"
+    source = live_config if live_config.is_file() else launch_path
+    if source.is_file():
+        evaluators = json.loads(source.read_text(encoding="utf-8")).get("evaluators", [])
+        _start_launched_live_evaluation(game_directory, manager, evaluators)
 
 
 def _confirm_worker_started(game_directory: Path, manager: GameProcessManager) -> None:
@@ -790,6 +837,7 @@ def _validate_launch_request(request: NewGameRequest) -> None:
                 specs.build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
         # mirror player validation: build every panel member up front so a bad spec fails fast
         specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)
+        specs.build_evaluators(evaluator_specs=request.evaluators, settings=settings, trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

@@ -7,6 +7,7 @@
    (e.g. the standalone export file) they gracefully fall back to system fonts. */
 
 const EXPORTABLE = [
+  ".researchCard", ".researchTable",
   ".pill", ".traceline", ".tpills", ".tcard",             // timeline
   ".pcard", ".synthCard", "#synthSection", ".matrix",     // rail · synthesis · compare
   ".chart", "#tokenChart", "#statsTable",                 // stats

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +54,7 @@ class NewGameRequest(BaseModel):
     players: list[str]
     seed: int = 0
     commentators: list[str] = Field(default_factory=list)
+    evaluators: list[str] = Field(default_factory=list)
     max_turns: int | None = None
     parallel_games: int = Field(default=1, ge=1, le=20)
     # extra information the players start the game knowing: one line every player is given, plus
@@ -69,24 +71,18 @@ class NewGameResponse(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
-    """A request to run the whole-game evaluator panel over a stored game."""
+    """A panel run, optionally following newly completed turns during play."""
 
     evaluators: list[str] = Field(default_factory=list)
+    live: bool = False
 
 
-class TagVerificationBody(BaseModel):
-    """A human verdict on one panel tag: set or clear its human-verified mark.
-
-    The first four fields identify the tag — the same ``(evaluator_index, player, behavior,
-    turn)`` key the agreement aggregate groups on — and ``verified`` is the state to set.
-    ``version`` is the evaluation run whose verifications the verdict belongs to (None = current),
-    since verifications are kept per version.
-    """
+class UnitVerificationBody(BaseModel):
+    """A human review of one research unit within a selected evaluation run."""
 
     evaluator_index: int
-    player: str
-    behavior: str
-    turn: int
+    unit_type: Literal["agreement", "episode", "claim"]
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     verified: bool
     version: str | None = None
 

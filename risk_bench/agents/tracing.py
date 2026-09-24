@@ -145,13 +145,14 @@ class TraceWriter:
         self.path = path
         self.turn = 0
         self.kind = "unknown"
+        self.decision_id: str | None = None
         self._sequence = _existing_record_count(path=path) if append and path.exists() else 0
         self._file = path.open("a" if append else "w", encoding="utf-8")
         # the commentator panel traces its members concurrently, so the sequence
         # counter and the append must be serialised across threads
         self._lock = threading.Lock()
 
-    def set_context(self, turn: int, kind: str) -> None:
+    def set_context(self, turn: int, kind: str, decision_id: str | None = None) -> None:
         """Set the game context stamped onto subsequent records.
 
         Args:
@@ -160,6 +161,7 @@ class TraceWriter:
         """
         self.turn = turn
         self.kind = kind
+        self.decision_id = decision_id
 
     def write_call(
         self,
@@ -191,6 +193,7 @@ class TraceWriter:
             "time": datetime.now(tz=UTC).isoformat(),
             "turn": turn,
             "kind": kind,
+            "decision_id": self.decision_id,
             "caller": caller,
             "model": model,
             "messages": [_message_to_json(message=message) for message in messages],

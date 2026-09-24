@@ -35,7 +35,7 @@ Start the web app:
 uv run python -m risk_bench.main serve --port 8420
 ```
 
-Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/v2/games/`.
+Open [http://localhost:8420](http://localhost:8420). V3 games are saved under `data/v3/games/`.
 
 ## Versioned datasets
 
@@ -54,13 +54,14 @@ uv sync
 OUTPUT_DIRECTORY=../risk-bench/data/v2 uv run python -m risk_bench.main serve --port 8421
 ```
 
-V3 development starts from this release and will use fresh games in `data/v3/`.
-Existing v2 games belong to the v2 application; they will not be resumed or forked
-in v3. The revised codebook and analysis interface are planned v3 work.
+V3 uses fresh games in `data/v3/`. Existing v2 games belong to the v2 application;
+v3 rejects them even if copied into the new folder. It does not migrate, resume,
+or fork v2 games. The revised commitment codebook is instrument version 2 within
+experiment version 3; these numbers describe different things.
 
 ## Example games
 
-These completed games are included in the repository and appear on the web app's home page.
+These completed v2 games are included in the repository. Open them with the v2 application above.
 Browsing their replays and saved evaluations requires no API keys.
 
 | Game | Players | Saved evaluation |
@@ -97,8 +98,7 @@ A **turn** belongs to one player. A **round** is one pass through the fixed seat
 skipping eliminated players; round 1 begins after setup. The reader and player prompts show
 both, for example **Round 3 · Turn 8**. Turn numbers remain continuous and turn limits still
 count individual turns. A round advances when the seating order wraps, even if its original
-first player has been eliminated. Round tracking is preserved by resume and forks; older
-journals reconstruct it from their recorded turn order.
+first player has been eliminated. Round tracking is preserved by execution checkpoints during resume and forks.
 
 Before each turn, a **negotiation session** opens the group chat so every surviving agent can
 negotiate before play continues. Prompts encourage explicit commitment deadlines such as
@@ -106,16 +106,27 @@ negotiate before play continues. Prompts encourage explicit commitment deadlines
 unenforced. The game ends when an agent completes its secret mission (or is the last one
 standing), and the result feeds the tournament's Elo rankings.
 
-Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. If a model returns an invalid move, the engine retries a few times and then falls back to a random legal move, so a single bad response never crashes a game.
+Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. Invalid moves receive a bounded correction exchange. Exhaustion pauses the game with that exchange preserved. Any provider error pauses immediately, including negotiation and note-writing. Resume retries the pending operation with its player context intact. No random move or implicit silence is substituted; random players remain an explicitly selected baseline.
 
-## Behavioural commentary
+## Commitment analysis (v3)
 
-Beyond the single Elo score, each game can be watched by one or more **commentators** — LLMs that tag what players are doing turn by turn against a fixed vocabulary. Tagging is split across two independent axes so a model can be profiled as, say, *competent but treacherous* rather than collapsed onto one line:
+The [revised codebook](docs/codebook-v2.md) defines seven codes over linked agreements,
+actor-specific commitment episodes, revisions, and message claims. Each independent coder
+screens every delivered message, then adjudicates the observed history. Episodes retain
+terms, assessment windows, outcomes, uncertainty and exact source citations. Claims separate
+stated-plan evidence from recorded facts; deception requires contradiction and explicit intent
+recorded before or in the same decision as the message. A later note in the same turn is insufficient.
 
-- **Skill** — strong versus weak play (good odds, continent prioritisation, blunders, …).
-- **Conduct** — cooperative, adversarial, or deceptive behaviour (alliances and kept promises versus betrayal, threats, and acted-on deception).
+The reader offers Timeline, Commitments & claims, and Compare views. Click citations for the
+source trace and board position, open an entire assessment window, and mark individual research
+units reviewed. Evaluation reruns retain their own reviews, API traces, and analysis artifacts.
 
-A third class of tags captures **affect** (tilt, taunting, …); these are descriptive and charted as frequency only, never summed into a score. Each axis runs as its own specialised commentator with a focused, criterion-referenced rubric, and the two can run on different model families — which weakens the self-enhancement bias of a model judging its own family. Commentary is stored per turn in the game journal and surfaced as cumulative per-axis charts in the viewer.
+Reports keep coder counts separate. Adherence includes only valid fulfilled or violated episodes
+with agent-choice provenance. Open, released, untriggered, unassessable, human-controlled and
+unknown-origin episodes remain visible outside that denominator. There is no overall honesty
+score. Missing screening differs from a screened message with no candidate; invalid evidence
+remains reviewable but excluded from counts. Forks retain ancestry and shared history must not
+be treated as independent observations. See [v3 implementation notes](docs/v3.md).
 
 ## Project layout
 
@@ -137,7 +148,7 @@ A third class of tags captures **affect** (tilt, taunting, …); these are descr
 The browser is enough to play. These commands are for running agent-only games, tournaments,
 evaluations, and replay exports directly from the terminal, after completing the setup above.
 
-Players are given inline as specs — `random` or `provider:model` (providers `anthropic`/`openai`/`google`), e.g. `anthropic:claude-opus-5`. Any model id the provider accepts works; the registry in `risk_bench/agents/models.py` is what the setup form offers and what usage reports can price, not a whitelist. There is no separate registration step.
+Players are given inline as specs — `random` or `provider:model` (providers `anthropic`/`openai`/`google`), e.g. `anthropic:claude-opus-5-5`. Any model id the provider accepts works; the registry in `risk_bench/agents/models.py` is what the setup form offers and what usage reports can price, not a whitelist. There is no separate registration step.
 
 Run a quick game between random players to check the engine end-to-end:
 
@@ -145,32 +156,38 @@ Run a quick game between random players to check the engine end-to-end:
 uv run python -m risk_bench.main game random random random
 ```
 
-Play a model-backed game, optionally with split commentators (a bare `--commentator <spec>` runs every rubric on one model):
+Play a model-backed game:
 
 ```bash
-uv run python -m risk_bench.main game anthropic:claude-opus-5 openai:gpt-5.6-sol google:gemini-3.8-flash \
-    --commentator skill=anthropic:claude-opus-5 --commentator conduct=google:gemini-3.8-flash
+uv run python -m risk_bench.main game anthropic:claude-opus-5-5 openai:gpt-6-sol google:gemini-3.8-flash
 ```
 
 Run a tournament and write its JSON report:
 
 ```bash
-uv run python -m risk_bench.main tournament anthropic:claude-opus-5 openai:gpt-5.6-sol random --games 10
+uv run python -m risk_bench.main tournament anthropic:claude-opus-5-5 openai:gpt-6-sol random --games 10
 ```
 
 Evaluate a stored game with a panel of whole-game **evaluators** — models that read the full trace
-offline (a finished or paused game) and emit cited per-turn tags and a per-player
-synthesis into a re-runnable `game.eval.jsonl` sidecar:
+offline (a finished or paused game) and emit cited research units into a versioned
+`game.eval.jsonl` sidecar:
 
 ```bash
-uv run python -m risk_bench.main evaluate data/v2/games/<game-folder>/game.jsonl \
-    --evaluator anthropic:claude-opus-5 --evaluator google:gemini-3.1-pro-preview
+uv run python -m risk_bench.main evaluate data/v3/games/<game-folder>/game.jsonl \
+    --evaluator anthropic:claude-opus-5-5 --evaluator google:gemini-3.1-pro-preview
 ```
+
+Web games can start a live research evaluator at launch or from the game's evaluation panel.
+It reads each completed turn, keeps a compact ledger of all commitments (including closed ones),
+and saves a short research note with cited assessments. A failed evaluator call leaves the last
+completed cutoff intact for retry. Once the result is recorded, it runs a final pass over the
+ledger to review outcomes that depend on the game ending. The annotation toggle starts off
+while a human is playing.
 
 Render a finished game into a standalone HTML replay:
 
 ```bash
-uv run python -m risk_bench.main view data/v2/games/<game-folder>/game.jsonl
+uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 ```
 
 ## Status
