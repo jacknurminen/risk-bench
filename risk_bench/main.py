@@ -198,13 +198,13 @@ def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
     total_citations, broken_citations = _citation_integrity(records=records)
     console.print(f"\nPanel: [bold]{', '.join(header.panel)}[/bold]")
     console.print(
-        f"Episodes: {counts['eval_episode']}  Claims: {counts['eval_claim']}  "
+        f"Commitments: {counts['eval_commitment']}  Statements: {counts['eval_statement']}  "
         f"(covers {header.span_count} spans across {header.record_count} records)"
     )
     console.print(f"Broken citations: {broken_citations}/{total_citations}")
 
 
-_EVAL_RECORD_KINDS = ("eval_episode", "eval_claim", "eval_agreement")
+_EVAL_RECORD_KINDS = ("eval_commitment", "eval_statement")
 
 
 def _citation_integrity(records: list[dict[str, Any]]) -> tuple[int, int]:

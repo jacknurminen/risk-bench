@@ -70,20 +70,22 @@ const annotators = () => EVAL.annotators || [];
 const annotatorColor = idx => MEMBER_COLORS[idx % MEMBER_COLORS.length];
 const annotatorLabel = idx => annotators().find(a => a.index === idx)?.label || "evaluator";
 const allUnits = () => (EVAL.members || []).flatMap(m =>
-  ["agreements", "episodes", "claims"].flatMap(kind => (m[kind] || []).map(u =>
+  (EVAL.tag_schema === "two_tag_v3" ? ["statements", "commitments"] : ["agreements", "episodes", "claims"]).flatMap(kind => (m[kind] || []).map(u =>
     ({...u, kind: kind.slice(0,-1), annotator: m.index}))));
-const unitVisible = u => state.filters.annotators.has(u.annotator)
+const unitVisible = u => u.members ? u.members.some(unitVisible) : state.filters.annotators.has(u.annotator)
   && (!state.filters.kind || u.kind === state.filters.kind)
   && (!state.filters.validOnly || u.valid)
-  && (!state.filters.actor || u.actor === state.filters.actor || u.initiator === state.filters.actor)
+  && (!state.filters.actor || u.actor === state.filters.actor || u.initiator === state.filters.actor ||
+    u.members?.some(m => m.actor === state.filters.actor))
   && (!state.filters.code || (u.codes || []).includes(state.filters.code))
-  && (!state.filters.status || u.status === state.filters.status)
+  && (!state.filters.status || u.status === state.filters.status ||
+    u.members?.some(m => m.status === state.filters.status))
   && (!state.filters.basis || (state.filters.basis === "unknown" ? u.basis == null : u.basis === state.filters.basis));
 const unitKey = u => u.annotator + ":" + u.kind + ":" + u.id;
 function unitCitations(value) {
   if (Array.isArray(value)) return value.flatMap(unitCitations);
   if (!value || typeof value !== "object") return [];
-  if ("span" in value && "quote" in value) return [value];
+  if ("span" in value && ("quote" in value || "field_path" in value)) return [value];
   return Object.values(value).flatMap(unitCitations);
 }
 /* ---- trace spans grouped by turn (rebuilt on every evaluation refresh, so the trace grows live) ---- */
@@ -151,7 +153,7 @@ const state = {
     annotators: new Set(annotators().map(a => a.index)),
     showPrivate: true, showCommentary: !(humanPlayers.size && !GAME.result),
   },
-  drawer: null,
+  drawer: null, unitDrawer: null, openTagEvidence: false,
 };
 // annotators the filter set has already decided on; lets a panel that finishes after page
 // load default to visible without re-enabling members the viewer explicitly hid

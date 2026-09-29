@@ -19,7 +19,7 @@ class NoCandidateCoder:
             spans = json.loads(match[0])
             result = {"messages": [{"span": s, "status": "no_candidate", "explanation": "Screened."} for s in spans]}
         else:
-            result = {"agreements": [], "episodes": [], "claims": [], "memos": ["No candidate in this test."]}
+            result = {"statements": [], "commitments": [], "memos": ["No candidate in this test."]}
         return Response(None, (ToolCall("1", tools[0].name, result),))
 
 

@@ -1,5 +1,6 @@
 import random
 import sys
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 
@@ -69,6 +70,10 @@ class GameRunner:
     commentary is journaled and printed but never shown to the players, a member's
     failure yields no record for it that turn without affecting the others, and the
     panel never affects the game.
+
+    An optional research callback runs after the final turn of each gameplay
+    round has been committed and before the next turn begins. Its failure
+    pauses at that checkpoint, so resume retries the same round review.
     """
 
     def __init__(
@@ -84,6 +89,7 @@ class GameRunner:
         journal: JournalWriter | None,
         trace: TraceWriter | None,
         verbose: bool,
+        round_review: Callable[[int], None] | None = None,
     ) -> None:
         self._players = players
         # what the game starts each player knowing beyond the board; a resumed game's checkpoint
@@ -98,6 +104,7 @@ class GameRunner:
         self._journal = journal
         self._trace = trace
         self._verbose = verbose
+        self._round_review = round_review
         # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
         self._all_events: list[GameEvent] = []
@@ -454,7 +461,12 @@ class GameRunner:
             p.pop("decision_id", None)
         elif stage == "commentary":
             self._commentate(state, p["commented_turn"])
-            p.update(stage="route", commented_turn=state.turn_number)
+            completed_round = state.previous_round_number > 0 and state.round_number > state.previous_round_number
+            p.update(stage="round_review" if completed_round else "route", commented_turn=state.turn_number)
+        elif stage == "round_review":
+            if self._round_review is not None:
+                self._round_review(state.previous_round_number)
+            p["stage"] = "route"
         elif stage == "final_commentary":
             self._commentate(state, state.turn_number)
             p["stage"] = "result"

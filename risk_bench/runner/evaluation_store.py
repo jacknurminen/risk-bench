@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from risk_bench.runner.codebook import CODEBOOK_HASH, CODEBOOK_VERSION
+from risk_bench.runner.codebook_v3 import CODEBOOK_HASH, CODEBOOK_VERSION
 from risk_bench.runner.evaluation import EvaluatedGame
 
-EVALUATION_SCHEMA_VERSION = 3
+EVALUATION_SCHEMA_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -86,11 +86,11 @@ def evaluation_header(records: list[dict[str, Any]]) -> EvaluationHeader | None:
     if not records or records[0].get("type") != "eval_header":
         return None
     data = records[0]
-    if data.get("schema_version") != 3:
+    if data.get("schema_version") not in {3, 4, 5}:
         raise ValueError("Older evaluations belong to the v2 application.")
     coverage = data["coverage"]
     return EvaluationHeader(
-        schema_version=3,
+        schema_version=data["schema_version"],
         run_id=data["run_id"],
         panel=data["panel"],
         record_count=coverage["record_count"],

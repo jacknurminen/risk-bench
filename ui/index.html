@@ -127,10 +127,9 @@
         alongside the board and the chat. Use the 📝 button on a seat to add something only that player knows.</span></div>
     <textarea class="context" id="commonContext" rows="2"
       placeholder="e.g. a rule of thumb, or background about the table — the same for everyone"></textarea>
-    <div class="row">
-      <label>live research evaluator <select id="liveEvaluator"></select></label>
-      <span class="hint">Reads each completed turn and updates the commitments and claims feed. Uses API tokens; you can choose Off and start it later in the game.</span>
-    </div>
+    <div class="sectionLabel">Live research evaluator
+      <span class="hint">— reviews each completed round and adds commitments and statements to the timeline. Uses API tokens; choose Off to start it later.</span></div>
+    <div class="playerRow" id="liveEvaluatorRow"></div>
     <div class="row">
       <label>seed <input type="number" id="seed" value="0" style="width:90px"></label>
       <label>max turns <input type="number" id="maxTurns" placeholder="default" style="width:90px"></label>
@@ -173,7 +172,7 @@ const PROVIDER_LOGOS = {
   google: "/assets/google-gemini.png",
   openai: "/assets/openai.png",
 };
-const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI" };
+const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI", off: "Off" };
 const DEFAULT_EFFORT = "low";
 
 let modelsByProvider = {};
@@ -185,17 +184,16 @@ async function loadModels() {
   modelsByProvider = catalog.models_by_provider;
   providers = Object.keys(modelsByProvider);
   efforts = catalog.efforts;
-  const options = ['<option value="">Off — choose later</option>'];
-  for (const [provider, models] of Object.entries(modelsByProvider)) {
-    for (const model of models) {
-      if (provider === "random") continue;
-      const spec = `${provider}:${model.id}:medium`;
-      options.push(`<option value="${spec}">${model.id} · $${model.input_usd_per_million}/$${model.output_usd_per_million} per million tokens</option>`);
-    }
-  }
-  el("liveEvaluator").innerHTML = options.join("");
-  if ([...el("liveEvaluator").options].some(option => option.value === "openai:gpt-6-luna:medium"))
-    el("liveEvaluator").value = "openai:gpt-6-luna:medium";
+  const evaluatorProvider = (modelsByProvider.openai || []).some(model => model.id === "gpt-6-luna")
+    ? "openai" : providers[0];
+  const evaluatorModel = evaluatorProvider === "openai" ? "gpt-6-luna" : defaultModel(evaluatorProvider);
+  const evaluatorRow = el("liveEvaluatorRow");
+  evaluatorRow.innerHTML = `<span class="seat">evaluator</span>
+    <div class="providerPicker">${["off", ...providers].map(name => providerTile(name, name === evaluatorProvider)).join("")}</div>
+    <select class="modelSelect">${modelOptions(evaluatorProvider, evaluatorModel)}</select>
+    <select class="effortSelect">${effortOptions("medium")}</select>`;
+  evaluatorRow.querySelectorAll(".providerTile").forEach(tile =>
+    tile.onclick = () => selectProvider(evaluatorRow, tile.dataset.provider));
   addPlayerRow(); addPlayerRow(); addPlayerRow();
 }
 
@@ -256,7 +254,7 @@ function selectProvider(row, provider) {
     tile.classList.toggle("active", tile.dataset.provider === provider));
   // model ids belong to one provider, so there is no selection to carry across; switching
   // providers falls back to that provider's first (most capable) model
-  const baseline = provider === "human" || provider === "random";
+  const baseline = provider === "human" || provider === "random" || provider === "off";
   row.querySelector(".modelSelect").hidden = baseline;
   row.querySelector(".effortSelect").hidden = baseline;
   row.querySelector(".modelSelect").innerHTML = modelOptions(provider, defaultModel(provider));
@@ -269,7 +267,7 @@ function renumber() {
 
 const specFromRow = row => {
   const provider = row.querySelector(".providerTile.active").dataset.provider;
-  if (provider === "human" || provider === "random") return provider;
+  if (provider === "human" || provider === "random" || provider === "off") return provider;
   return `${provider}:${row.querySelector(".modelSelect").value}:${row.querySelector(".effortSelect").value}`;
 };
 
@@ -278,9 +276,10 @@ async function launch() {
   const players = [...document.querySelectorAll("#playerRows .playerRow")].map(specFromRow);
   const playerContext = [...document.querySelectorAll("#playerRows .playerRow")]
     .map(row => row.querySelector(".rowContext textarea").value.trim());
+  const evaluator = specFromRow(el("liveEvaluatorRow"));
   const body = {
     players,
-    evaluators: el("liveEvaluator").value ? [el("liveEvaluator").value] : [],
+    evaluators: evaluator === "off" ? [] : [evaluator],
     seed: Number(el("seed").value) || 0,
     max_turns: el("maxTurns").value ? Number(el("maxTurns").value) : null,
     parallel_games: Number(el("parallelGames").value) || 1,

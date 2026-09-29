@@ -191,7 +191,7 @@ class ScriptedCoder:
             if not self.omit:
                 result["messages"].append({"span": 2, "status": "no_candidate", "explanation": "Acknowledgement."})
         else:
-            result = adjudication()
+            result = {"statements": [], "commitments": [], "memos": []}
         return Response(text=None, tool_calls=(ToolCall("1", name, result),))
 
 
@@ -222,7 +222,7 @@ def test_screening_excludes_future_context_and_constrains_and_repairs_the_batch(
             tool = tools[0]
             if tool.name == "submit_adjudication":
                 assert spans[-1].text in messages[0].content
-                result = adjudication()
+                result = {"statements": [], "commitments": [], "memos": []}
             else:
                 self.screenings += 1
                 allowed = tool.parameters["$defs"]["MessageScreen"]["properties"]["span"]["enum"]

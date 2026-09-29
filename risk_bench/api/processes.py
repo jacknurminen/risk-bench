@@ -138,7 +138,7 @@ class GameProcessManager:
         return self._evaluations[game_id][1]
 
     def evaluating_live(self, game_id: str) -> bool:
-        """Whether the running evaluation follows completed turns."""
+        """Whether the detached evaluation follows completed rounds."""
         return self.is_evaluating(game_id) and bool(self._evaluations.get(game_id, (None, None, False))[2])
 
     def pause_game(self, game_id: str) -> bool:
@@ -162,7 +162,7 @@ class GameProcessManager:
         return True
 
     def pause_evaluation(self, game_id: str) -> bool:
-        """Stop a live panel; its last atomic turn snapshot remains resumable."""
+        """Stop a live panel; its last atomic round snapshot remains resumable."""
         entry = self._evaluations.get(game_id)
         if entry is None or not entry[0].is_alive():
             return False

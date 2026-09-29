@@ -13,7 +13,7 @@
 <body>
 <header class="masthead">
   <div class="inner">
-    <div><span class="brand">risk-bench v3</span> <small>commitments &amp; claims</small></div>
+    <div><span class="brand">risk-bench v3</span> <small>research annotations</small></div>
     <div class="mastmeta">
       <span id="mastStatus"></span>
       <span style="color:#c7c1b3">·</span>
@@ -154,14 +154,6 @@
     </section>
     {% endif %}
 
-    <details class="readerAnalysis" id="readerAnalysis" open>
-    <summary>Game analysis</summary>
-    <section class="card evalBar" id="evalBar" hidden></section>
-    <section class="card ctaCard" id="evalCta" hidden></section>
-    <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
-
-    </details>
-
     <div class="subbar">
       <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
       <div style="display:flex;align-items:center;gap:6px">
@@ -172,6 +164,11 @@
     </div>
 
     <div id="timeline"></div>
+    <div class="timelineResearch" aria-label="Research evaluation">
+      <section class="card evalBar" id="evalBar" hidden></section>
+      <section class="card ctaCard" id="evalCta" hidden></section>
+      <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+    </div>
     </section>
   </main>
   {% if human_url %}

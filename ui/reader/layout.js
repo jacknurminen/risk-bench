@@ -5,8 +5,6 @@
   const button = document.getElementById('mapFocus'), board = document.querySelector('.boardcard');
   if (!divider || !pane || !button) return;
   const media = matchMedia('(min-width: 1000px) and (min-height: 600px)');
-  const analysis = document.getElementById('readerAnalysis');
-  if (analysis && media.matches) analysis.open = false;
   const key = 'risk-bench:map-split';
   let ratio = 0.6, focused = false, drag = null, limits = {min: 0, max: 0};
   try {

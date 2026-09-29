@@ -121,6 +121,29 @@ def adjudication():
     }
 
 
+def two_tag_adjudication():
+    """The same source passage assessed independently as a promise and a statement."""
+    passage = {"span": 1, "quote": "I will not attack Brazil this turn."}
+    commitment = {
+        "id": "e1", "actor": "alice", "passage": passage,
+        "terms": "Do not attack Brazil this turn.",
+        "status_history": [
+            {"status": "committed", "cutoff_span": 1, "explanation": "Explicit unilateral restraint.",
+             "evidence": [passage]},
+            {"status": "violated", "cutoff_span": 3, "explanation": "Attack breached the restraint.",
+             "evidence": [{"span": 3, "quote": "attack"}]},
+        ],
+    }
+    statement = {
+        "id": "s1", "actor": "alice", "proposition": "Alice plans not to attack Brazil this turn",
+        "passage": dict(passage), "basis": "stated_plan", "status": "deceptive",
+        "comparison": [{"span": 0, "quote": "I will attack Brazil."}],
+        "deliberate_intent": [{"span": 0, "quote": "I will lie to Bob to stop his defence."}],
+        "explanation": "Private text states a contrary plan and explicit intent to lie.",
+    }
+    return {"commitments": [commitment], "statements": [statement], "memos": []}
+
+
 def write_journal(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(r) + "\n" for r in records()), encoding="utf-8")
@@ -154,8 +177,11 @@ def write_evaluation(journal_path: Path, eval_path=None, run_id=None, panel=None
     for index, spec in enumerate(panel):
         writer.write_evaluation(index, EvaluatedGame(spec, tuple(rows)))
     writer.close()
+    # This fixture deliberately writes a historical v2 evaluation sidecar.
+    data = [json.loads(line) for line in path.read_text().splitlines()]
+    data[0]["schema_version"] = 3
+    data[0]["codebook_version"] = "commitments-v2-2026-09-22"
     if run_id:
-        data = [json.loads(line) for line in path.read_text().splitlines()]
         data[0]["run_id"] = run_id
-        path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+    path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
     return path

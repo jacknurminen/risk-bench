@@ -71,7 +71,7 @@ class NewGameResponse(BaseModel):
 
 
 class EvaluateRequest(BaseModel):
-    """A panel run, optionally following newly completed turns during play."""
+    """A panel run, optionally reviewing each completed round during play."""
 
     evaluators: list[str] = Field(default_factory=list)
     live: bool = False
@@ -81,7 +81,7 @@ class UnitVerificationBody(BaseModel):
     """A human review of one research unit within a selected evaluation run."""
 
     evaluator_index: int
-    unit_type: Literal["agreement", "episode", "claim"]
+    unit_type: Literal["agreement", "episode", "claim", "statement", "commitment"]
     unit_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     verified: bool
     version: str | None = None

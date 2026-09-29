@@ -1,6 +1,7 @@
 """Running games as plain function calls, shared by the CLI and the web app's worker processes."""
 
 import hashlib
+import json
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,6 +16,7 @@ from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.players import rendering, tools
 from risk_bench.players.human import mailbox_for
+from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.players.rendering import render_board_text
 from risk_bench.runner.checkpoint import restore_engine
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
@@ -115,9 +117,12 @@ def run_new_game(
         journal=journal,
         trace=trace,
         verbose=verbose,
+        round_review=lambda _: _review_live_evaluation(journal_path, settings, blocking=True),
     )
     try:
-        return runner.run(), journal_path
+        record = runner.run()
+        _review_live_evaluation(journal_path, settings, blocking=False)
+        return record, journal_path
     finally:
         journal.close()
         if trace is not None:
@@ -189,13 +194,36 @@ def resume_game(
         journal=journal,
         trace=trace,
         verbose=verbose,
+        round_review=lambda _: _review_live_evaluation(journal_file, settings, blocking=True),
     )
     try:
-        return runner.resume(restored=restored)
+        record = runner.resume(restored=restored)
+        _review_live_evaluation(journal_file, settings, blocking=False)
+        return record
     finally:
         journal.close()
         if trace is not None:
             trace.close()
+
+
+def _review_live_evaluation(journal_path: Path, settings: Settings, *, blocking: bool) -> None:
+    """At a round boundary, complete the research call before gameplay proceeds."""
+    config_path = journal_path.parent / "live-evaluators.json"
+    if not config_path.is_file():
+        return
+    error_path = journal_path.with_suffix(".eval.error.json")
+    try:
+        panel = json.loads(config_path.read_text(encoding="utf-8")).get("evaluators", [])
+        if not panel:
+            return
+        from risk_bench.runner.live_evaluation import run_live_evaluation
+
+        run_live_evaluation(journal_path, panel, settings, follow=False)
+        error_path.unlink(missing_ok=True)
+    except Exception as error:
+        error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
+        if blocking:
+            raise ProviderUnavailableError(f"Research evaluation paused: {error}") from error
 
 
 def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Settings) -> Path:

@@ -73,7 +73,7 @@ document.addEventListener("mouseover", event => {
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape" || !exporting) return;
   if (exportModalOpen()) { closeExportModal(); return; }
-  if (statsOpen() || el("notesModal").classList.contains("open") || state.drawer) return;
+  if (statsOpen() || el("notesModal").classList.contains("open") || state.drawer || state.unitDrawer) return;
   setExportMode(false);
 });
 

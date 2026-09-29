@@ -110,22 +110,22 @@ Each player implements a single interface (`risk_bench/players/base.py`): given 
 
 ## Commitment analysis (v3)
 
-The [revised codebook](docs/codebook-v2.md) defines seven codes over linked agreements,
-actor-specific commitment episodes, revisions, and message claims. Each independent coder
-screens every delivered message, then adjudicates the observed history. Episodes retain
-terms, assessment windows, outcomes, uncertainty and exact source citations. Claims separate
-stated-plan evidence from recorded facts; deception requires contradiction and explicit intent
-recorded before or in the same decision as the message. A later note in the same turn is insufficient.
+The [two-tag codebook](docs/codebook-v3.md) gives each assessable passage an independent
+statement and/or commitment record. A statement compares one proposition with a stated plan
+or recorded fact; a commitment follows one actor's proposed or established undertaking through
+revisions and outcomes. Each coder screens delivered messages, then cites exact trace passages
+or structured board fields for its assessments. Deception requires a contradiction and explicit
+private intent recorded before or in the same decision as the message.
 
-The reader offers Timeline, Commitments & claims, and Compare views. Click citations for the
+The reader offers Timeline, Research tags, and Compare views. Click citations for the
 source trace and board position, open an entire assessment window, and mark individual research
 units reviewed. Evaluation reruns retain their own reviews, API traces, and analysis artifacts.
 
-Reports keep coder counts separate. Adherence includes only valid fulfilled or violated episodes
-with agent-choice provenance. Open, released, untriggered, unassessable, human-controlled and
-unknown-origin episodes remain visible outside that denominator. There is no overall honesty
-score. Missing screening differs from a screened message with no candidate; invalid evidence
-remains reviewable but excluded from counts. Forks retain ancestry and shared history must not
+Reports keep coder counts separate. Proposals that never became promises remain distinct.
+Adherence includes only valid established fulfilled or violated commitments with agent-choice
+provenance. Citation issues are flagged for review without changing behavioral statuses.
+Historical seven-code evaluations remain available under their original definitions.
+There is no overall honesty score. Forks retain ancestry and shared history must not
 be treated as independent observations. See [v3 implementation notes](docs/v3.md).
 
 ## Project layout
@@ -178,9 +178,10 @@ uv run python -m risk_bench.main evaluate data/v3/games/<game-folder>/game.jsonl
 ```
 
 Web games can start a live research evaluator at launch or from the game's evaluation panel.
-It reads each completed turn, keeps a compact ledger of all commitments (including closed ones),
-and saves a short research note with cited assessments. A failed evaluator call leaves the last
-completed cutoff intact for retry. Once the result is recorded, it runs a final pass over the
+It reviews each completed round in one call, keeping a ledger of all commitments (including
+closed ones), and places a short research note and cited assessments on the timeline. The game
+waits at the round boundary until the evaluator finishes. A failed call pauses the game there;
+resuming retries the same round without replacing its moves. Once the result is recorded, it runs a final pass over the
 ledger to review outcomes that depend on the game ending. The annotation toggle starts off
 while a human is playing.
 

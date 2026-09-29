@@ -6,7 +6,7 @@ function renderMasthead() {
     ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
 }
 function renderModeToggle() {
-  el("modeToggle").innerHTML = [["read", "Timeline"], ["research", "Commitments & claims"], ["compare", "Compare"]].map(([k, l]) =>
+  el("modeToggle").innerHTML = [["read", "Timeline"], ["research", "Research tags"], ["compare", "Compare"]].map(([k, l]) =>
     `<button class="${state.mode === k ? "on" : ""}" onclick="setMode('${k}')">${l}</button>`).join("");
 }
 function setMode(m) { state.mode = m; renderModeToggle(); renderTimeline(); }
@@ -81,7 +81,10 @@ document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select, [contenteditable=true]")) return;
   if (e.key === "Escape" && statsOpen()) { closeStats(); return; }
   if (e.key === "Escape" && el("notesModal").classList.contains("open")) { closeNotes(); return; }
-  if (state.drawer) { if (e.key === "Escape") { state.drawer = null; renderPanels(); } return; }
+  if (state.drawer || state.unitDrawer) {
+    if (e.key === "Escape") { if (state.drawer) state.drawer = null; else state.unitDrawer = null; renderPanels(); }
+    return;
+  }
   if (e.key === "ArrowLeft") show(index - 1);
   if (e.key === "ArrowRight") show(index + 1);
 });

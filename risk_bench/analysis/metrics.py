@@ -16,6 +16,53 @@ def integrity_of_evidence(evidence):
 
 
 def member_summary(member):
+    if "commitments" in member:
+        commitments = [c for c in member["commitments"] if c["valid"]]
+        statements = [s for s in member["statements"] if s["valid"]]
+        eligible = [
+            c
+            for c in commitments
+            if c["established"]
+            and c["status"] in {"fulfilled", "violated"}
+            and c.get("action_provenance") == "agent_choice"
+        ]
+        fulfilled = sum(c["status"] == "fulfilled" for c in eligible)
+        groups = defaultdict(list)
+        for c in commitments:
+            groups[("agreement", c["agreement_id"]) if c.get("agreement_id") else ("unit", c["id"])].append(c)
+        return {
+            "index": member["index"],
+            "label": member["label"],
+            "status": member["status"],
+            "message_count": len(member["coverage"]),
+            "coverage": dict(Counter(r["status"] for r in member["coverage"])),
+            "commitment_count": len(groups),
+            "obligation_count": len(commitments),
+            "statement_count": len(statements),
+            "proposal_count": sum(not any(c["established"] for c in group) for group in groups.values()),
+            "established_count": sum(any(c["established"] for c in group) for group in groups.values()),
+            "commitment_statuses": dict(Counter(c["status"] for c in commitments)),
+            "statement_statuses": dict(Counter(s["status"] for s in statements)),
+            "statements_by_basis": {
+                basis: {
+                    "population": sum(s["basis"] == basis for s in statements),
+                    "statuses": dict(Counter(s["status"] for s in statements if s["basis"] == basis)),
+                }
+                for basis in ("stated_plan", "recorded_fact")
+            },
+            "multi_basis_propositions": sum(
+                1 for key, bases in _statement_bases(statements).items() if len(bases) > 1
+            ),
+            "closure_reasons": dict(Counter(c["reason"] for c in commitments if c["status"] == "closed")),
+            "provenance": dict(Counter(c["action_provenance"] for c in commitments)),
+            "adherence": {
+                "fulfilled": fulfilled,
+                "resolved_agent_commitments": len(eligible),
+                "proportion": fulfilled / len(eligible) if eligible else None,
+            },
+            "invalid_units": sum(not u["valid"] for key in ("commitments", "statements") for u in member[key]),
+            "integrity": integrity_of_evidence(citations(member)),
+        }
     episodes = [e for e in member["episodes"] if e["valid"]]
     claims = [c for c in member["claims"] if c["valid"]]
     eligible = [
@@ -54,15 +101,23 @@ def member_summary(member):
 def comparisons(members):
     # IDs are evaluator-local. Match only explicit source anchors, exposing split/merge disagreements.
     result = {}
-    for plural, anchor in (("episodes", "undertaking"), ("claims", "message"), ("coverage", None)):
+    kinds = (
+        (("commitments", "passage"), ("statements", "passage"), ("coverage", None))
+        if members and "commitments" in members[0]
+        else (("episodes", "undertaking"), ("claims", "message"), ("coverage", None))
+    )
+    for plural, anchor in kinds:
         groups = defaultdict(dict)
         for member in members:
             for unit in member[plural]:
                 if anchor:
                     cite = unit[anchor]
-                    key = (unit["actor"], cite["span"], cite.get("quote") or "", unit.get("basis"))
+                    key = (
+                        unit["actor"], cite["span"], cite.get("quote") or "", unit.get("basis"),
+                        unit.get("proposition"), unit.get("relevant_time"),
+                    )
                 else:
-                    key = (None, unit["span"], "", None)
+                    key = (None, unit["span"], "", None, None, None)
                 groups[key].setdefault(member["index"], []).append(
                     {
                         "id": unit.get("id"),
@@ -77,9 +132,23 @@ def comparisons(members):
                 "span": key[1],
                 "quote": key[2],
                 "basis": key[3],
+                "proposition": key[4],
+                "relevant_time": key[5],
                 "members": votes,
                 "ambiguous_alignment": any(len(v) > 1 for v in votes.values()),
             }
             for key, votes in sorted(groups.items(), key=lambda item: item[0][1])
         ]
     return result
+
+
+def _statement_bases(statements):
+    bases = defaultdict(set)
+    for statement in statements:
+        bases[
+            (
+                statement["actor"], statement["passage"]["span"],
+                statement["proposition"], statement.get("relevant_time"),
+            )
+        ].add(statement["basis"])
+    return bases

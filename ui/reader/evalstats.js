@@ -13,6 +13,7 @@ function evalKpi(value, label, detail, action = "") {
     '<strong>' + value + '</strong><span>' + label + '</span><small>' + detail + '</small></' + tag + '>';
 }
 function renderEvalStats() {
+  if (EVAL.tag_schema === "two_tag_v3") return renderEvalStatsV3();
   const sheet = el("evalSheet");
   if (!EVAL.has_evaluation) { sheet.innerHTML = '<p class="empty">No evaluation yet.</p>'; return; }
   const summaries = EVAL.analysis?.members || (EVAL.members || []).map(summarizeMember);
@@ -68,6 +69,58 @@ function renderEvalStats() {
         ' quote mismatches</p></div></details></article>';
     }).join('') +
     '<p class="evalFootnote">Forks share inherited history and are related continuations. Citation checks do not validate interpretation.</p>';
+}
+function renderEvalStatsV3() {
+  const sheet = el("evalSheet");
+  if (!EVAL.has_evaluation) { sheet.innerHTML = '<p class="empty">No evaluation yet.</p>'; return; }
+  const summaries = EVAL.analysis?.members || (EVAL.members || []).map(summarizeMemberV3);
+  const statuses = [["proposed","Proposed","open"],["agreed","Agreed","open"],["committed","Committed","open"],["made","Made","open"],["fulfilled","Fulfilled","coop"],
+    ["violated","Violated","adversarial"],["unresolved","Unresolved","neutral"],["closed","Closed","neutral"]];
+  sheet.innerHTML = '<p class="evalIntro">Shared agreements appear as one tag; each participant obligation is assessed separately. Broken citations are excluded.</p>' +
+    summaries.map(m => {
+      const index = m.index, cs = m.commitment_statuses || {}, ss = m.statement_statuses || {};
+      const denominator = m.adherence?.resolved_agent_commitments || 0;
+      return '<article class="evalDashboard"><header class="evalDashHead"><div><span class="evalEyebrow">Evaluator ' + (index + 1) +
+        '</span><h3>' + escapeHtml(m.label) + '</h3></div><span class="evalRunStatus">' + escapeHtml(pretty(m.status)) + '</span></header>' +
+        '<div class="evalKpis">' + evalKpi(m.commitment_count,'commitments',m.established_count + ' established · ' + m.proposal_count + ' proposals',evalAction(index,'commitment')) +
+        evalKpi(m.statement_count,'statements','One status per assessment',evalAction(index,'statement')) +
+        evalKpi(m.invalid_units,'need review','Excluded from counts') + '</div>' +
+        '<div class="evalDashGrid"><section class="evalSection"><div class="evalSectionHead"><h4>Commitments</h4><span>' +
+        (m.obligation_count ?? m.commitment_count) + ' participant obligations</span></div><div class="evalLegend">' + statuses.filter(([key]) => cs[key]).map(([key,label,tone]) =>
+        '<button class="evalLegendItem" onclick="' + escapeHtml(evalAction(index,'commitment',key)) + '"><i class="tone-' + tone +
+        '"></i><span>' + label + '</span><strong>' + cs[key] + '</strong></button>').join('') + '</div>' +
+        '<div class="evalAdherence"><span>Adherence among established, resolved agent commitments</span><strong>' +
+        (denominator ? m.adherence.fulfilled + ' / ' + denominator + ' · ' + Math.round(m.adherence.fulfilled / denominator * 100) + '%' : 'Unavailable') +
+        '</strong></div><p class="evalFine">Closed reasons: ' + readableCounts(m.closure_reasons || {}) + '</p></section>' +
+        '<section class="evalSection"><div class="evalSectionHead"><h4>Statements by evidence basis</h4><span>' +
+        m.statement_count + ' valid</span></div>' + Object.entries(m.statements_by_basis || {}).map(([basis,v]) =>
+        '<div class="evalBasis"><button class="evalBasisHead" onclick="' + escapeHtml(evalAction(index,'statement','','',basis)) +
+        '"><strong>' + escapeHtml(pretty(basis)) + '</strong><span>' + v.population + ' statements ↗</span></button><div class="evalCodeList">' +
+        Object.entries(v.statuses || {}).map(([status,n]) => '<button class="evalCode" onclick="' + escapeHtml(evalAction(index,'statement',status,'',basis)) +
+        '"><span>' + escapeHtml(pretty(status)) + '</span><strong>' + n + '</strong></button>').join('') + '</div></div>').join('') +
+        '<p class="evalFine">Deceptive includes contradiction and counts once. ' + (m.multi_basis_propositions || 0) +
+        ' propositions assessed on both bases.</p></section></div>' +
+        '<details class="evalDetails"><summary>Coverage and citation checks</summary><p>' + readableCounts(m.coverage || {}) +
+        ' · ' + (m.integrity?.broken_citations || 0) + ' broken citations</p></details></article>';
+    }).join('');
+}
+function summarizeMemberV3(m) {
+  const commitments = (m.commitments || []).filter(u => u.valid), statements = (m.statements || []).filter(u => u.valid);
+  const groups = new Map(); commitments.forEach(c => { const key = c.agreement_id ? 'agreement:' + c.agreement_id : 'unit:' + c.id; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(c); });
+  const countBy = (rows,key) => rows.reduce((o,r) => (o[r[key]]=(o[r[key]]||0)+1,o),{});
+  const eligible = commitments.filter(c => c.established && ["fulfilled","violated"].includes(c.status) && c.action_provenance === 'agent_choice');
+  const bases = Object.fromEntries(['stated_plan','recorded_fact'].map(b => [b,{population:statements.filter(s => s.basis === b).length,
+    statuses:countBy(statements.filter(s => s.basis === b),'status')}]));
+  const keys = new Map(); statements.forEach(s => { const k = [s.actor,s.passage.span,s.proposition,s.relevant_time].join(':');
+    if (!keys.has(k)) keys.set(k,new Set()); keys.get(k).add(s.basis); });
+  return {index:m.index,label:m.label,status:m.status,commitment_count:groups.size,obligation_count:commitments.length,statement_count:statements.length,
+    proposal_count:[...groups.values()].filter(g => !g.some(c => c.established)).length,established_count:[...groups.values()].filter(g => g.some(c => c.established)).length,
+    invalid_units:[...(m.commitments || []),...(m.statements || [])].filter(u => !u.valid).length,
+    commitment_statuses:countBy(commitments,'status'),statement_statuses:countBy(statements,'status'),statements_by_basis:bases,
+    multi_basis_propositions:[...keys.values()].filter(s => s.size > 1).length,
+    closure_reasons:countBy(commitments.filter(c => c.status === 'closed'),'reason'),coverage:countBy(m.coverage || [],'status'),
+    adherence:{fulfilled:eligible.filter(c => c.status === 'fulfilled').length,resolved_agent_commitments:eligible.length},
+    integrity:{broken_citations:unitCitations(m).filter(c => !c.resolved).length}};
 }
 function openEvalResearch(index, kind, status = "", code = "", basis = "") {
   closeStats();

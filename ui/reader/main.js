@@ -28,6 +28,7 @@ async function refreshFromJournal() {
   GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
+  if (state.drawer || state.unitDrawer) renderPanels();
   el("slider").max = steps.length - 1;
   renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
   renderDriftNotice();
@@ -42,5 +43,6 @@ renderForkPanel();
 renderDriftNotice();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
-if (EVAL.running) pollEvaluation();  // a run already in flight (started before this page load)
+if (EVAL.running || (LIVE && EVAL.live_evaluation && !EVAL.live_finalized && !EVAL.error))
+  pollEvaluation();  // also watch live games launched outside this server
 if (location.hash === "#stats") openStats();  // deep link (kept from when stats lived only in the classic view)

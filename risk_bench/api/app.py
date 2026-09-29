@@ -43,6 +43,7 @@ from risk_bench.runner.evaluation_store import (
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
+from risk_bench.runner.live_evaluation import review_activity_for_journal
 from risk_bench.runner.verification_store import delete_verification, write_verification
 from risk_bench.version import require_v3
 from risk_bench.viewer.evaluation import build_evaluation_view_model
@@ -420,9 +421,21 @@ def _load_evaluation_view_model(
         raise HTTPException(
             status_code=409, detail=f"The journal does not replay cleanly or is not viewable yet: {error}"
         ) from None
-    view_model["running"] = manager.is_evaluating(game_id=game_id)
+    live_panel = _configured_live_evaluators(path) if run_id is None else []
+    live_in_game = run_id is None and manager.is_running(game_id) and bool(live_panel)
+    view_model["live_panel"] = live_panel
+    review_activity = review_activity_for_journal(path) if run_id is None else None
+    view_model["review_active"] = review_activity is not None
+    view_model["reviewing_round"] = review_activity.get("round") if review_activity else None
+    view_model["reviewing_final"] = bool(review_activity and review_activity["kind"] == "final")
+    view_model["running"] = manager.is_evaluating(game_id=game_id) or live_in_game or bool(review_activity)
     if run_id is None:
-        view_model["live_evaluation"] = view_model["live_evaluation"] or manager.evaluating_live(game_id)
+        view_model["live_evaluation"] = (
+            view_model["live_evaluation"]
+            or manager.evaluating_live(game_id)
+            or bool(live_panel)
+            or bool(review_activity)
+        )
     error_path = path.with_suffix(".eval.error.json")
     view_model["error"] = None
     if run_id is None:
@@ -430,23 +443,31 @@ def _load_evaluation_view_model(
             view_model["error"] = json.loads(error_path.read_text(encoding="utf-8")).get("detail")
         except (FileNotFoundError, json.JSONDecodeError):
             pass
+    panel = manager.evaluating_panel(game_id=game_id) or (live_panel if live_in_game else None)
+    if view_model["evaluation_cadence"] == "round" or live_in_game or manager.evaluating_live(game_id):
+        rounds = {span["round"] for span in view_model["spans"] if span["turn"] > 0 and span.get("round") is not None}
+        completed_rounds = len(rounds) if view_model["finished"] else max(0, len(rounds) - 1)
+        expected_per_member = completed_rounds + (1 if view_model["finished"] else 0)
+    else:
+        expected_per_member = len({span["turn"] for span in view_model["spans"] if span["layer"] == "message"}) + 1
     view_model["progress"] = _evaluation_progress(
         journal_path=path,
-        panel=manager.evaluating_panel(game_id=game_id),
-        turn_count=len({span["turn"] for span in view_model["spans"] if span["layer"] == "message"}),
+        panel=panel,
+        expected_per_member=expected_per_member,
         usage_cache=usage_cache,
     )
     return view_model
 
 
 def _evaluation_progress(
-    journal_path: Path, panel: list[str] | None, turn_count: int, usage_cache: _UsageCache
+    journal_path: Path, panel: list[str] | None, expected_per_member: int, usage_cache: _UsageCache
 ) -> dict[str, Any] | None:
     """Report the in-flight (or interrupted) evaluation run from its growing trace sidecar.
 
-    The evaluator flushes one trace record per provider call, and a per-turn sweep makes a known
-    number of calls (turns + one synthesis, per member), so the flat trace file doubles as a live
-    progress and running-cost signal without any cooperation from the worker. A flat trace left
+    The evaluator flushes one trace record per provider call. A stored-game sweep calls each
+    member once per turn plus synthesis; live research calls once per completed round plus a
+    final pass. The flat trace file therefore doubles as a progress and running-cost signal
+    without any cooperation from the worker. A flat trace left
     behind without its eval sidecar means the last run died before finishing (e.g. a server
     shutdown killed the daemon worker) — surfaced as ``interrupted`` so the silent death and its
     spend are visible.
@@ -454,7 +475,7 @@ def _evaluation_progress(
     Args:
         journal_path: The game's journal path.
         panel: The running panel's specs from the process manager, or None when no run is alive.
-        turn_count: The number of turns the sweep covers (each member calls once per turn, plus one).
+        expected_per_member: Expected calls for one member at the current journal cutoff.
         usage_cache: The per-trace usage cache shared across requests.
 
     Returns:
@@ -470,7 +491,7 @@ def _evaluation_progress(
     if panel is not None:
         return {
             "state": "running",
-            "expected_calls": len(panel) * (turn_count + 1),
+            "expected_calls": len(panel) * expected_per_member,
             "completed_calls": completed_calls,
             "failed_calls": sum(entry["errors"] for entry in usage.values()),
             "cost_usd": cost_usd,
@@ -479,7 +500,7 @@ def _evaluation_progress(
                     "index": index,
                     "spec": spec,
                     "calls": usage.get(f"evaluator[{index}]", {}).get("calls", 0),
-                    "expected_calls": turn_count + 1,
+                    "expected_calls": expected_per_member,
                 }
                 for index, spec in enumerate(panel)
             ],
@@ -489,7 +510,7 @@ def _evaluation_progress(
     return {
         "state": "interrupted",
         # panel size is estimated from the callers seen, so a member that never called undercounts it
-        "expected_calls": len(usage) * (turn_count + 1),
+        "expected_calls": len(usage) * expected_per_member,
         "completed_calls": completed_calls,
         "cost_usd": cost_usd,
         "last_call_at": datetime.fromtimestamp(trace_path.stat().st_mtime, tz=UTC).isoformat(),
@@ -551,6 +572,8 @@ def _evaluator_usage_response(usage: dict[str, dict[str, Any]]) -> dict[str, Any
 def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: Path, request: EvaluateRequest) -> None:
     if manager.is_evaluating(game_id=game_id):
         raise HTTPException(status_code=409, detail="An evaluation is already running for this game.")
+    if manager.is_running(game_id) and _configured_live_evaluators(journal_path):
+        raise HTTPException(status_code=409, detail="Pause the game before changing its live evaluator panel.")
     if not request.evaluators:
         raise HTTPException(status_code=400, detail="Provide at least one evaluator panel member.")
     # build every member up front so a bad spec or missing key fails fast, before the worker starts
@@ -558,15 +581,16 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
         specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
+    _write_live_evaluators(journal_path, request.evaluators if request.live else [])
+    if request.live and manager.is_running(game_id):
+        journal_path.with_suffix(".eval.error.json").unlink(missing_ok=True)
+        return  # the game worker will block at the next completed round and run this panel
     manager.evaluate_game(
         game_id=game_id,
         journal_path=journal_path,
         evaluator_specs=request.evaluators,
         log_path=journal_path.parent / "evaluation.log",
         live=request.live,
-    )
-    (journal_path.parent / "live-evaluators.json").write_text(
-        json.dumps({"evaluators": request.evaluators if request.live else []}), encoding="utf-8"
     )
 
 
@@ -707,7 +731,6 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
         game_directory = games_directory / base_id
         _start_game_worker(game_directory=game_directory, manager=manager, request=request, seed=request.seed)
         _wait_for_journal_header(game_directory=game_directory, manager=manager)
-        _start_launched_live_evaluation(game_directory, manager, request.evaluators)
         return NewGameResponse(id=base_id, tournament=False)
 
     # a tournament: the same setup replicated across workers on consecutive seeds,
@@ -729,20 +752,7 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
     for game_id in game_ids:
         game_directory = tournament_directory / game_id
         _wait_for_journal_header(game_directory=game_directory, manager=manager)
-        _start_launched_live_evaluation(game_directory, manager, request.evaluators)
     return NewGameResponse(id=base_id, tournament=True)
-
-
-def _start_launched_live_evaluation(game_directory: Path, manager: GameProcessManager, evaluators: list[str]) -> None:
-    if evaluators and not manager.is_evaluating(game_directory.name):
-        game_directory.mkdir(parents=True, exist_ok=True)
-        (game_directory / "live-evaluators.json").write_text(
-            json.dumps({"evaluators": evaluators}), encoding="utf-8"
-        )
-        manager.evaluate_game(
-            game_id=game_directory.name, journal_path=game_directory / "game.jsonl",
-            evaluator_specs=evaluators, log_path=game_directory / "evaluation.log", live=True,
-        )
 
 
 def _start_game_worker(game_directory: Path, manager: GameProcessManager, request: NewGameRequest, seed: int) -> None:
@@ -750,6 +760,7 @@ def _start_game_worker(game_directory: Path, manager: GameProcessManager, reques
     # the launch record keeps the game's own seed so resume sees the game, not the tournament
     launch_record = request.model_copy(update={"seed": seed, "parallel_games": 1})
     (game_directory / "launch.json").write_text(launch_record.model_dump_json(), encoding="utf-8")
+    _write_live_evaluators(game_directory / "game.jsonl", request.evaluators)
     manager.launch_game(
         game_id=game_directory.name,
         players=request.players,
@@ -777,6 +788,8 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
     if summary is None or summary.finished:
         raise HTTPException(status_code=409, detail="The game is already finished; nothing to resume.")
     game_directory = journal_path.parent
+    if manager.evaluating_live(game_id):
+        manager.pause_evaluation(game_id)
     manager.resume_game(
         game_id=game_id,
         journal_path=journal_path,
@@ -784,12 +797,25 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
         log_path=game_directory / "worker.log",
     )
     _confirm_worker_started(game_directory=game_directory, manager=manager)
-    live_config = game_directory / "live-evaluators.json"
-    launch_path = game_directory / "launch.json"
-    source = live_config if live_config.is_file() else launch_path
-    if source.is_file():
-        evaluators = json.loads(source.read_text(encoding="utf-8")).get("evaluators", [])
-        _start_launched_live_evaluation(game_directory, manager, evaluators)
+
+
+def _configured_live_evaluators(journal_path: Path) -> list[str]:
+    try:
+        config = (journal_path.parent / "live-evaluators.json").read_text(encoding="utf-8")
+        return json.loads(config).get("evaluators", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _write_live_evaluators(journal_path: Path, evaluators: list[str]) -> None:
+    """Publish panel changes atomically while the game worker watches this file."""
+    target = journal_path.parent / "live-evaluators.json"
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary.write_text(json.dumps({"evaluators": evaluators}), encoding="utf-8")
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _confirm_worker_started(game_directory: Path, manager: GameProcessManager) -> None:

@@ -7,7 +7,7 @@ from risk_bench.runner.evaluation_store import evaluation_header, read_evaluatio
 from risk_bench.runner.evaluation_versions import EvaluationVersion
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 
 def build_analysis(journal_path: Path, eval_path: Path, generated_at: str) -> dict:
@@ -27,7 +27,7 @@ def build_analysis(journal_path: Path, eval_path: Path, generated_at: str) -> di
     )
     view = build_evaluation_view_model(journal_path, version)
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": header.schema_version,
         "game_id": journal_path.parent.name,
         "generated_at": generated_at,
         "codebook_version": header.codebook_version,
@@ -41,11 +41,14 @@ def build_analysis(journal_path: Path, eval_path: Path, generated_at: str) -> di
         "members": [member_summary(m) for m in view["members"]],
         "comparison": comparisons(view["members"]),
         "notes": [
-            "Counts are per coder. Panel votes are not independent episodes.",
-            "Adherence includes only valid fulfilled or violated episodes with agent-choice provenance.",
+            "Counts are per coder and unique tag; panel votes are not independent observations.",
+            "Proposals without establishment are counted separately from promises.",
+            "Adherence uses only valid, established, resolved agent-attributable commitments.",
+            "Deceptive is one statement status and includes the underlying contradiction.",
             "Citation integrity checks sources, not the truth of an interpretation.",
-            "Untyped, unclear and missing messages are not classified as honest.",
-            "Source-anchor comparisons expose ambiguous splits; they are not an adjudicated agreement statistic.",
-            "Forks share observations with their ancestors. Do not count inherited history as independent games.",
+            "Forks share observations with their ancestors and are not independent games.",
+        ] if header.schema_version >= 4 else [
+            "Legacy v2 codebook and seven-code counts; do not relabel as two-tag assessments.",
+            "Forks share observations with their ancestors and are not independent games.",
         ],
     }

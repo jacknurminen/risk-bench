@@ -1,4 +1,5 @@
 import json
+import os
 import time
 from pathlib import Path
 
@@ -141,20 +142,40 @@ def test_launch_requests_are_validated(tmp_path: Path):
     assert "Unknown provider" in bad_provider.json()["detail"]
 
 
-def test_launch_starts_the_selected_live_evaluator(tmp_path: Path, monkeypatch):
+def test_launch_configures_the_selected_round_evaluator_before_play(tmp_path: Path, monkeypatch):
     from risk_bench.api import app as api_app
 
     started = []
     monkeypatch.setattr(api_app, "_validate_launch_request", lambda request: None)
-    monkeypatch.setattr(api_app, "_start_game_worker", lambda **kwargs: None)
     monkeypatch.setattr(api_app, "_wait_for_journal_header", lambda **kwargs: None)
-    monkeypatch.setattr(GameProcessManager, "evaluate_game", lambda self, **kwargs: started.append(kwargs))
+    monkeypatch.setattr(GameProcessManager, "launch_game", lambda self, **kwargs: started.append(kwargs))
     response = client_for(tmp_path).post("/api/games", json={
         "players": ["random"] * 3, "evaluators": ["openai:gpt-6-luna:medium"]
     })
     assert response.status_code == 201
-    assert started[0]["evaluator_specs"] == ["openai:gpt-6-luna:medium"]
-    assert started[0]["live"] is True
+    config = started[0]["journal_path"].parent / "live-evaluators.json"
+    assert config.is_file()
+    assert json.loads(config.read_text())["evaluators"] == ["openai:gpt-6-luna:medium"]
+
+
+def test_live_panel_started_during_play_is_handled_by_the_game_worker(tmp_path: Path, monkeypatch):
+    from risk_bench.api import app as api_app
+    from risk_bench.api.schemas import EvaluateRequest
+
+    journal = tmp_path / "games" / "ongoing" / "game.jsonl"
+    journal.parent.mkdir(parents=True)
+    manager = GameProcessManager()
+    monkeypatch.setattr(manager, "is_running", lambda game_id: True)
+    monkeypatch.setattr(api_app.specs, "build_evaluators", lambda **kwargs: ())
+    monkeypatch.setattr(manager, "evaluate_game", lambda **kwargs: (_ for _ in ()).throw(
+        AssertionError("A second worker would race the game-boundary review")
+    ))
+
+    api_app._start_evaluation(
+        manager, "ongoing", journal, EvaluateRequest(evaluators=["test:coder"], live=True)
+    )
+
+    assert api_app._configured_live_evaluators(journal) == ["test:coder"]
 
 
 def unfinished_journal(games_directory: Path, name: str) -> Path:
@@ -533,6 +554,27 @@ def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Pat
         (1, "openai:gpt-5.6-sol"),
     ]
     assert progress["expected_calls"] == 2 * progress["members"][0]["expected_calls"]
+
+
+def test_live_review_activity_is_reported_only_while_a_round_or_final_call_is_active(tmp_path: Path):
+    client, game_id = client_with_finished_game(tmp_path=tmp_path)
+    marker = tmp_path / "games" / game_id / "game.eval.active.json"
+    (marker.parent / "live-evaluators.json").write_text(json.dumps({"evaluators": ["test:coder"]}))
+
+    waiting = client.get(f"/api/games/{game_id}/evaluation").json()
+    assert waiting["live_evaluation"] is True and waiting["live_panel"] == ["test:coder"]
+    assert waiting["review_active"] is False
+    marker.write_text(json.dumps({"pid": os.getpid(), "kind": "round", "round": 1}))
+    reviewing = client.get(f"/api/games/{game_id}/evaluation").json()
+    assert reviewing["review_active"] is True
+    assert reviewing["reviewing_round"] == 1 and reviewing["reviewing_final"] is False
+
+    marker.write_text(json.dumps({"pid": os.getpid(), "kind": "final", "round": None}))
+    final = client.get(f"/api/games/{game_id}/evaluation").json()
+    assert final["review_active"] is True and final["reviewing_final"] is True
+
+    marker.unlink()
+    assert client.get(f"/api/games/{game_id}/evaluation").json()["review_active"] is False
 
 
 def test_a_trace_without_its_sidecar_is_reported_as_an_interrupted_run(tmp_path: Path):
