@@ -10,7 +10,7 @@ from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWrit
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import render_reader_export_html, render_reader_html
 from risk_bench.viewer.snapshots import build_view_model
-from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
+from tests.runner.test_journal import LEGACY_GAME_HEADERS, PLAYER_NAMES, write_game_journal
 
 
 def journal_with_game(tmp_path: Path) -> Path:
@@ -20,10 +20,9 @@ def journal_with_game(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("game_id", ["20260909-123257-seed1", "20260910-092103-seed7", "20260911-071339-seed8"])
-def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
-    path = Path(__file__).parents[2] / "data" / "v2" / "games" / game_id / "game.jsonl"
-    if not path.exists():
-        pytest.skip("the committed reference game is not checked out")
+def test_schema_three_reference_headers_require_the_v2_application(game_id: str, tmp_path: Path):
+    path = tmp_path / "game.jsonl"
+    path.write_text(json.dumps(LEGACY_GAME_HEADERS[game_id]) + "\n", encoding="utf-8")
     for read in (read_journal, build_view_model, restore_game):
         with pytest.raises(ValueError, match="v2 Git tag"):
             read(path)

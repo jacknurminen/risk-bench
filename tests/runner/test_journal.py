@@ -19,7 +19,9 @@ from risk_bench.runner.journal import (
 )
 
 PLAYER_NAMES = ["alice", "bob", "carla"]
-REFERENCE_GAME_JOURNAL = Path(__file__).parents[2] / "data" / "v2" / "games" / "20260908-092609-seed0" / "game.jsonl"
+LEGACY_GAME_HEADERS = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "legacy-game-headers.json").read_text(encoding="utf-8")
+)
 
 
 def journaled_runner(journal: JournalWriter | None, seed: int, max_turns: int) -> GameRunner:
@@ -200,10 +202,11 @@ def test_journals_from_before_schema_three_replay_under_the_legacy_ruleset(tmp_p
         restore_game(path=path)
 
 
-@pytest.mark.skipif(not REFERENCE_GAME_JOURNAL.exists(), reason="the committed reference game is not checked out")
-def test_the_committed_reference_game_replays_cleanly():
+def test_legacy_reference_game_header_is_rejected(tmp_path: Path):
+    path = tmp_path / "game.jsonl"
+    path.write_text(json.dumps(LEGACY_GAME_HEADERS["20260908-092609-seed0"]) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="v2 Git tag"):
-        restore_game(path=REFERENCE_GAME_JOURNAL)
+        restore_game(path=path)
 
 
 def test_restore_rejects_files_without_a_header(tmp_path: Path):

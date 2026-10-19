@@ -1,0 +1,61 @@
+{
+  "20260908-092609-seed0": {
+    "type": "header",
+    "schema_version": 2,
+    "seed": 0,
+    "player_specs": {
+      "gemini-3.1-pro-preview": "google:gemini-3.1-pro-preview:medium",
+      "claude-opus-5": "anthropic:claude-opus-5:medium",
+      "gpt-5.6-sol": "openai:gpt-5.6-sol:medium"
+    },
+    "max_turns": 150,
+    "allow_private_messages": false,
+    "max_negotiation_rounds": 3,
+    "commentators": [
+      "openai:gpt-5.6-sol:medium"
+    ]
+  },
+  "20260909-123257-seed1": {
+    "type": "header",
+    "schema_version": 3,
+    "seed": 1,
+    "player_specs": {
+      "claude-opus-5": "anthropic:claude-opus-5:medium",
+      "human": "human",
+      "gpt-5.6-sol": "openai:gpt-5.6-sol:medium"
+    },
+    "max_turns": 150,
+    "allow_private_messages": false,
+    "max_negotiation_rounds": 3,
+    "commentators": []
+  },
+  "20260910-092103-seed7": {
+    "type": "header",
+    "schema_version": 3,
+    "seed": 7,
+    "player_specs": {
+      "human": "human",
+      "claude-fable-5": "anthropic:claude-fable-5:medium",
+      "gpt-6-astra": "openai:gpt-6-astra:medium"
+    },
+    "max_turns": 150,
+    "allow_private_messages": false,
+    "max_negotiation_rounds": 3,
+    "commentators": []
+  },
+  "20260911-071339-seed8": {
+    "type": "header",
+    "schema_version": 3,
+    "seed": 8,
+    "player_specs": {
+      "gemini-3.8-flash": "google:gemini-3.8-flash:medium",
+      "gpt-5.6-terra": "openai:gpt-5.6-terra:medium",
+      "human": "human",
+      "claude-sonnet-5": "anthropic:claude-sonnet-5:medium"
+    },
+    "max_turns": 150,
+    "allow_private_messages": false,
+    "max_negotiation_rounds": 3,
+    "commentators": []
+  }
+}

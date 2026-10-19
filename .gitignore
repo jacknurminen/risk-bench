@@ -12,18 +12,18 @@ wheels/
 # Local API keys
 .env
 
-# Runtime data, except selected example games (journals, traces, evaluation, analysis)
+# Runtime data, except the selected tournament dataset and its audit history
 data/*
-!data/v2/
-data/v2/*
-!data/v2/games/
-data/v2/games/*
-!data/v2/games/20260908-092609-seed0/
-!data/v2/games/20260909-123257-seed1/
-!data/v2/games/20260910-092103-seed7/
-!data/v2/games/20260911-071339-seed8/
-data/v2/games/*/game.human/
-data/v2/games/*/*.log
+!data/v3/
+data/v3/*
+!data/v3/games/
+data/v3/games/*
+!data/v3/games/20261012-101836-seed8349/
+data/v3/games/**/*.log
+data/v3/games/**/game.human/
+data/v3/games/**/*.lock
+data/v3/games/**/*.active.json
+data/v3/games/**/*.pid
 
 # Local design scratch: UI prototypes and screenshots, kept out of history (heavy binaries)
 designs/

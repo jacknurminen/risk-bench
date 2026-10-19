@@ -39,39 +39,38 @@ Open [http://localhost:8420](http://localhost:8420). V3 games are saved under `d
 
 ## Versioned datasets
 
-The Git tag `v2` preserves the game engine, evaluator, and reader for the existing
-experiments. Its default output directory is `data/v2/`, including game journals,
-model traces, evaluations, and analysis. These experiment versions are separate
-from the schema version numbers inside individual files.
+The Git tag `v2` preserves the earlier game engine, evaluator, reader, and four
+example games under `data/v2/`. Those examples are no longer tracked on this branch;
+existing local copies remain usable. These experiment versions are separate from
+the schema version numbers inside individual files.
 
 To open the v2 application alongside ongoing development, use a separate checkout
-and point it at the existing dataset:
+with its saved example dataset:
 
 ```bash
 git worktree add --detach ../risk-bench-v2 v2
 cd ../risk-bench-v2
 uv sync
-OUTPUT_DIRECTORY=../risk-bench/data/v2 uv run python -m risk_bench.main serve --port 8421
+uv run python -m risk_bench.main serve --port 8421
 ```
 
 V3 uses fresh games in `data/v3/`. Existing v2 games belong to the v2 application;
 v3 rejects them even if copied into the new folder. It does not migrate, resume,
-or fork v2 games. The revised commitment codebook is instrument version 2 within
+or fork v2 games. The thesis commitment/deception codebook is instrument version 4 within
 experiment version 3; these numbers describe different things.
 
-## Example games
+## Included tournament
 
-These completed v2 games are included in the repository. Open them with the v2 application above.
-Browsing their replays and saved evaluations requires no API keys.
+The repository includes [20261012-101836-seed8349](data/v3/games/20261012-101836-seed8349),
+a completed 12-game tournament between Claude Opus 5.5, Gemini 3.8 Flash, and GPT-6.1 Sol,
+all configured with medium reasoning effort. Seating cycles through all six orders twice.
+Open the current application and select the tournament to browse its games and aggregated
+statistics. Browsing saved replays and evaluations requires no API keys.
 
-| Game | Players | Saved evaluation |
-| --- | --- | --- |
-| [20260908-092609-seed0](data/v2/games/20260908-092609-seed0) | Gemini 3.1 Pro Preview, Claude Opus 5, GPT-5.6 Sol | Yes |
-| [20260909-123257-seed1](data/v2/games/20260909-123257-seed1) | Human, Claude Opus 5, GPT-5.6 Sol | Yes |
-| [20260910-092103-seed7](data/v2/games/20260910-092103-seed7) | Human, Claude Fable 5, GPT-6 Astra | Yes |
-| [20260911-071339-seed8](data/v2/games/20260911-071339-seed8) | Human, Claude Sonnet 5, GPT-5.6 Terra, Gemini 3.8 Flash | No |
-
-Each includes its game journal and model-call trace, plus evaluation and analysis files where available.
+The dataset includes the tournament manifest, saved launch settings, journals, model-call
+traces, evaluations, analyses, and review records. Three superseded game attempts and an
+earlier evaluation version remain available for audit; the manifest selects the 12 current
+attempts used in tournament statistics. Runtime logs and other local experiments are ignored.
 
 ## Why Risk?
 
