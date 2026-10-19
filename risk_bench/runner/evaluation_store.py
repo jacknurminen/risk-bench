@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from risk_bench.runner.codebook_v3 import CODEBOOK_HASH, CODEBOOK_VERSION
+from risk_bench.runner.codebook_v4 import CODEBOOK_HASH, CODEBOOK_VERSION
 from risk_bench.runner.evaluation import EvaluatedGame
 
-EVALUATION_SCHEMA_VERSION = 5
+EVALUATION_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class EvaluationHeader:
     source: dict = field(default_factory=dict)
     codebook_version: str = CODEBOOK_VERSION
     codebook_hash: str = CODEBOOK_HASH
+    method: str = "whole_game"
 
 
 def evaluation_path_for_journal(journal_path: Path) -> Path:
@@ -39,16 +40,18 @@ class EvaluationWriter:
         self.path = path
         self._file = path.open("w", encoding="utf-8")
 
-    def write_header(self, panel: list[str], record_count: int, span_count: int, source: dict | None = None) -> None:
+    def write_header(self, panel: list[str], record_count: int, span_count: int, source: dict | None = None,
+                     run_id: str | None = None) -> None:
         created = datetime.now(tz=UTC)
         self._write_line(
             {
                 "type": "eval_header",
                 "schema_version": EVALUATION_SCHEMA_VERSION,
                 "experiment_version": 3,
+                "method": "whole_game",
                 "codebook_version": CODEBOOK_VERSION,
                 "codebook_hash": CODEBOOK_HASH,
-                "run_id": created.strftime("%Y%m%d-%H%M%S-%f"),
+                "run_id": run_id or created.strftime("%Y%m%d-%H%M%S-%f"),
                 "created_at": created.isoformat(),
                 "panel": panel,
                 "coverage": {"record_count": record_count, "span_count": span_count},
@@ -86,7 +89,7 @@ def evaluation_header(records: list[dict[str, Any]]) -> EvaluationHeader | None:
     if not records or records[0].get("type") != "eval_header":
         return None
     data = records[0]
-    if data.get("schema_version") not in {3, 4, 5}:
+    if data.get("schema_version") not in {3, 4, 5, 6}:
         raise ValueError("Older evaluations belong to the v2 application.")
     coverage = data["coverage"]
     return EvaluationHeader(
@@ -99,4 +102,5 @@ def evaluation_header(records: list[dict[str, Any]]) -> EvaluationHeader | None:
         source=data.get("source", {}),
         codebook_version=data.get("codebook_version", ""),
         codebook_hash=data.get("codebook_hash", ""),
+        method=data.get("method", "live_rounds" if data.get("live") else "whole_game"),
     )

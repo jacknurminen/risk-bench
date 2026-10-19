@@ -31,7 +31,7 @@ def with_citation_catalog(payload):
             if "span" in value and ("quote" in value or "field_path" in value):
                 if value not in catalog:
                     catalog.append(value)
-                return catalog.index(value)
+                return {"citation": catalog.index(value)}
             return {key: compact(child) for key, child in value.items()}
         if isinstance(value, list):
             return [compact(child) for child in value]
@@ -94,11 +94,13 @@ def test_round_assessment_reuses_catalog_citations_without_repeating_quotes():
         def respond(self, messages, tools):
             self.calls += 1
             schema = tools[0].parameters
-            assert schema["$defs"]["Statement"]["properties"]["passage"] == {"type": "integer", "minimum": 0}
+            passage = schema["$defs"]["Statement"]["properties"]["passage"]
+            assert passage["required"] == ["citation"]
+            assert passage["properties"]["citation"]["type"] == "integer"
             assert schema["properties"]["citations"]["items"] == {"$ref": "#/$defs/Citation"}
             if self.calls == 1:
                 invalid = copy.deepcopy(answer)
-                invalid["statements"][0]["passage"] = 99
+                invalid["statements"][0]["passage"] = {"citation": 99}
                 return Response(text=None, tool_calls=(ToolCall("1", tools[0].name, invalid),))
             assert "Citation index 99" in messages[1].content
             return Response(text=None, tool_calls=(ToolCall("1", tools[0].name, answer),))
@@ -122,7 +124,8 @@ def test_unchanged_units_are_retained_without_model_repeating_them():
 
     class Coder:
         def respond(self, messages, tools):
-            assert "return ONLY new records and existing" in messages[1].content
+            assert "commitment_updates" in messages[1].content
+            assert "server retains every omitted prior record" in messages[1].content
             assert '"id": "e1"' in messages[0].content
             return Response(text=None, tool_calls=(ToolCall("1", tools[0].name, {
                 "messages": [], "statements": [], "commitments": [], "memos": [],
@@ -203,9 +206,9 @@ def test_final_assessment_keeps_the_ledger_and_uses_the_recorded_result():
         def respond(self, messages, tools):
             assert '"winner": "alice"' in messages[0].content
             assert '"id": "e1"' in messages[0].content
-            assert tools[0].parameters["$defs"]["Commitment"]["properties"]["passage"] == {
-                "type": "integer", "minimum": 0,
-            }
+            passage = tools[0].parameters["$defs"]["Commitment"]["properties"]["passage"]
+            assert passage["required"] == ["citation"]
+            assert passage["properties"]["citation"]["type"] == "integer"
             return Response(text=None, tool_calls=(ToolCall("1", tools[0].name, with_citation_catalog({
                 **two_tag_adjudication(), "summary": "Alice won; her earlier commitment was violated."
             })),))
@@ -287,13 +290,15 @@ def test_live_evaluation_saves_completed_turn_and_resumes_after_api_failure(tmp_
     evaluator.fail = True
     with pytest.raises(RuntimeError, match="API unavailable"):
         run_live_evaluation(journal, [evaluator.spec], settings=None, follow=False)
-    assert not evaluation_path_for_journal(journal).exists()
+    initial = read_evaluation(evaluation_path_for_journal(journal))
+    assert initial[-1] == {"type": "eval_live_cutoff", "round": 0, "turn": 0, "finalized": False}
     assert review_activity_for_journal(journal) is None
 
     evaluator.fail = False
     run_live_evaluation(journal, [evaluator.spec], settings=None, follow=False)
     assert review_activity_for_journal(journal) is None
     saved = read_evaluation(evaluation_path_for_journal(journal))
+    assert saved[0]["run_id"] == initial[0]["run_id"]
     assert saved[-1] == {"type": "eval_live_cutoff", "round": 1, "turn": 1, "finalized": True}
     assert {r["span"] for r in saved if r["type"] == "eval_message_coverage"} == {1, 2}
     view = build_evaluation_view_model(journal, version_for(journal, None))
@@ -309,6 +314,80 @@ def test_live_evaluation_saves_completed_turn_and_resumes_after_api_failure(tmp_
     run_live_evaluation(journal, [evaluator.spec], settings=None, follow=False)
     assert len(evaluator.calls) == 2
     assert evaluator.final_calls == 1
+
+
+def test_fresh_replay_matches_live_rounds_and_preserves_previous_artifacts(tmp_path, monkeypatch):
+    journal = tmp_path / "game" / "game.jsonl"
+    journal.parent.mkdir()
+    (journal.parent / "live-evaluators.json").write_text(json.dumps({"evaluators": ["test:coder"]}))
+    evaluator = DeterministicEvaluator()
+    monkeypatch.setattr("risk_bench.runner.live_evaluation.specs.build_evaluators", lambda **kwargs: (evaluator,))
+    run_new_game(["random"] * 3, 19, Settings(), [], journal, 4, False, [])
+    original_journal = journal.read_bytes()
+    original_calls = copy.deepcopy(evaluator.calls)
+    current = version_for(journal, None)
+    original_rows = read_evaluation(current.eval_path)
+    # These companions must travel with the old evaluation, including human reviews.
+    companions = {"trace_path": b'{"call": "original"}\n', "verifications_path": b'{"review": true}\n',
+                  "analysis_path": b'{"analysis": "original"}\n'}
+    for attribute, content in companions.items():
+        getattr(current, attribute).write_bytes(content)
+
+    run_live_evaluation(journal, [evaluator.spec], Settings(), follow=False, restart=True)
+
+    versions = list_versions(journal)
+    assert len(versions) == 2
+    fresh, archived = versions
+    assert fresh.run_id != current.run_id and archived.run_id == current.run_id
+    assert read_evaluation(archived.eval_path) == original_rows
+    assert read_evaluation(fresh.eval_path)[1:] == original_rows[1:]
+    assert evaluator.calls[len(original_calls):] == original_calls
+    assert evaluator.calls[len(original_calls)][1] is None  # no old annotations leak into replay
+    assert evaluator.final_calls == 2
+    assert journal.read_bytes() == original_journal
+    for attribute, content in companions.items():
+        assert getattr(archived, attribute).read_bytes() == content
+
+
+@pytest.mark.parametrize("failure", ["first", "second", "final"])
+def test_failed_fresh_replay_resumes_its_own_version(tmp_path, monkeypatch, failure):
+    journal = tmp_path / "game" / "game.jsonl"
+    journal.parent.mkdir()
+    run_new_game(["random"] * 3, 19, Settings(), [], journal, 4, False, [])
+
+    class Coder(DeterministicEvaluator):
+        failing_round = None
+
+        def evaluate_round(self, players, spans, round_spans, ledger, round_number):
+            self.fail = round_number == self.failing_round
+            # Every call sees only its cutoff, even though the whole game is on disk.
+            assert all(span.round is None or span.round <= round_number for span in spans)
+            return super().evaluate_round(players, spans, round_spans, ledger, round_number)
+
+    coder = Coder()
+    monkeypatch.setattr("risk_bench.runner.live_evaluation.specs.build_evaluators", lambda **kwargs: (coder,))
+    run_live_evaluation(journal, [coder.spec], Settings(), follow=False)
+    old_version = version_for(journal, None)
+    expected = read_evaluation(old_version.eval_path)[1:]
+    coder.failing_round = {"first": 1, "second": 2}.get(failure)
+    coder.fail_final = failure == "final"
+    with pytest.raises(RuntimeError, match="API"):
+        run_live_evaluation(journal, [coder.spec], Settings(), follow=False, restart=True)
+    paused_version = version_for(journal, None)
+    paused = read_evaluation(paused_version.eval_path)
+    assert paused[-1]["round"] == {"first": 0, "second": 1, "final": 2}[failure]
+    view = build_evaluation_view_model(journal, paused_version)
+    assert view["coverage"]["source_matches"] and not view["live_finalized"]
+    calls_before_resume = len(coder.calls)
+    coder.failing_round = None
+    coder.fail_final = False
+
+    run_live_evaluation(journal, [coder.spec], Settings(), follow=False)
+
+    assert len(list_versions(journal)) == 2  # retry doesn't create yet another version
+    assert version_for(journal, None).run_id == paused_version.run_id
+    assert read_evaluation(paused_version.eval_path)[1:] == expected
+    assert len(coder.calls) - calls_before_resume == {"first": 2, "second": 1, "final": 0}[failure]
 
 
 def test_old_turn_cadence_is_archived_before_round_review(tmp_path, monkeypatch):
@@ -380,6 +459,38 @@ def test_live_evaluation_waits_for_the_next_round_boundary(tmp_path, monkeypatch
     assert len(evaluator.calls) == 1
     assert review_activity_for_journal(journal) is None
     assert read_evaluation(evaluation_path_for_journal(journal))[-1]["turn"] == 1
+
+
+def test_paused_replay_defers_unfinished_round_and_continues_when_game_resumes(tmp_path, monkeypatch):
+    journal = tmp_path / "paused" / "game.jsonl"
+    journal.parent.mkdir()
+    rows = [*round_records(), {"type": "note", "player": "bob", "turn": 2, "round": 2,
+                              "text": "Unfinished round"}]
+    journal.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    original = journal.read_bytes()
+    evaluator = DeterministicEvaluator()
+    monkeypatch.setattr("risk_bench.runner.live_evaluation.specs.build_evaluators", lambda **kwargs: (evaluator,))
+    run_live_evaluation(journal, [evaluator.spec], Settings(), follow=False)
+    old = version_for(journal, None)
+    old_rows = read_evaluation(old.eval_path)
+    run_live_evaluation(journal, [evaluator.spec], Settings(), follow=False, restart=True)
+    fresh = version_for(journal, None)
+    saved = read_evaluation(fresh.eval_path)
+    assert journal.read_bytes() == original
+    assert fresh.run_id != old.run_id and len(list_versions(journal)) == 2
+    assert saved[1:] == old_rows[1:]
+    assert saved[-1] == {"type": "eval_live_cutoff", "round": 1, "turn": 1, "finalized": False}
+    assert evaluator.calls[0] == evaluator.calls[1]
+    assert evaluator.final_calls == 0
+    with journal.open("a") as file:
+        file.write(json.dumps({"type": "note", "player": "bob", "turn": 3, "round": 3,
+                               "text": "Next round"}) + "\n")
+    run_live_evaluation(journal, [evaluator.spec], Settings(), follow=False)
+    assert len(evaluator.calls) == 3
+    assert evaluator.calls[-1][1] is not None
+    assert read_evaluation(fresh.eval_path)[-1]["round"] == 2
+    assert version_for(journal, None).run_id == fresh.run_id
+    assert evaluator.final_calls == 0
 
 
 def test_two_turns_in_one_round_use_one_evaluator_call(tmp_path, monkeypatch):

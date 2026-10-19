@@ -374,7 +374,7 @@ def test_deadline_rules_are_in_actual_evaluator_instructions():
     assert "a pause, API failure or observation limit does not" in CODEBOOK_TEXT
 
 
-def test_new_sidecar_opens_with_two_tags_and_counts_once(tmp_path):
+def test_historical_sidecar_opens_with_two_tags_and_counts_once(tmp_path):
     journal = tmp_path / "game.jsonl"
     write_journal(journal)
     source_records = read_journal(journal)
@@ -398,6 +398,12 @@ def test_new_sidecar_opens_with_two_tags_and_counts_once(tmp_path):
         ),
     )
     writer.close()
+    import json
+
+    path = evaluation_path_for_journal(journal)
+    saved = [json.loads(line) for line in path.read_text().splitlines()]
+    saved[0].update(schema_version=5, codebook_version="two-tag-v3-arrangements-2026-09-28")
+    path.write_text("".join(json.dumps(row) + "\n" for row in saved))
     view = build_evaluation_view_model(journal, version_for(journal, None))
     assert view["tag_schema"] == "two_tag_v3"
     assert view["versions"][0]["schema_version"] == 5

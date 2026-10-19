@@ -34,6 +34,7 @@ class EvaluationVersion:
     analysis_path: Path
     verifications_path: Path
     schema_version: int = 3
+    method: str = "whole_game"
 
 
 def list_versions(journal_path: Path) -> list[EvaluationVersion]:
@@ -171,6 +172,7 @@ def _version(
         analysis_path=paths.analysis_path,
         verifications_path=paths.verifications_path,
         schema_version=header.schema_version if header else 3,
+        method=header.method if header else "whole_game",
     )
 
 

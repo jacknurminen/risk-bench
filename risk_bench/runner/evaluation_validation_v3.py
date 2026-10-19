@@ -16,8 +16,11 @@ def resolve_citation(raw: dict, lookup: dict[int, TraceSpan]) -> dict:
         matched = quote in source.text
     elif source and path:
         value = source.data
+        # The rendered trace wraps structured evidence in `data`. Accept that
+        # explicit wrapper as well as the canonical path relative to its contents.
+        parts = path[1:] if path[0] == "data" else path
         try:
-            for part in path:
+            for part in parts:
                 value = value[part]
             matched = value == raw.get("field_value")
         except (KeyError, IndexError, TypeError):
@@ -32,7 +35,10 @@ def resolve_citation(raw: dict, lookup: dict[int, TraceSpan]) -> dict:
     }
 
 
-def validate_adjudication(raw: cb.Adjudication, spans: tuple[TraceSpan, ...], players: set[str]) -> list[dict]:
+def validate_adjudication(
+    raw: cb.Adjudication, spans: tuple[TraceSpan, ...], players: set[str],
+    *, communication_ids: set[str] | None = None, check_revision_actor: bool = True,
+) -> list[dict]:
     lookup = {s.span: s for s in spans}
     cutoff = len(spans) - 1
     counts = Counter(
@@ -108,7 +114,9 @@ def validate_adjudication(raw: cb.Adjudication, spans: tuple[TraceSpan, ...], pl
                 if any(p not in players or p == unit.actor for p in unit.requires_acceptance):
                     issues.append("Required acceptance must name other game participants")
                 for revision in unit.revisions:
-                    if not any(delivered(c, unit.actor) for c in revision.evidence):
+                    if check_revision_actor and revision.effective and not any(
+                        delivered(c, unit.actor) for c in revision.evidence
+                    ):
                         issues.append("Revision needs the actor's delivered terms or acceptance")
                     if any(not lookup.get(c.span) or lookup[c.span].layer != "message" for c in revision.evidence):
                         issues.append("Revision must cite communicated terms and authorization")
@@ -158,7 +166,11 @@ def validate_adjudication(raw: cb.Adjudication, spans: tuple[TraceSpan, ...], pl
                         if not established:
                             issues.append("Proposal cannot have an established-outcome status")
                         sources = [lookup[c.span] for c in event.evidence if c.span in lookup]
-                        if not any(s.layer in {"action", "event"} for s in sources):
+                        communication = unit.id in (communication_ids or set()) and any(
+                            s.layer == "message" and s.player == unit.actor and s.span > (established_at or 0)
+                            for s in sources
+                        )
+                        if not communication and not any(s.layer in {"action", "event"} for s in sources):
                             issues.append("Outcome needs action or event evidence")
                         if event.window:
                             start, end = event.window
@@ -174,7 +186,7 @@ def validate_adjudication(raw: cb.Adjudication, spans: tuple[TraceSpan, ...], pl
                             # A battle result can cite the applied action by its step,
                             # without forcing the evaluator to cite both records.
                             steps = {s.step for s in sources if s.layer in {"action", "event"}}
-                            if not any(
+                            if not communication and not any(
                                 s.layer == "action" and s.player == unit.actor and s.step in steps
                                 and s.span >= (established_at or 0)
                                 and (s.data or {}).get("action", s.data or {}).get("kind")
@@ -199,6 +211,13 @@ def validate_adjudication(raw: cb.Adjudication, spans: tuple[TraceSpan, ...], pl
                     )
                 ]
                 origins = {s.origin or "unknown" for s in actions}
+                if unit.id in (communication_ids or set()) and not final.window:
+                    origins.update(
+                        lookup[c.span].origin or "unknown" for c in final.evidence
+                        if c.span in lookup and lookup[c.span].layer == "message"
+                        and lookup[c.span].player == unit.actor
+                        and c.span > (established_at or 0)
+                    )
                 # These are engine-derived view/count fields, never requested from the evaluator.
                 data.update(
                     status=unit.status,

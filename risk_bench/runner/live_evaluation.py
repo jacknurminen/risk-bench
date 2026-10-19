@@ -15,7 +15,7 @@ from pathlib import Path
 from risk_bench import specs
 from risk_bench.agents.tracing import TraceWriter
 from risk_bench.config import Settings
-from risk_bench.runner.codebook_v3 import CODEBOOK_HASH, CODEBOOK_VERSION
+from risk_bench.runner.codebook_v4 import CODEBOOK_HASH, CODEBOOK_VERSION
 from risk_bench.runner.evaluation_store import (
     EVALUATION_SCHEMA_VERSION,
     evaluation_path_for_journal,
@@ -34,7 +34,7 @@ def review_activity_for_journal(journal_path: Path) -> dict | None:
     try:
         activity = json.loads(journal_path.with_suffix(".eval.active.json").read_text(encoding="utf-8"))
         pid = activity["pid"]
-        if not isinstance(pid, int) or pid <= 0 or activity.get("kind") not in {"round", "final"}:
+        if not isinstance(pid, int) or pid <= 0 or activity.get("kind") not in {"round", "final", "whole_game"}:
             return None
         if activity["kind"] == "round" and not isinstance(activity.get("round"), int):
             return None
@@ -44,13 +44,15 @@ def review_activity_for_journal(journal_path: Path) -> dict | None:
         return None
 
 
-def _mark_review_active(journal_path: Path, *, kind: str, round_number: int | None = None) -> None:
+def _mark_review_active(
+    journal_path: Path, *, kind: str, round_number: int | None = None, panel: list[str] | None = None,
+) -> None:
     marker = journal_path.with_suffix(".eval.active.json")
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=marker.parent, prefix=".eval-active-", delete=False
     ) as file:
         temporary = Path(file.name)
-        file.write(json.dumps({"pid": os.getpid(), "kind": kind, "round": round_number}))
+        file.write(json.dumps({"pid": os.getpid(), "kind": kind, "round": round_number, "panel": panel}))
     try:
         temporary.replace(marker)
     finally:
@@ -59,7 +61,7 @@ def _mark_review_active(journal_path: Path, *, kind: str, round_number: int | No
 
 def run_live_evaluation(
     journal_path: Path, evaluator_specs: list[str], settings: Settings, *, follow: bool = True,
-    poll_seconds: float = 1.0,
+    poll_seconds: float = 1.0, restart: bool = False, run_id: str | None = None,
 ) -> Path:
     """Catch up completed rounds, then follow the journal until the game ends."""
     if not evaluator_specs:
@@ -67,7 +69,8 @@ def run_live_evaluation(
     path = evaluation_path_for_journal(journal_path)
     saved = read_evaluation(path)
     resumable = bool(
-        saved and saved[0].get("live") and saved[0].get("live_review_version") == LIVE_REVIEW_VERSION
+        not restart and saved and saved[0].get("live")
+        and saved[0].get("live_review_version") == LIVE_REVIEW_VERSION
         and saved[0].get("panel") == evaluator_specs
         and saved[0].get("codebook_hash") == CODEBOOK_HASH
         and saved[-1].get("type") == "eval_live_cutoff"
@@ -87,6 +90,7 @@ def run_live_evaluation(
             raise ValueError("The saved live evaluation does not match this game's journal prefix.")
     if saved and not resumable:
         archive_current(journal_path)
+    header: dict
     if resumable:
         header = saved[0]
         cutoff = saved[-1]
@@ -101,12 +105,21 @@ def run_live_evaluation(
         header = {
             "type": "eval_header", "schema_version": EVALUATION_SCHEMA_VERSION,
             "experiment_version": 3, "codebook_version": CODEBOOK_VERSION,
-            "codebook_hash": CODEBOOK_HASH, "run_id": now.strftime("%Y%m%d-%H%M%S-%f"),
+            "codebook_hash": CODEBOOK_HASH, "run_id": run_id or now.strftime("%Y%m%d-%H%M%S-%f"),
             "created_at": now.isoformat(), "panel": evaluator_specs, "live": True,
-            "cadence": "round", "live_review_version": LIVE_REVIEW_VERSION,
-            "coverage": {"record_count": 0, "span_count": 0}, "source": {},
+            "cadence": "round", "method": "live_rounds", "live_review_version": LIVE_REVIEW_VERSION,
+            "coverage": {"record_count": 0, "span_count": 0},
+            "source": {
+                "game_id": journal_path.parent.name, "file": journal_path.name,
+                "journal_hash": prefix_hash([]), "trace_hash": trace_fingerprint(()),
+                "finished": False,
+            },
         }
         last_turn, last_round, ledgers, coverage, commentary, finalized = 0, 0, {}, [], [], False
+        # Keep the run identity (and its failed-call trace) even if the first call fails.
+        _replace_jsonl(path, [header, {
+            "type": "eval_live_cutoff", "round": 0, "turn": 0, "finalized": False,
+        }])
     journal_path.with_suffix(".eval.active.json").unlink(missing_ok=True)
     trace = TraceWriter(path=evaluation_trace_path_for_journal(journal_path), append=resumable)
     try:
@@ -149,7 +162,9 @@ def run_live_evaluation(
                         {**row, "evaluator_index": index, "evaluator": evaluator.spec}
                         for row in assessed if row["type"] == "eval_live_commentary"
                     )
-                record_count = prefix[-1].record + 1
+                source_record = prefix[-1].record
+                assert source_record is not None
+                record_count = source_record + 1
                 header["coverage"] = {"record_count": record_count, "span_count": len(prefix)}
                 header["source"] = {
                     "game_id": journal_path.parent.name, "file": journal_path.name,

@@ -25,7 +25,7 @@ from risk_bench.players.human import HumanPlayer
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.commentary import Commentator
-from risk_bench.runner.evaluation import Evaluator
+from risk_bench.runner.evaluation_v4 import Evaluator
 from risk_bench.tournament.runner import PlayerFactory
 
 _PROVIDER_NAMES: Final[frozenset[str]] = frozenset(Provider)
