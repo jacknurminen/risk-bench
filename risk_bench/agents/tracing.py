@@ -22,6 +22,17 @@ from risk_bench.agents.models import estimate_cost_usd
 TOKEN_CATEGORY_ORDER: Final[tuple[str, ...]] = ("negotiation", "decision", "commentary", "other")
 
 
+def _call_cost(record: dict, *, include_output: bool = True) -> float | None:
+    """Price before aggregating: many short prompts must not become one long prompt."""
+    return estimate_cost_usd(
+        model=record["model"],
+        input_tokens=record.get("input_tokens") or 0,
+        cache_write_tokens=record.get("cache_write_tokens") or 0,
+        cache_read_tokens=record.get("cache_read_tokens") or 0,
+        output_tokens=(record.get("output_tokens") or 0) if include_output else 0,
+    )
+
+
 def usage_by_caller(trace_path: Path) -> dict[str, dict[str, Any]]:
     """Aggregate a trace file into per-caller call counts, token totals, and cache-aware cost.
 
@@ -45,6 +56,7 @@ def usage_by_caller(trace_path: Path) -> dict[str, dict[str, Any]]:
                 "output_tokens": 0,
                 "cache_write_tokens": 0,
                 "cache_read_tokens": 0,
+                "cost_usd": 0.0,
             },
         )
         entry["calls"] += 1
@@ -54,14 +66,8 @@ def usage_by_caller(trace_path: Path) -> dict[str, dict[str, Any]]:
         # records from before cache accounting carry no cache fields; they price as uncached
         entry["cache_write_tokens"] += record.get("cache_write_tokens") or 0
         entry["cache_read_tokens"] += record.get("cache_read_tokens") or 0
-    for entry in usage.values():
-        entry["cost_usd"] = estimate_cost_usd(
-            model=entry["model"],
-            input_tokens=entry["input_tokens"],
-            cache_write_tokens=entry["cache_write_tokens"],
-            cache_read_tokens=entry["cache_read_tokens"],
-            output_tokens=entry["output_tokens"],
-        )
+        cost = _call_cost(record)
+        entry["cost_usd"] = None if cost is None or entry["cost_usd"] is None else entry["cost_usd"] + cost
     return usage
 
 
@@ -83,7 +89,7 @@ def per_turn_usage(trace_path: Path) -> dict[str, Any]:
         ``input_tokens`` / ``output_tokens`` / ``input_cost`` / ``output_cost``
         series aligned with ``turns``.
     """
-    counts: dict[int, dict[str, dict[str, dict[str, int]]]] = {}
+    counts: dict[int, dict[str, dict[str, dict[str, int | float]]]] = {}
     model_by_caller: dict[str, str] = {}
     for record in _iter_trace_records(trace_path=trace_path):
         caller = record["caller"]
@@ -92,12 +98,13 @@ def per_turn_usage(trace_path: Path) -> dict[str, Any]:
         bucket = (
             counts.setdefault(int(record.get("turn", 0)), {})
             .setdefault(caller, {})
-            .setdefault(category, {"input": 0, "output": 0, "cache_write": 0, "cache_read": 0})
+            .setdefault(category, {"input": 0, "output": 0, "input_cost": 0.0, "output_cost": 0.0})
         )
         bucket["input"] += record.get("input_tokens") or 0
         bucket["output"] += record.get("output_tokens") or 0
-        bucket["cache_write"] += record.get("cache_write_tokens") or 0
-        bucket["cache_read"] += record.get("cache_read_tokens") or 0
+        input_cost = _call_cost(record, include_output=False) or 0.0
+        bucket["input_cost"] += input_cost
+        bucket["output_cost"] += (_call_cost(record) or 0.0) - input_cost
     turns = sorted(counts)
     categories = [
         category
@@ -110,13 +117,9 @@ def per_turn_usage(trace_path: Path) -> dict[str, Any]:
         "categories": categories,
         "callers": callers,
         "by_category": {
-            category: _usage_series(counts=counts, turns=turns, models=model_by_caller, category=category)
-            for category in categories
+            category: _usage_series(counts=counts, turns=turns, category=category) for category in categories
         },
-        "by_caller": {
-            caller: _usage_series(counts=counts, turns=turns, models=model_by_caller, caller=caller)
-            for caller in callers
-        },
+        "by_caller": {caller: _usage_series(counts=counts, turns=turns, caller=caller) for caller in callers},
     }
 
 
@@ -278,17 +281,16 @@ class TracingAgent:
 
 
 def _usage_series(
-    counts: dict[int, dict[str, dict[str, dict[str, int]]]],
+    counts: dict[int, dict[str, dict[str, dict[str, int | float]]]],
     turns: list[int],
-    models: dict[str, str],
     category: str | None = None,
     caller: str | None = None,
 ) -> dict[str, list[float]]:
     """Build per-turn token and cost series, summing over whichever axis is left free.
 
     Fixing ``category`` sums across callers (the by-category breakdown); fixing
-    ``caller`` sums across categories (the by-caller breakdown). Cost is derived
-    per bucket from that caller's model, so a mix of models aggregates correctly.
+    ``caller`` sums across categories (the by-caller breakdown). Costs were priced
+    per call before aggregation so prompt-length tiers apply independently.
     """
     input_tokens, output_tokens, input_cost, output_cost = [], [], [], []
     for turn in turns:
@@ -301,29 +303,10 @@ def _usage_series(
                 bucket = categories_for_caller.get(current_category)
                 if bucket is None:
                     continue
-                model = models[current_caller]
                 tokens_in += bucket["input"]
                 tokens_out += bucket["output"]
-                cost_in += (
-                    estimate_cost_usd(
-                        model=model,
-                        input_tokens=bucket["input"],
-                        cache_write_tokens=bucket["cache_write"],
-                        cache_read_tokens=bucket["cache_read"],
-                        output_tokens=0,
-                    )
-                    or 0.0
-                )
-                cost_out += (
-                    estimate_cost_usd(
-                        model=model,
-                        input_tokens=0,
-                        cache_write_tokens=0,
-                        cache_read_tokens=0,
-                        output_tokens=bucket["output"],
-                    )
-                    or 0.0
-                )
+                cost_in += bucket["input_cost"]
+                cost_out += bucket["output_cost"]
         input_tokens.append(tokens_in)
         output_tokens.append(tokens_out)
         input_cost.append(round(cost_in, 4))
@@ -373,9 +356,14 @@ def _message_to_json(message: Message) -> dict[str, Any]:
 
 
 def _response_to_json(response: Response) -> dict[str, Any]:
-    return {
+    serialized = {
         "text": response.text,
         "tool_calls": [
             {"id": call.id, "name": call.name, "arguments": call.arguments} for call in response.tool_calls
         ],
     }
+    if response.stop_reason is not None:
+        serialized["stop_reason"] = response.stop_reason
+    if response.provider_metadata is not None:
+        serialized["provider_metadata"] = response.provider_metadata
+    return serialized

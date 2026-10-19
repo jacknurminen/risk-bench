@@ -16,8 +16,8 @@ class AnthropicAgent:
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
-        # The effort parameter is rejected by Haiku-class models; only send it where it is supported.
-        self._supports_effort = "haiku" not in model.lower()
+        # Haiku 5.5 adds effort support; older Haiku versions reject the parameter.
+        self._supports_effort = "haiku" not in model.lower() or model.lower().startswith("claude-haiku-5-5")
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -45,7 +45,22 @@ class AnthropicAgent:
             output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
         ) as stream:
             response = stream.get_final_message()
+            request_id = stream.request_id
         parsed = _parse_response(content_blocks=response.content)
+        parsed = dataclasses.replace(
+            parsed,
+            stop_reason=response.stop_reason,
+            provider_metadata={
+                "provider": "anthropic",
+                "request_id": request_id,
+                "response_id": response.id,
+                "model": response.model,
+                "stop_sequence": response.stop_sequence,
+                "max_tokens": self._max_tokens,
+                "reasoning_effort": self._reasoning_effort.value if self._supports_effort else None,
+                "content": [block.model_dump(mode="json", exclude_none=True) for block in response.content],
+            },
+        )
         return _with_usage(parsed=parsed, usage=response.usage)
 
 

@@ -83,6 +83,9 @@ class Response:
     output_tokens: int | None = None
     cache_write_tokens: int | None = None
     cache_read_tokens: int | None = None
+    # Diagnostics only; never replay these fields as conversation turns.
+    stop_reason: str | None = None
+    provider_metadata: dict[str, Any] | None = None
 
 
 def list_argument(value: Any) -> list[Any] | None:
