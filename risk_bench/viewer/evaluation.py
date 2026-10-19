@@ -1,6 +1,7 @@
 """Resolve v3 research units and evidence against their original observation prefix."""
 
 import copy
+import json
 from dataclasses import asdict
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from risk_bench.runner.evaluation_versions import list_versions
 from risk_bench.runner.journal import prefix_hash, read_journal
 from risk_bench.runner.trace_index import build_trace_index, trace_fingerprint
 from risk_bench.runner.verification_store import read_verifications
+from risk_bench.viewer.research import research_report
 
 
 def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
@@ -35,9 +37,15 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
     members = []
     for index, spec in enumerate(header.panel if header else []):
         rows = [r for r in eval_records if r.get("evaluator_index") == index]
-        member = {"index": index, "label": spec, "spec": spec}
+        member: dict = {"index": index, "label": spec, "spec": spec}
         kinds = (
-            (("statements", "statement"), ("commitments", "commitment"))
+            (
+                ("deceptions", "deception"),
+                ("commitments", "commitment"),
+                ("deception_candidates", "deception_candidate"),
+            )
+            if header and header.schema_version >= 6
+            else (("statements", "statement"), ("commitments", "commitment"))
             if header and header.schema_version >= 4
             else (("agreements", "agreement"), ("episodes", "episode"), ("claims", "claim"))
         )
@@ -48,7 +56,11 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
                     continue
                 unit = copy.deepcopy(row)
                 for cite in citations(unit):
-                    cite.update(_evidence_view(cite, lookup, header.source if header else {}, header.schema_version))
+                    cite.update(
+                        _evidence_view(
+                            cite, lookup, header.source if header else {}, header.schema_version if header else 3
+                        )
+                    )
                 if any(not c["resolved"] or c.get("quote_matched") is False for c in citations(unit)):
                     unit["valid"] = False
                     unit["needs_review"] = True
@@ -69,9 +81,20 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
         member["issues"] = [r for r in rows if r["type"] == "eval_issue"]
         status = next((r for r in rows if r["type"] == "eval_member_status"), {})
         member["status"] = status.get("status", "failed")
+        member["review_flags"] = sum(
+            u.get("needs_review", False) or not u.get("valid", True) for plural, _ in kinds for u in member[plural]
+        )
+        # Historical "partial" conflated completed work with flagged annotations.
+        if (
+            member["status"] == "partial"
+            and not member["issues"]
+            and all(r["status"] != "missing" for r in member["coverage"])
+        ):
+            member["status"] = "complete"
+        member["review_status"] = "needs_review" if member["review_flags"] else "clear"
         member["memos"] = status.get("memos", [])
         members.append(member)
-    return {
+    view = {
         "title": journal_path.name,
         "game_id": journal_path.parent.name,
         "experiment_version": 3,
@@ -80,6 +103,7 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
         # server-side for citation validation, not repeated in every browser span.
         "spans": [{key: value for key, value in asdict(s).items() if key != "data"} for s in spans],
         "has_evaluation": header is not None,
+        "evaluation_method": header.method if header else None,
         "live_evaluation": bool(eval_records and eval_records[0].get("live")),
         "evaluation_cadence": eval_records[0].get("cadence") if eval_records else None,
         "evaluated_through_turn": next(
@@ -96,7 +120,13 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
         "finished": any(r["type"] == "result" for r in records),
         "journal_span_count": len(spans),
         "codes": list(CODES) if header and header.schema_version == 3 else [],
-        "tag_schema": "two_tag_v3" if header and header.schema_version >= 4 else "legacy_v2",
+        "tag_schema": (
+            "commitments_deception_v4"
+            if header and header.schema_version >= 6
+            else "two_tag_v3"
+            if header and header.schema_version >= 4
+            else "legacy_v2"
+        ),
         "members": members,
         "panel": [{"index": i, "spec": spec, "label": spec} for i, spec in enumerate(header.panel if header else [])],
         "annotators": [{"index": m["index"], "label": m["label"]} for m in members],
@@ -110,6 +140,7 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
         if header
         else None,
         "codebook_version": header.codebook_version if header else None,
+        "codebook_hash": header.codebook_hash if header else None,
         "version": version.run_id if version else None,
         "versions": [
             dict(
@@ -119,10 +150,31 @@ def build_evaluation_view_model(journal_path: Path, version=None) -> dict:
                 panel=v.panel,
                 labels=v.panel,
                 schema_version=v.schema_version,
+                method=v.method,
             )
             for v in list_versions(journal_path)
         ],
     }
+    view["review_flags"] = sum(m["review_flags"] for m in members)
+    view["completion_status"] = (
+        "not_started"
+        if not header
+        else "interrupted"
+        if any(m["status"] in {"failed", "partial"} for m in members)
+        else "unfinished"
+        if view["live_evaluation"] and not view["live_finalized"]
+        else "complete"
+    )
+    view["review_status"] = "needs_review" if view["review_flags"] else "clear"
+    if version and version.is_current:
+        try:
+            error = json.loads(journal_path.with_suffix(".eval.error.json").read_text()).get("detail")
+            if error:
+                view["completion_status"] = "interrupted"
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+    view["research_report"] = research_report(view, records[0]["player_specs"])
+    return view
 
 
 def _evidence_view(evidence, span_by_id, source=None, schema_version=3):

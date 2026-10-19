@@ -13,7 +13,7 @@ const ANALYSIS_URL = window.BOOT.urls.analysis;
 let gameRunning = window.BOOT.live_running;  // whether the game's worker is currently playing (live games only)
 // which evaluation run is being viewed: "" follows the current (newest) run — so a re-run or a live
 // game's fresh evaluation shows automatically — while a specific run id pins an older archived run.
-let selectedVersion = "";
+let selectedVersion = typeof location !== "undefined" ? new URLSearchParams(location.search).get("version") || "" : "";
 const viewedVersionRunId = () => selectedVersion || null;
 
 
@@ -69,8 +69,10 @@ const richText = t => colorizeNames(t).replace(PLACE_PATTERN, m => `<span class=
 const annotators = () => EVAL.annotators || [];
 const annotatorColor = idx => MEMBER_COLORS[idx % MEMBER_COLORS.length];
 const annotatorLabel = idx => annotators().find(a => a.index === idx)?.label || "evaluator";
+const isThesisSchema = () => EVAL.tag_schema === "commitments_deception_v4";
+const isTwoTagSchema = () => isThesisSchema() || EVAL.tag_schema === "two_tag_v3";
 const allUnits = () => (EVAL.members || []).flatMap(m =>
-  (EVAL.tag_schema === "two_tag_v3" ? ["statements", "commitments"] : ["agreements", "episodes", "claims"]).flatMap(kind => (m[kind] || []).map(u =>
+  (isThesisSchema() ? ["deceptions", "commitments"] : isTwoTagSchema() ? ["statements", "commitments"] : ["agreements", "episodes", "claims"]).flatMap(kind => (m[kind] || []).map(u =>
     ({...u, kind: kind.slice(0,-1), annotator: m.index}))));
 const unitVisible = u => u.members ? u.members.some(unitVisible) : state.filters.annotators.has(u.annotator)
   && (!state.filters.kind || u.kind === state.filters.kind)
@@ -80,7 +82,7 @@ const unitVisible = u => u.members ? u.members.some(unitVisible) : state.filters
   && (!state.filters.code || (u.codes || []).includes(state.filters.code))
   && (!state.filters.status || u.status === state.filters.status ||
     u.members?.some(m => m.status === state.filters.status))
-  && (!state.filters.basis || (state.filters.basis === "unknown" ? u.basis == null : u.basis === state.filters.basis));
+  && (!state.filters.basis || (state.filters.basis === "unknown" ? u.basis == null : u.basis === state.filters.basis || u.contradictions?.some(b => b.basis === state.filters.basis)));
 const unitKey = u => u.annotator + ":" + u.kind + ":" + u.id;
 function unitCitations(value) {
   if (Array.isArray(value)) return value.flatMap(unitCitations);

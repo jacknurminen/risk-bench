@@ -63,7 +63,7 @@ function renderFilters() {
   };
   select("actorFilter", GAME.players.map(p => p.name), state.filters.actor, "players");
   select("codeFilter", EVAL.codes || [], state.filters.code, "codes");
-  select("statusFilter", EVAL.tag_schema === "two_tag_v3" ?
+  select("statusFilter", isThesisSchema() ? ["proposed","agreed","fulfilled","violated","unresolved","closed"] : isTwoTagSchema() ?
     ["proposed","agreed","committed","fulfilled","violated","unresolved","closed","contradicted","deceptive",
       ...["made","supported","undetermined"].filter(status => allUnits().some(u => u.status === status))] :
     ["open","fulfilled","violated","released","not_triggered","unassessable","assessable","unclear","insufficient_evidence"], state.filters.status, "statuses");
@@ -95,25 +95,25 @@ const KINDS = {
 };
 function renderTimeline() {
   const root = el("timeline");
-  const compactTags = state.mode === "research" && EVAL.tag_schema === "two_tag_v3";
+  const compactTags = state.mode === "research" && isTwoTagSchema();
   el("expandAll").hidden = compactTags;
   el("collapseAll").hidden = compactTags;
   if (state.mode === "research") root.innerHTML = researchHtml();
   else if (state.mode === "compare") root.innerHTML = comparisonHtml();
   else root.innerHTML = turns.map(turn => turnCard(turn) + reviewTimelineEvents(turn) +
-    activeReviewTimelineEvent(turn) + pausedFinalReviewTimelineEvent(turn)).join("");
+    activeReviewTimelineEvent(turn) + pausedReviewTimelineEvent(turn)).join("");
   el("turnCount").textContent = turns.length + " turns";
   el("subStat").textContent = EVAL.has_evaluation
-    ? (EVAL.tag_schema === "two_tag_v3" ? orderedV3Units() : allUnits()).filter(u => ["episode","commitment"].includes(u.kind)).length + " commitments · " +
-      allUnits().filter(u => ["claim","statement"].includes(u.kind)).length +
-      (EVAL.tag_schema === "two_tag_v3" ? " statement assessments" : " claim assessments")
+    ? (isTwoTagSchema() ? orderedV3Units() : allUnits()).filter(u => ["episode","commitment"].includes(u.kind)).length + " commitments · " +
+      allUnits().filter(u => ["claim","statement","deception"].includes(u.kind)).length +
+      (isThesisSchema() ? " documented deception incidents" : isTwoTagSchema() ? " statement assessments" : " claim assessments")
     : "No evaluation yet";
   show(index);
 }
 function turnCard(turn) {
   const setup = isSetupTurn(turn), actor = turnActor(turn), accent = setup ? "var(--mute)" : colorOf(actor);
   const units = state.filters.showCommentary ?
-    (EVAL.tag_schema === "two_tag_v3" ? orderedV3Units() : allUnits()).filter(u => unitVisible(u) &&
+    (isTwoTagSchema() ? orderedV3Units() : allUnits()).filter(u => unitVisible(u) &&
       (u.turn === turn || (u.members || [u]).some(m =>
         m.turn === turn || (m.mentions || []).some(c => spanById.get(c.span)?.turn === turn)))) : [];
   return '<article class="tcard" data-turn="' + turn + '" style="border-left-color:' + accent + '">' +
@@ -133,7 +133,8 @@ function reviewTimelineEvents(turn) {
   const finalNotes = (EVAL.live_final || []).filter(note =>
     note.turn === turn && state.filters.annotators.has(note.evaluator_index));
   const event = (note, final) => '<article class="researchReviewEvent" data-turn="' + turn + '">' +
-    '<div class="researchReviewMeta">' + (final ? 'Final research review' :
+    '<div class="researchReviewMeta">' + (final ? (EVAL.evaluation_method === 'whole_game'
+      ? 'Whole-game analysis' : 'Final research review') :
       'Research review · Round ' + escapeHtml(String(note.round ?? roundByTurn[turn] ?? '?'))) +
     ' · ' + escapeHtml(annotatorLabel(note.evaluator_index)) + '</div>' +
     '<div class="researchReviewText">' + richText(note.text) + '</div></article>';
@@ -142,6 +143,10 @@ function reviewTimelineEvents(turn) {
 }
 function activeReviewTimelineEvent(turn) {
   if (!state.filters.showCommentary || !EVAL.review_active) return "";
+  if (EVAL.reviewing_whole_game) {
+    if (turn !== turns.at(-1)) return "";
+    return '<article class="researchReviewEvent activeReviewEvent" role="status"><div class="researchReviewMeta">◐ Whole-game analysis in progress</div></article>';
+  }
   if (EVAL.reviewing_final) {
     if (turn !== turns.at(-1)) return "";
     return '<article class="researchReviewEvent activeReviewEvent" role="status"><div class="researchReviewMeta">◐ Final research review in progress</div></article>';
@@ -152,10 +157,17 @@ function activeReviewTimelineEvent(turn) {
   return '<article class="researchReviewEvent activeReviewEvent" role="status"><div class="researchReviewMeta">◐ Research review · Round ' +
     escapeHtml(String(round)) + ' in progress</div></article>';
 }
-function pausedFinalReviewTimelineEvent(turn) {
-  if (turn !== turns.at(-1) || !GAME.result || !EVAL.live_evaluation || EVAL.live_finalized ||
+function pausedReviewTimelineEvent(turn) {
+  if (!state.filters.showCommentary || !GAME.result || !EVAL.live_evaluation || EVAL.live_finalized ||
       EVAL.running || !EVAL.error) return "";
-  return '<article class="researchReviewEvent pausedReviewEvent"><div class="researchReviewMeta">Final research review paused</div>' +
+  const roundOf = value => roundByTurn[value] ?? (spansByTurn.get(value) || []).find(span => span.round != null)?.round;
+  const pendingTurn = turns.find(value => value > 0 && roundOf(value) > (EVAL.evaluated_through_round || 0));
+  const pendingRound = pendingTurn == null ? null : roundOf(pendingTurn);
+  const target = pendingRound == null ? turns.at(-1) : turns.filter(value => roundOf(value) === pendingRound).at(-1);
+  if (turn !== target) return "";
+  const title = pendingRound == null ? 'Final research review paused' :
+    'Research review · Round ' + escapeHtml(String(pendingRound)) + ' paused';
+  return '<article class="researchReviewEvent pausedReviewEvent"><div class="researchReviewMeta">' + title + '</div>' +
     '<button class="btn" onclick="resumeLiveReview()">Resume review</button></article>';
 }
 function expandedBody(turn) {
@@ -181,7 +193,7 @@ function traceLine(turn, s) {
     ' · ' + escapeHtml(s.player || "") + '</summary>' + content + '</details>' : content;
 }
 function unitPill(u) {
-  if (EVAL.tag_schema === "two_tag_v3") {
+  if (isTwoTagSchema()) {
     return '<button class="pill turnTag tagKind-' + u.kind +
       '" title="' + escapeHtml(unitTitle(u)) + '" onclick="openUnitDrawer(\'' + unitKey(u) + '\')">' +
       '<span class="turnTagNumber">' + v3Number(u) + '</span>' +
@@ -193,9 +205,9 @@ function unitPill(u) {
     escapeHtml(unitType(u) + " · " + tagOf(u.actor || u.initiator) + " · " + unitStatus(u)) +
     (u.valid ? "" : " · needs review") + '</button>';
 }
-function unitType(u) { return {agreement:"Proposal / agreement", episode:"Commitment", claim:"Claim",statement:"Statement",commitment:"Commitment"}[u.kind]; }
+function unitType(u) { return {agreement:"Proposal / agreement", episode:"Commitment", claim:"Claim",statement:"Statement",commitment:"Commitment",deception:"Deception"}[u.kind]; }
 function unitTitle(u) {
-  if (u.kind === "statement") return u.proposition;
+  if (["statement","deception"].includes(u.kind)) return u.proposition;
   if (u.kind === "commitment") return typeof u.terms === "string" ? u.terms : u.terms?.action || u.passage?.quote || '';
   return u.kind === "episode" ? u.terms.action : u.kind === "claim" ? u.proposition :
     (u.proposals.at(-1)?.terms || "Proposal terms not recorded");
@@ -215,6 +227,7 @@ function unitStatus(u) {
 }
 function unitTone(u) {
   if (!u.valid) return "neutral";
+  if (u.kind === "deception") return "deceptive";
   if (u.status === "deceptive") return "deceptive";
   if (u.status === "contradicted") return "adversarial";
   if (u.status === "supported") return "coop";
@@ -231,7 +244,7 @@ function linkedUnitButton(u, kind, id, label) {
     escapeHtml(label + (linked ? ': ' + unitTitle(linked) : '')) + '</button>';
 }
 function researchHtml() {
-  if (EVAL.tag_schema === "two_tag_v3") return researchHtmlV3();
+  if (isTwoTagSchema()) return researchHtmlV3();
   if (!state.filters.showCommentary) return '<p class="empty">Enable annotations to see the research assessments.</p>';
   const units = allUnits().filter(unitVisible);
   const kindOptions = [["","All records"],["episode","Commitments"],["agreement","Proposals"],["claim","Claims"]];
@@ -260,7 +273,7 @@ function setResearchKind(kind) { state.filters.kind = kind; renderTimeline(); }
 function researchHtmlV3() {
   if (!state.filters.showCommentary) return '<p class="empty">Enable annotations to see the research assessments.</p>';
   const units = orderedV3Units().map((u,index) => ({u,number:index+1})).filter(({u}) => unitVisible(u));
-  const choices = [["","All tags"],["statement","Statements"],["commitment","Commitments"]];
+  const choices = [["","All tags"],isThesisSchema() ? ["deception","Documented deception"] : ["statement","Statements"],["commitment","Commitments"]];
   const toolbar = '<div class="researchToolbar"><div class="researchKinds">' + choices.map(([kind,label]) =>
     '<button class="' + (state.filters.kind === kind ? 'on' : '') + '" onclick="setResearchKind(\'' + kind + '\')">' + label + '</button>').join('') +
     '</div><button class="btn" onclick="clearResearchFilters()">Clear filters</button></div>';
@@ -268,10 +281,24 @@ function researchHtmlV3() {
     (EVAL.members || []).filter(m => state.filters.annotators.has(m.index)).map(m =>
       '<h3>' + escapeHtml(m.label) + '</h3>' + (m.coverage || []).map(c =>
         '<p><button class="chip" onclick="openLineDrawer(' + c.span + ')">[' + c.span + ']</button> ' +
-        escapeHtml(pretty(c.status) + ' · ' + c.explanation) + '</p>').join('')).join('') + '</details>';
-  return toolbar + '<div class="tagTimeline" aria-label="Statements and commitments in chronological order">' +
+        escapeHtml((c.scope ? pretty(c.scope) + ' · ' : '') + pretty(c.status) + ' · ' + c.explanation) +
+        (c.missing_evidence?.length ? ' · Missing evidence: ' + escapeHtml(c.missing_evidence.join('; ')) : '') + '</p>').join('')).join('') + '</details>';
+  return toolbar + '<div class="tagTimeline" aria-label="Research tags in chronological order">' +
     units.map(({u,number}) => unitCardV3(u,false,number)).join('') + '</div>' +
-    (units.length ? '' : '<p class="empty">No tags match these filters.</p>') + screening;
+    (units.length ? '' : '<p class="empty">No tags match these filters.</p>') + candidateReviewHtml() + screening;
+}
+function candidateReviewHtml() {
+  if (!isThesisSchema()) return '';
+  return '<details class="card researchCard"><summary>Deception candidate review — not findings</summary>' +
+    (EVAL.members || []).filter(m => state.filters.annotators.has(m.index)).map(m =>
+      '<h3>' + escapeHtml(m.label) + '</h3>' + ((m.deception_candidates || []).map(c =>
+        '<article><h4>' + escapeHtml(c.actor + ': ' + c.proposition) + '</h4><button class="chip" onclick="openLineDrawer(' +
+        c.passage.span + ')">Message [' + c.passage.span + ']</button><p>' + escapeHtml(c.scope_explanation) + '</p>' +
+        c.review_history.map(r => '<p><strong>' + escapeHtml(pretty(r.outcome)) + '</strong> · ' +
+          escapeHtml(v3Time(r.cutoff_span) + ' · ' + r.reason) + ' ' +
+          (r.evidence || []).map(e => '<button class="chip" onclick="openLineDrawer(' + e.span + ')">[' + e.span + ']</button>').join('') +
+          '</p>').join('') + (c.needs_review ? '<p>Technical review: ' + escapeHtml(c.issues.join('; ')) + '</p>' : '') +
+        '</article>').join('') || '<p>No candidates recorded.</p>')).join('') + '</details>';
 }
 function orderedV3Units() {
   const passageOffset = u => {
@@ -295,7 +322,7 @@ function orderedV3Units() {
       valid:members.some(m => m.valid), needs_review:members.some(m => m.needs_review),
       verified:members.every(m => m.verified)});
   }
-  return units.filter(u => u.kind === 'statement' || u.kind === 'commitment').sort((a,b) =>
+  return units.filter(u => ['statement','commitment','deception'].includes(u.kind)).sort((a,b) =>
     (a.passage?.span ?? Infinity) - (b.passage?.span ?? Infinity) ||
     passageOffset(a) - passageOffset(b) || a.annotator - b.annotator || a.kind.localeCompare(b.kind) ||
     a.actor.localeCompare(b.actor) || a.id.localeCompare(b.id));
@@ -333,6 +360,7 @@ function unitPlayersV3(u) {
   return [...new Set((u.members || [u]).map(m => m.actor || m.initiator))].map(unitPlayer).join(' · ');
 }
 function unitStatusesV3(u) {
+  if (u.kind === 'deception') return '';
   const counts = new Map();
   for (const member of u.members || [u]) counts.set(member.status, (counts.get(member.status) || 0) + 1);
   return [...counts].map(([status,count]) => '<span class="turnTagStatus researchTone-' +
@@ -347,7 +375,9 @@ function unitEvidenceV3(u) {
     if (!found.has(key)) found.set(key,c);
   });
   add([u.passage]);
-  if (u.kind === 'statement') {
+  if (u.kind === 'deception') {
+    add(unitCitations(u));
+  } else if (u.kind === 'statement') {
     add(u.comparison); add(u.deliberate_intent); add(u.context); add(u.mentions);
   } else {
     for (const member of u.members || [u]) {
@@ -356,6 +386,7 @@ function unitEvidenceV3(u) {
       (member.revisions || []).forEach(r => { add(r.evidence); add(r.authorization);
         (r.responses || []).forEach(p => add(p.evidence)); });
       add(member.trigger); add(member.outcome); add(member.mentions);
+      (member.participant_history || []).forEach(h => add(h.evidence));
       (member.status_history || []).forEach(h => {
         add(h.evidence);
         if (h.cutoff_span != null && ![...found.values()].some(c => c.span === h.cutoff_span)) {
@@ -426,6 +457,13 @@ function undertakingDetailV3(u, grouped = false) {
   const source = spanById.get(u.passage?.span);
   const developments = u.kind === 'commitment' ? commitmentLinesV3(u,grouped) : '';
   return '<p class="tagExplanation">' + richText(u.explanation || '') + '</p>' +
+    (u.scope_explanation ? '<p>Commitment relevance: ' + richText(u.scope_explanation) + '</p>' : '') +
+    (u.contradictions || []).map(b => '<p><strong>Contradiction evidence · ' + escapeHtml(pretty(b.basis)) +
+      '</strong>: ' + richText(b.explanation) + '</p>').join('') +
+    (u.participant_history?.length ? '<details><summary>Participant roles and responses</summary>' +
+      u.participant_history.map(p => '<p>' + escapeHtml(p.actor + ' · ' + pretty(p.role) + ' · ' +
+        pretty(p.response) + ' · ' + v3Time(p.cutoff_span)) + '</p>').join('') + '</details>' : '') +
+    (u.needs_review ? '<p class="researchCaution">Technical review: ' + escapeHtml((u.issues || []).join('; ')) + '</p>' : '') +
     (u.kind === 'commitment' && !u.established ? '<p class="tagUnestablished">No undertaking established</p>' : '') +
     (u.reason ? '<p><strong>Reason:</strong> ' + richText(u.reason) + '</p>' : '') +
     (u.uncertainty ? '<p class="researchCaution">' + richText(u.uncertainty) + '</p>' : '') +
@@ -472,7 +510,7 @@ function labeledEvidence(u) {
   return walk(u, "");
 }
 function unitCard(u, expanded = false) {
-  if (EVAL.tag_schema === "two_tag_v3") return unitCardV3(u, expanded);
+  if (isTwoTagSchema()) return unitCardV3(u, expanded);
   const title = unitTitle(u);
   let details = "";
   if (u.kind === "episode") {
@@ -573,7 +611,7 @@ function evidenceQuote(t, e, citations = [e]) {
       ${s.layer === 'action' ? '' : `<span class="kindlabel">${kindLabel}</span>`}
       ${e.temporal_relationship ? '<span class="kindlabel">' + escapeHtml(pretty(e.temporal_relationship)) + '</span>' : ""}
       ${s.player && s.layer !== 'action' ? `<span class="mono" style="font-size:9px;font-weight:600;color:${colorOf(s.player)}">${escapeHtml(s.player)}</span>` : ""}
-      ${EVAL.tag_schema === "two_tag_v3" ? `<span class="mono" style="font-size:9px;color:var(--faint)">${escapeHtml(v3Time(e.span))}</span>` :
+      ${isTwoTagSchema() ? `<span class="mono" style="font-size:9px;color:var(--faint)">${escapeHtml(v3Time(e.span))}</span>` :
         s.turn !== t.turn ? `<span class="mono" style="font-size:9px;color:var(--faint)">turn ${s.turn}</span>` : ""}
       ${collapsible ? `<button class="evmore" onclick="toggleEvidence('${key}')">${open ? "▴ collapse" : "▸ show full line"}</button>` : ""}
     </div>

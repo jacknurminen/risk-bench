@@ -16,6 +16,28 @@ def integrity_of_evidence(evidence):
 
 
 def member_summary(member):
+    if "deceptions" in member:
+        commitments = [c for c in member["commitments"] if c["valid"]]
+        findings = [d for d in member["deceptions"] if d["valid"]]
+        eligible = [c for c in commitments if c["established"] and c["status"] in {"fulfilled", "violated"}
+                    and c.get("action_provenance") == "agent_choice"]
+        fulfilled = sum(c["status"] == "fulfilled" for c in eligible)
+        return {
+            "index": member["index"], "label": member["label"], "status": member["status"],
+            "review_flags": member.get("review_flags", 0),
+            "commitment_count": len(commitments), "established_count": sum(c["established"] for c in commitments),
+            "proposal_count": sum(not c["established"] for c in commitments), "deception_count": len(findings),
+            "commitment_statuses": dict(Counter(c["status"] for c in commitments)),
+            "closure_reasons": dict(Counter(c["reason"] for c in commitments if c["status"] == "closed")),
+            "unresolved_reasons": dict(Counter(c["reason"] for c in commitments if c["status"] == "unresolved")),
+            "coverage": dict(Counter(r["status"] for r in member["coverage"])),
+            "screening_scope": dict(Counter(r.get("scope", "missing") for r in member["coverage"])),
+            "candidate_reviews": dict(Counter(c["review_history"][-1]["outcome"]
+                                               for c in member["deception_candidates"])),
+            "adherence": {"fulfilled": fulfilled, "resolved_agent_commitments": len(eligible),
+                          "proportion": fulfilled / len(eligible) if eligible else None},
+            "integrity": integrity_of_evidence(citations(member)),
+        }
     if "commitments" in member:
         commitments = [c for c in member["commitments"] if c["valid"]]
         statements = [s for s in member["statements"] if s["valid"]]
@@ -102,6 +124,8 @@ def comparisons(members):
     # IDs are evaluator-local. Match only explicit source anchors, exposing split/merge disagreements.
     result = {}
     kinds = (
+        (("commitments", "passage"), ("deceptions", "passage"), ("coverage", None))
+        if members and "deceptions" in members[0] else
         (("commitments", "passage"), ("statements", "passage"), ("coverage", None))
         if members and "commitments" in members[0]
         else (("episodes", "undertaking"), ("claims", "message"), ("coverage", None))
@@ -121,7 +145,7 @@ def comparisons(members):
                 groups[key].setdefault(member["index"], []).append(
                     {
                         "id": unit.get("id"),
-                        "status": unit["status"],
+                        "status": unit.get("status"),
                         "codes": unit.get("codes", []),
                         "valid": unit.get("valid", True),
                     }

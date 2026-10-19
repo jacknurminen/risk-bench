@@ -14,6 +14,7 @@ function renderStats() {
       series.players.map((p,i) => '<polyline points="' + points(p[key] || []) + '" stroke="' + COLORS[i] + '" stroke-width="2" fill="none"/>').join("") +
       '<text x="32" y="177" class="axis">Turn ' + (series.turns[0] ?? 0) + '</text><text x="470" y="177" class="axis">Turn ' + (series.turns.at(-1) ?? 0) + '</text></svg></figure>';
   }).join("");
+  renderPlayerOutput();
   el("commentaryStats").hidden = true;
   const usage = Object.entries(GAME.stats.usage || {});
   el("tokenSection").hidden = !usage.length;
@@ -27,6 +28,75 @@ function renderStats() {
       s.attacks + '</td><td>' + s.conquests + '</td><td>' + s.armies_lost + '</td><td>' + (s.public_messages+s.private_messages) + '</td></tr>';}).join("") + '</tbody>';
   if (!el("evalSheet").hidden) renderEvalStats();
 }
+
+// Use the game's recorded text, so these measurements also work in offline exports
+// and are independent of evaluator annotations or the API trace being available.
+function playerOutputStats(game) {
+  const turnCount = new Set(game.steps.map(step => step.turn)).size;
+  const rows = game.players.map(player => ({name: player.name, publicMessages: 0, privateMessages: 0,
+    messages: 0, messageWords: 0, thoughts: 0, thoughtWords: 0}));
+  const byName = new Map(rows.map(row => [row.name, row]));
+  const wordCount = text => (text || "").trim().match(/\S+/gu)?.length || 0;
+  for (const message of game.messages || []) {
+    const row = byName.get(message.sender);
+    if (!row) continue;
+    row.messages++;
+    row[message.visibility === "private" ? "privateMessages" : "publicMessages"]++;
+    row.messageWords += wordCount(message.text);
+  }
+  for (const thought of game.thoughts || []) {
+    const row = byName.get(thought.player);
+    if (!row) continue;
+    row.thoughts++;
+    row.thoughtWords += wordCount(thought.text);
+  }
+  for (const row of rows) {
+    row.messagesPerTurn = turnCount ? row.messages / turnCount : null;
+    row.thoughtsPerTurn = turnCount ? row.thoughts / turnCount : null;
+    row.wordsPerMessage = row.messages ? row.messageWords / row.messages : null;
+    row.wordsPerThought = row.thoughts ? row.thoughtWords / row.thoughts : null;
+  }
+  return {rows, turnCount};
+}
+
+function outputNumber(value, decimals = 0) {
+  return value == null ? "—" : value.toLocaleString("en-US", {maximumFractionDigits: decimals});
+}
+
+function outputBarChart(rows, key, title, unit, decimals = 0) {
+  const max = Math.max(1, ...rows.map(row => row[key] ?? 0));
+  return '<figure class="chart outputChart"><figcaption>' + escapeHtml(title) + '</figcaption>' +
+    '<div class="outputBars">' + rows.map(row => {
+      const value = row[key];
+      const label = value == null ? "No entries" : outputNumber(value, decimals) + " " + unit;
+      return '<div class="outputBarRow"><span class="outputPlayer" style="color:' + colorOf(row.name) + '">' +
+        escapeHtml(row.name) + '</span><span class="outputValue">' + escapeHtml(label) + '</span>' +
+        '<div class="outputTrack" aria-hidden="true"><span style="width:' + ((value ?? 0) / max * 100) +
+        '%;background:' + colorOf(row.name) + '"></span></div></div>';
+    }).join("") + '</div></figure>';
+}
+
+function renderPlayerOutput() {
+  const {rows, turnCount} = playerOutputStats(GAME);
+  const includesSetup = GAME.steps.some(step => step.turn === 0);
+  el("outputNote").textContent = 'Entire recorded game · ' + turnCount + ' recorded turn' + (turnCount === 1 ? '' : 's') +
+    (includesSetup ? ', including setup as one turn' : '') + '. Per-turn averages use this same period for every player, including silent turns and turns after elimination. ' +
+    'Messages include public and private deliveries. Internal reasoning counts recorded thought entries, not hidden provider reasoning. Lengths count whitespace-separated words; notes and tool calls are excluded.';
+  el("outputCharts").innerHTML = [
+    outputBarChart(rows, "messagesPerTurn", "Average messages per turn", "msg / turn", 2),
+    outputBarChart(rows, "wordsPerMessage", "Average message length", "words / msg", 1),
+    outputBarChart(rows, "thoughts", "Internal reasoning entries", "entries"),
+    outputBarChart(rows, "wordsPerThought", "Average reasoning length", "words / entry", 1),
+  ].join("");
+  el("outputTable").innerHTML = '<thead><tr><th scope="col">Player</th><th scope="col">Messages</th>' +
+    '<th scope="col">Public</th><th scope="col">Private</th><th scope="col">Message words</th>' +
+    '<th scope="col">Reasoning entries</th><th scope="col">Reasoning / turn</th><th scope="col">Reasoning words</th>' +
+    '</tr></thead><tbody>' + rows.map(row => '<tr><th scope="row" style="color:' + colorOf(row.name) + '">' +
+      escapeHtml(row.name) + '</th>' + [row.messages, row.publicMessages, row.privateMessages, row.messageWords,
+        row.thoughts, row.thoughtsPerTurn, row.thoughtWords].map(value => '<td>' + outputNumber(value, 2) + '</td>').join("") +
+      '</tr>').join("") + '</tbody>';
+}
+
 // The API calls sheet: summaries come from the server's trace endpoint; the full
 // prompt/response of a call is fetched lazily when it is expanded.
 let traceCalls = null;

@@ -40,11 +40,14 @@ def build_analysis(journal_path: Path, eval_path: Path, generated_at: str) -> di
         },
         "members": [member_summary(m) for m in view["members"]],
         "comparison": comparisons(view["members"]),
+        "research_report": view["research_report"],
         "notes": [
             "Counts are per coder and unique tag; panel votes are not independent observations.",
             "Proposals without establishment are counted separately from promises.",
             "Adherence uses only valid, established, resolved agent-attributable commitments.",
-            "Deceptive is one statement status and includes the underlying contradiction.",
+            ("Documented deception is one incident across evidence bases; candidate reviews are separate."
+             if header.schema_version >= 6 else
+             "Deceptive is one statement status and includes the underlying contradiction."),
             "Citation integrity checks sources, not the truth of an interpretation.",
             "Forks share observations with their ancestors and are not independent games.",
         ] if header.schema_version >= 4 else [

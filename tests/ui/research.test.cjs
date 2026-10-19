@@ -6,7 +6,7 @@ const vm = require('node:vm');
 function reader({human = false, finished = false, evaluate = false} = {}) {
   const nodes = new Map();
   const context = vm.createContext({requestAnimationFrame: () => {}, document: {getElementById(id) {
-    if (!nodes.has(id)) nodes.set(id, {querySelector: () => ({})});
+    if (!nodes.has(id)) nodes.set(id, {querySelector: () => ({}), querySelectorAll: () => []});
     return nodes.get(id);
   }}, window: {BOOT: {
     game: {players:[{name:'alice'}], human_players:human ? ['alice'] : [], continents:[],
@@ -19,6 +19,33 @@ function reader({human = false, finished = false, evaluate = false} = {}) {
   }
   return code => vm.runInContext(code,context);
 }
+
+test('thesis tags show deception evidence and a separate candidate review without statement statuses', () => {
+  const run = reader();
+  run(`EVAL.tag_schema='commitments_deception_v4'; EVAL.annotators=[{index:0,label:'Coder'}];
+    EVAL.members=[{index:0,label:'Coder',commitments:[],deceptions:[{id:'d1',actor:'alice',
+      passage:{span:0,quote:'A <promise>.',resolved:true,quote_matched:true},proposition:'A promise',
+      scope_explanation:'Establishes a promise',explanation:'Intent was explicit',valid:true,
+      contradictions:[{basis:'stated_plan',evidence:[{span:0,quote:'A <promise>.',resolved:true}],explanation:'Conflicting plan'}],
+      deliberate_intent:[{span:0,quote:'A <promise>.',resolved:true}]}],coverage:[],
+      deception_candidates:[{id:'c1',actor:'alice',passage:{span:0},proposition:'Uncertain promise',
+        scope_explanation:'Promise under review',review_history:[{outcome:'pending',cutoff_span:0,reason:'Intent missing',evidence:[]}]}]}];
+    state.filters.annotators.add(0); state.filters.showCommentary=true; rebuildTrace();`);
+  const html = run('researchHtmlV3()');
+  assert.match(html,/Documented deception/);
+  assert.match(html,/Deception candidate review — not findings/);
+  assert.match(html,/Intent missing/);
+  assert.doesNotMatch(html,/Statements|statement assessments|>contradicted<|>deceptive</);
+  assert.equal(run('orderedV3Units().length'),1);
+  const detail = run('unitDetailV3(orderedV3Units()[0])');
+  assert.match(detail,/Commitment relevance/);
+  assert.match(detail,/Contradiction evidence/);
+  assert.match(detail,/Conflicting plan/);
+  run('EVAL.completion_status="complete"; EVAL.review_flags=2');
+  assert.equal(run('evaluationStatusLabel()'),'Evaluation complete · 2 annotation(s) need review');
+  run('EVAL.completion_status="interrupted"');
+  assert.match(run('evaluationStatusLabel()'),/^Evaluation interrupted/);
+});
 
 test('research annotations start hidden during a human game and can be shown explicitly', () => {
   const run = reader({human:true});
@@ -51,15 +78,73 @@ test('completed evaluator calls appear as chronological timeline entries', () =>
   assert.ok(template.indexOf('id="timeline"') < template.indexOf('id="evalBar"'));
 });
 
-test('a live review has no version or re-run panel beneath the timeline', () => {
-  const run = reader({finished:true, evaluate:true});
-  run(`EVAL.has_evaluation=true; EVAL.live_evaluation=true; EVAL.live_finalized=false;
+test('a running game has no version or re-run panel beneath the timeline', () => {
+  const run = reader({evaluate:true});
+  run(`gameRunning=true; EVAL.has_evaluation=true; EVAL.live_evaluation=true; EVAL.live_finalized=false;
     EVAL.versions=[{run_id:"20260923-120000-1",created_at:"2026-09-23T12:00:00Z",is_current:true,panel:["Coder"]}];
     renderEvalCta(); renderEvalBar(); renderSynthesis();`);
   assert.equal(run('el("evalCta").hidden'),true);
   assert.equal(run('el("evalBar").hidden'),true);
   assert.equal(run('el("synthSection").hidden'),true);
   assert.doesNotMatch(run('el("evalBar").innerHTML'), /versionSelect|Re-run panel/);
+});
+
+test('paused games expose replay and only offer resume when completed rounds remain', () => {
+  const run = reader({evaluate:true});
+  run(`gameRunning=false; EVAL.has_evaluation=true; EVAL.live_evaluation=true;
+    EVAL.evaluated_through_round=1;
+    EVAL.spans=[{turn:1,round:1},{turn:5,round:2}];
+    EVAL.versions=[{run_id:"20260929-120000-1",is_current:true,panel:["Coder"]}]; renderEvalBar();`);
+  assert.equal(run('el("evalBar").hidden'),false);
+  assert.match(run('el("evalBar").innerHTML'), /Replay rounds/);
+  assert.doesNotMatch(run('el("evalBar").innerHTML'), /id="resumeEvalBtn"/);
+  run('EVAL.evaluated_through_round=0; renderEvalBar()');
+  assert.match(run('el("evalBar").innerHTML'), /id="resumeEvalBtn"/);
+});
+
+test('finished live evaluations expose versions, fresh replay, and a separate resume action', () => {
+  const run = reader({finished:true, evaluate:true});
+  run(`EVAL.has_evaluation=true; EVAL.live_evaluation=true; EVAL.live_finalized=true;
+    EVAL.versions=[{run_id:"20260929-120000-1",created_at:"2026-09-29T12:00:00Z",
+      schema_version:5,is_current:true,panel:["Coder"]}]; renderEvalBar();`);
+  assert.equal(run('el("evalBar").hidden'),false);
+  let html = run('el("evalBar").innerHTML');
+  assert.match(html, /versionSelect/);
+  assert.match(html, /Replay rounds/);
+  assert.match(html, /two-tag v3/);
+  assert.doesNotMatch(html, /legacy v2|resumeEvalBtn|evalLive/);
+  run('EVAL.live_finalized=false; EVAL.error="API unavailable"; renderEvalBar()');
+  html = run('el("evalBar").innerHTML');
+  assert.match(html, /Resume evaluation/);
+  assert.match(html, /Replay rounds/);
+  run('EVAL.running=true; renderEvalBar()');
+  assert.doesNotMatch(run('el("evalBar").innerHTML'), /id="rerunBtn"|id="resumeEvalBtn"/);
+});
+
+test('rerun toggle switches method while keeping the selected panel', async () => {
+  const run = reader({finished:true, evaluate:true});
+  run(`el("evalRows").children=[{querySelector: selector =>
+    ({value: ({".evP":"openai",".evM":"gpt-6-luna",".evE":"medium"})[selector]})}];
+    fetch=async (url, options) => {globalThis.sent=JSON.parse(options.body); return {ok:true};};
+    renderEvalCta=()=>{}; renderEvalBar=()=>{}; pollEvaluation=()=>{};
+    EVAL.error="old failure"; selectedVersion="old-version";`);
+  await run('runEvaluation()');
+  assert.equal(JSON.stringify(run('sent')),JSON.stringify({
+    evaluators:['openai:gpt-6-luna:medium'],live:true,restart:true,
+  }));
+  assert.equal(run('selectedVersion'),'');
+  assert.equal(run('EVAL.error'),null);
+  run('GAME.result=null; gameRunning=false');
+  await run('runEvaluation()');
+  assert.equal(run('sent.restart'),true);
+  run(`GAME.result={winner:'alice'}; evaluationDraftMethod="whole_game";`);
+  await run('runEvaluation()');
+  assert.equal(JSON.stringify(run('sent')),JSON.stringify({
+    evaluators:['openai:gpt-6-luna:medium'],live:false,restart:false,
+  }));
+  assert.equal(run('EVAL.live_evaluation'),false);
+  assert.equal(JSON.stringify(run('EVAL.configured_panels.live_rounds')),JSON.stringify([]));
+  assert.equal(JSON.stringify(run('EVAL.configured_panels.whole_game')),JSON.stringify(['openai:gpt-6-luna:medium']));
 });
 
 test('active calls appear between the relevant turns and disappear when idle', () => {
@@ -83,8 +168,14 @@ test('active calls appear between the relevant turns and disappear when idle', (
   assert.equal((html.match(/activeReviewEvent/g) || []).length,1);
 
   run(`GAME.result={winner:"alice"}; EVAL.running=false; EVAL.review_active=false;
-    EVAL.error="API unavailable"; EVAL.live_finalized=false; EVAL.live_panel=["test:coder"]; renderTimeline()`);
+    EVAL.error="API unavailable"; EVAL.live_finalized=false; EVAL.evaluated_through_round=2;
+    EVAL.live_panel=["test:coder"]; renderTimeline()`);
   assert.match(run('el("timeline").innerHTML'), /Final research review paused.*Resume review/s);
+  run('EVAL.evaluated_through_round=0; renderTimeline()');
+  html = run('el("timeline").innerHTML');
+  assert.doesNotMatch(html, /Final research review paused/);
+  assert.ok(html.indexOf('data-turn="1"') < html.indexOf('Round 1 paused'));
+  assert.ok(html.indexOf('Round 1 paused') < html.indexOf('data-turn="2"'));
 });
 
 test('a paused final review resumes with its configured live panel', async () => {
@@ -185,7 +276,7 @@ test('two-tag rows show one status per tag, full passages, and structured eviden
   assert.doesNotMatch(panel,/condition<\/dt><dd>Unknown/);
   run('EVAL.members[0].commitments[0].needs_review=true; EVAL.members[0].commitments[0].issues=["Invalid citation [69]"]; renderPanels()');
   assert.match(run('el("panelRoot").innerHTML'),/Needs review/);
-  assert.doesNotMatch(run('el("panelRoot").innerHTML'),/Invalid citation \[69\]|Citation review:/);
+  assert.match(run('el("panelRoot").innerHTML'),/Technical review: Invalid citation \[69\]/);
   assert.equal(run('jumpToTagEvidence(0); el("tagEvidence").open'),true);
   run('renderPanels()');
   assert.match(run('el("panelRoot").innerHTML'),/id="tagEvidence" open/);
@@ -519,4 +610,23 @@ test('compact histories show agreed and committed with working terms and evidenc
   assert.match(unilateral,/Not effective.*Attack Brazil next turn instead/);
   assert.doesNotMatch(pact + unilateral,/<strong>made<\/strong>|undefined/);
   assert.equal(run('summarizeMemberV3(EVAL.members[0]).established_count'),2);
+});
+
+
+test('rerun method control keeps a single panel and changes its action', () => {
+  const run = reader({finished:true, evaluate:true});
+  run(`let inputs=[{value:'live_rounds'},{value:'whole_game'}];
+    el('evalConfig').querySelectorAll=()=>inputs;
+    el('evalRows').children=[{model:'keep me'}]; bindEvaluationConfig();
+    inputs[1].onchange();`);
+  assert.equal(run('chosenEvaluationMethod()'), 'whole_game');
+  assert.equal(run('el("evalRun").textContent'), 'Run whole-game analysis');
+  assert.equal(run('el("evalRows").children[0].model'), 'keep me');
+  assert.equal(run('el("evalRun").disabled'), false);
+  assert.match(run('evaluationConfigHtml()'), /value="whole_game" checked/);
+  run('inputs[0].onchange()');
+  assert.equal(run('el("evalRun").textContent'), 'Replay rounds');
+  assert.equal(run('el("evalRows").children[0].model'), 'keep me');
+  run('GAME.result=null; inputs[1].onchange()');
+  assert.equal(run('el("evalRun").disabled'), true);
 });

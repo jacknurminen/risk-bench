@@ -6,18 +6,18 @@ function openInterval(start, end) {
   state.drawer = {focus: start, interval: [start,end], cites: new Set()}; renderPanels();
 }
 function openUnitDrawer(key) {
-  const unit = EVAL.tag_schema === "two_tag_v3" ?
+  const unit = isTwoTagSchema() ?
     orderedV3Units().find(u => unitKey(u) === key || u.members?.some(m => unitKey(m) === key)) :
     allUnits().find(u => unitKey(u) === key);
   if (!unit) { toast("This unit is not available in the selected run."); return; }
   const selectedKey = unitKey(unit);
-  if (EVAL.tag_schema === "two_tag_v3" && state.unitDrawer?.key === selectedKey) {
+  if (isTwoTagSchema() && state.unitDrawer?.key === selectedKey) {
     state.unitDrawer = {key:null}; state.openTagEvidence = false; renderPanels(); return;
   }
   state.openTagEvidence = false;
   state.unitDrawer = {key:selectedKey, undertakings:new Set(
     (unit.members || []).filter(m => unitKey(m) === key).map(m => m.id))}; renderPanels();
-  if (EVAL.tag_schema === "two_tag_v3") requestAnimationFrame(() =>
+  if (isTwoTagSchema()) requestAnimationFrame(() =>
     el("tag-event-" + v3Number(unit))?.scrollIntoView({block:"center"}));
 }
 function chipClick(span) { openLineDrawer(span); }
@@ -25,7 +25,7 @@ function closeDrawer() { state.drawer = null; renderPanels(); }
 function closeUnitDrawer() { state.unitDrawer = null; state.openTagEvidence = false; renderPanels(); }
 function closePanels() { state.drawer = null; state.unitDrawer = null; state.openTagEvidence = false; renderPanels(); }
 async function setUnitVerified(key, verified) {
-  const unit = EVAL.tag_schema === "two_tag_v3" ?
+  const unit = isTwoTagSchema() ?
     orderedV3Units().find(u => unitKey(u) === key) : allUnits().find(u => unitKey(u) === key);
   if (!unit) return;
   for (const member of unit.members || [unit]) {
@@ -42,7 +42,7 @@ async function setUnitVerified(key, verified) {
 function renderPanels() {
   const root = el("panelRoot"), d = state.drawer;
   const unitScroll = root.querySelector(".unitDrawer .dbody")?.scrollTop;
-  const unitTimeline = EVAL.tag_schema === "two_tag_v3" && !!state.unitDrawer;
+  const unitTimeline = isTwoTagSchema() && !!state.unitDrawer;
   const unit = state.unitDrawer?.key && (unitTimeline ? orderedV3Units() : allUnits())
     .find(u => unitKey(u) === state.unitDrawer.key);
   if (state.unitDrawer?.key && !unit) state.unitDrawer = unitTimeline ? {key:null} : null;
@@ -52,11 +52,11 @@ function renderPanels() {
   const source = d ? (EVAL.spans || []).filter(s => !d.interval || (s.span >= d.interval[0] && s.span <= d.interval[1])) : [];
   root.innerHTML = '<div class="overlay" onclick="closePanels()"></div>' +
     (showUnit ? '<aside class="drawer unitDrawer' + (unit ? ' researchTone-' + unitTone(unit) : '') + '" aria-label="' +
-      escapeHtml(EVAL.tag_schema === "two_tag_v3" ? "Statement and commitment timeline" : unitType(unit) + " details") +
-      '"><div class="dhead"><span>' + (EVAL.tag_schema === "two_tag_v3" ? 'Statements &amp; commitments' :
+      escapeHtml(isThesisSchema() ? "Deception and commitment timeline" : isTwoTagSchema() ? "Statement and commitment timeline" : unitType(unit) + " details") +
+      '"><div class="dhead"><span>' + (isThesisSchema() ? 'Deception &amp; commitments' : isTwoTagSchema() ? 'Statements &amp; commitments' :
       escapeHtml(unitType(unit) + ' · ' + (EVAL.game_id || ""))) +
       '</span><button class="btn" onclick="closeUnitDrawer()">Close</button></div>' +
-      '<div class="dbody">' + (EVAL.tag_schema === "two_tag_v3" ?
+      '<div class="dbody">' + (isTwoTagSchema() ?
         '<div class="tagTimeline">' + orderedV3Units().map((v,index) =>
           unitCardV3(v,unitKey(v) === state.unitDrawer.key,index+1)).join('') + '</div>' :
         unitCard(unit, true)) +

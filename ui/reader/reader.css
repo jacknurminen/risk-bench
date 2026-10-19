@@ -248,6 +248,18 @@
   .chart text.axis { font: 9px var(--font-mono); fill: var(--mute-2); }
   .chart text.marker { font: 9px var(--font-sans); cursor: default; }
   #commentaryStats { margin-top: 16px; }
+  #playerOutput { margin-top: 22px; }
+  #outputCharts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 16px; }
+  #outputNote { line-height: 1.65; }
+  .outputBars { padding: 14px; background: var(--subtle-warm); border: 1px solid var(--line-2); border-radius: 6px; }
+  .outputBarRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; margin-bottom: 13px; }
+  .outputBarRow:last-child { margin-bottom: 0; }
+  .outputPlayer { font: 11px var(--font-mono); overflow-wrap: anywhere; }
+  .outputValue { font: 10px var(--font-mono); color: var(--mute-2); text-align: right; }
+  .outputTrack { grid-column: 1 / -1; height: 7px; background: var(--line-2); border-radius: 3px; overflow: hidden; }
+  .outputTrack > span { display: block; height: 100%; border-radius: inherit; }
+  #outputTable tbody th { text-transform: none; letter-spacing: normal; font-size: 11px; }
+  @media (max-width: 650px) { #outputCharts { grid-template-columns: minmax(0, 1fr); } }
   #memberToggles, #agreementFilter, #evalMemberToggles, #evalAgreementFilter, .grainControls {
                  display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px;
                  font-family: var(--font-mono); font-size: 10.5px; color: var(--mute); margin-bottom: 7px; }
@@ -729,3 +741,6 @@ body.readerSplit .subbar { gap: 6px 12px; }
   .tagDevelopment { grid-template-columns: 1fr 38px; gap: 4px 8px; }
   .tagDevelopment > span:last-child { grid-column: 1 / -1; }
 }
+
+.evaluationModeActions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.evalConfig .evalRow{flex-wrap:wrap}.evalConfig .evalRow select{min-width:0;max-width:100%}

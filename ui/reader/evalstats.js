@@ -13,7 +13,11 @@ function evalKpi(value, label, detail, action = "") {
     '<strong>' + value + '</strong><span>' + label + '</span><small>' + detail + '</small></' + tag + '>';
 }
 function renderEvalStats() {
-  if (EVAL.tag_schema === "two_tag_v3") return renderEvalStatsV3();
+  if (isTwoTagSchema() && EVAL.has_evaluation && EVAL.research_report) {
+    el("evalSheet").innerHTML = renderResearchGameReport(EVAL.research_report, GAME);
+    return;
+  }
+  if (isTwoTagSchema()) return renderEvalStatsV3();
   const sheet = el("evalSheet");
   if (!EVAL.has_evaluation) { sheet.innerHTML = '<p class="empty">No evaluation yet.</p>'; return; }
   const summaries = EVAL.analysis?.members || (EVAL.members || []).map(summarizeMember);
