@@ -120,11 +120,16 @@ def test_the_model_catalog_offers_every_model_with_its_prices(tmp_path: Path):
     assert set(catalog["models_by_provider"]) == {"anthropic", "google", "openai"}
     anthropic_models = catalog["models_by_provider"]["anthropic"]
     # the setup form offers a provider's first entry by default, so the flagship must lead
-    assert anthropic_models[0]["id"] == "claude-fable-5"
+    assert anthropic_models[0]["id"] == "claude-fable-5-1"
     assert {model["id"] for model in anthropic_models} >= {"claude-opus-5-5", "claude-haiku-4-5"}
     ids = {model["id"] for models in catalog["models_by_provider"].values() for model in models}
-    assert {"gpt-6-sol", "gpt-6-luna"} <= ids
-    assert not {"claude-opus-5", "gpt-5.6-sol", "gpt-5.6-luna"} & ids
+    assert {"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5"} <= ids
+    assert {"claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5", "gpt-5.6-sol", "gpt-5.6-luna",
+            "gemini-3.7-flash", "gemini-3.1-flash-lite"} <= ids
+    assert len(ids) == sum(len(models) for models in catalog["models_by_provider"].values())
+    assert "gemini-3-pro-preview" not in ids
+    new_haiku = next(model for model in anthropic_models if model["id"] == "claude-haiku-5-5")
+    assert (new_haiku["input_usd_per_million"], new_haiku["output_usd_per_million"]) == (0.10, 0.50)
     haiku = next(model for model in anthropic_models if model["id"] == "claude-haiku-4-5")
     assert (haiku["input_usd_per_million"], haiku["output_usd_per_million"]) == (1.00, 5.00)
     assert catalog["baseline"] == "random"
@@ -176,6 +181,95 @@ def test_live_panel_started_during_play_is_handled_by_the_game_worker(tmp_path: 
     )
 
     assert api_app._configured_live_evaluators(journal) == ["test:coder"]
+
+
+def test_finished_game_can_start_fresh_round_replay_or_resume(tmp_path: Path, monkeypatch):
+    from risk_bench.api import app as api_app
+
+    journal = tmp_path / "games" / "replay" / "game.jsonl"
+    journal.parent.mkdir(parents=True)
+    write_game_journal(path=journal, seed=11, max_turns=4)
+    original = journal.read_bytes()
+    started = []
+    monkeypatch.setattr(api_app.specs, "build_evaluators", lambda **kwargs: ())
+    monkeypatch.setattr(GameProcessManager, "evaluate_game", lambda self, **kwargs: started.append(kwargs))
+    client = client_for(tmp_path)
+    for restart in (True, False):
+        response = client.post("/api/games/replay/evaluate", json={
+            "evaluators": ["test:coder"], "live": True, "restart": restart,
+        })
+        assert response.status_code == 202
+        assert started[-1]["live"] is True and started[-1]["restart"] is restart
+    assert journal.read_bytes() == original
+
+
+def test_fresh_replay_rejects_running_games_before_changing_configuration(tmp_path: Path, monkeypatch):
+    from risk_bench.api import app as api_app
+
+    journal = tmp_path / "games" / "unfinished" / "game.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({"type": "header", "experiment_version": 3, "schema_version": 4,
+                                   "player_specs": ["alice", "bob"]}) + "\n")
+    config = journal.parent / "live-evaluators.json"
+    config.write_text(json.dumps({"evaluators": ["original:coder"]}))
+    monkeypatch.setattr(GameProcessManager, "is_running", lambda self, game_id: True)
+    monkeypatch.setattr(api_app.specs, "build_evaluators", lambda **kwargs: ())
+    response = client_for(tmp_path).post("/api/games/unfinished/evaluate", json={
+        "evaluators": ["test:coder"], "live": True, "restart": True,
+    })
+    assert response.status_code == 409
+    assert "Pause the game" in response.json()["detail"]
+    assert json.loads(config.read_text())["evaluators"] == ["original:coder"]
+
+
+def test_paused_game_can_replay_but_cannot_resume_during_evaluation(tmp_path, monkeypatch):
+    from risk_bench.api import app as api_app
+
+    journal = tmp_path / "games" / "paused" / "game.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({"type": "header", "experiment_version": 3, "schema_version": 4,
+                                   "player_specs": ["alice", "bob"]}) + "\n")
+    started = []
+    monkeypatch.setattr(api_app.specs, "build_evaluators", lambda **kwargs: ())
+    monkeypatch.setattr(GameProcessManager, "evaluate_game", lambda self, **kwargs: started.append(kwargs))
+    client = client_for(tmp_path)
+    response = client.post("/api/games/paused/evaluate", json={
+        "evaluators": ["test:coder"], "live": True, "restart": True,
+    })
+    assert response.status_code == 202
+    assert started[0]["restart"] is True
+    monkeypatch.setattr(GameProcessManager, "is_evaluating", lambda self, game_id: True)
+    response = client.post("/api/games/paused/resume")
+    assert response.status_code == 409
+    assert "Wait for the evaluation replay" in response.json()["detail"]
+
+
+def test_standalone_review_worker_catches_up_without_following_the_game(tmp_path, monkeypatch):
+    from risk_bench.api import processes
+    from risk_bench.runner import live_evaluation
+
+    calls = []
+    monkeypatch.setattr(processes, "_redirect_output", lambda **kwargs: None)
+    monkeypatch.setattr(live_evaluation, "run_live_evaluation", lambda *args, **kwargs: calls.append(kwargs))
+    for restart in (True, False):
+        processes._run_evaluation_in_worker(str(tmp_path / "log"), str(tmp_path / "game.jsonl"),
+                                            ["test:coder"], live=True, restart=restart)
+        assert calls[-1] == {"follow": False, "restart": restart}
+
+
+def test_replay_rejects_a_review_owned_by_an_external_game_process(tmp_path: Path, monkeypatch):
+    from risk_bench.api import app as api_app
+
+    journal = tmp_path / "games" / "busy" / "game.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({"type": "header", "experiment_version": 3, "schema_version": 4,
+                                   "player_specs": ["alice", "bob"]}) + "\n")
+    monkeypatch.setattr(api_app, "review_activity_for_journal", lambda path: {"kind": "final", "pid": os.getpid()})
+    response = client_for(tmp_path).post("/api/games/busy/evaluate", json={
+        "evaluators": ["test:coder"], "live": True, "restart": True,
+    })
+    assert response.status_code == 409
+    assert "already running" in response.json()["detail"]
 
 
 def unfinished_journal(games_directory: Path, name: str) -> Path:
@@ -318,10 +412,12 @@ def test_a_game_without_a_trace_lists_no_calls(tmp_path: Path):
 
 def test_a_parallel_launch_becomes_a_grouped_tournament(tmp_path: Path):
     client = client_for(tmp_path=tmp_path)
+    orders = [[1, 2, 3], [1, 3, 2], [2, 1, 3]]
 
     response = client.post(
         "/api/games",
-        json={"players": ["random", "random", "random"], "seed": 7, "max_turns": 40, "parallel_games": 3},
+        json={"players": ["random", "random", "random"], "seed": 7, "max_turns": 4,
+              "games": 3, "parallel_games": 2, "seating_mode": "cycle"},
     )
     assert response.status_code == 201
     assert response.json()["tournament"] is True
@@ -331,6 +427,7 @@ def test_a_parallel_launch_becomes_a_grouped_tournament(tmp_path: Path):
     payload = client.get("/api/games").json()
     [tournament] = payload["tournaments"]
     assert tournament["id"] == tournament_id
+    assert tournament["parallel_games"] == 2
     assert tournament["game_ids"] == [f"{tournament_id}-g{index}" for index in (1, 2, 3)]
     assert len(payload["games"]) == 3
     assert all(game["tournament_id"] == tournament_id for game in payload["games"])
@@ -340,8 +437,18 @@ def test_a_parallel_launch_becomes_a_grouped_tournament(tmp_path: Path):
     finished = 0
     while time.monotonic() < deadline and finished < 3:
         time.sleep(0.5)
-        finished = sum(game["finished"] for game in client.get("/api/games").json()["games"])
+        games = client.get("/api/games").json()["games"]
+        assert sum(game["running"] for game in games) <= 2
+        finished = sum(game["finished"] for game in games)
     assert finished == 3, "the tournament's games never all finished"
+    names = ["random", "random#2", "random#3"]
+    for game_id, order in zip(tournament["game_ids"], orders):
+        journal = tmp_path / "games" / tournament_id / game_id / "game.jsonl"
+        header = json.loads(journal.read_text().splitlines()[0])
+        assert list(header["player_specs"]) == [names[index - 1] for index in order]
+    schedule = client.get(f"/api/tournaments/{tournament_id}").json()["seating_schedule"]
+    assert [row["order"] for row in schedule] == orders
+    assert [row["seed"] for row in schedule] == [7, 8, 9]
 
 
 def test_oversized_tournaments_are_rejected(tmp_path: Path):
@@ -548,12 +655,13 @@ def test_a_running_evaluation_reports_live_progress_from_its_trace(tmp_path: Pat
     assert progress["state"] == "running"
     assert progress["completed_calls"] == 3 and progress["failed_calls"] == 0
     assert progress["cost_usd"] == round(3 * _CALL_COST_USD, 4)
-    # each member is expected to make one call per turn plus the synthesis call
+    # Each member produces one complete assessment; corrections are additional calls.
     assert [(member["calls"], member["spec"]) for member in progress["members"]] == [
         (2, "anthropic:claude-opus-5"),
         (1, "openai:gpt-5.6-sol"),
     ]
-    assert progress["expected_calls"] == 2 * progress["members"][0]["expected_calls"]
+    assert progress["members"][0]["expected_calls"] == 1
+    assert progress["expected_calls"] == 2
 
 
 def test_live_review_activity_is_reported_only_while_a_round_or_final_call_is_active(tmp_path: Path):

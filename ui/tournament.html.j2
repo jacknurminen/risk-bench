@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/research-report.css">
 <style>
   body { padding-bottom: 60px; }
 
@@ -32,7 +33,10 @@
                  font-size: 11px; color: var(--body); }
 
   /* tables */
-  .tableCard { padding: 6px 14px; }
+  .tableCard { padding: 6px 14px; overflow: auto; }
+  .tournamentTabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .tournamentTabs button { padding: 9px 16px; border: 1px solid var(--line); border-radius: 6px; background: white; cursor: pointer; }
+  .tournamentTabs button[aria-pressed="true"] { background: var(--ink); color: white; }
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; font-family: var(--font-mono); font-weight: 500; font-size: 9.5px; text-transform: uppercase;
        letter-spacing: .12em; color: var(--mute-2); padding: 10px 10px 7px; border-bottom: 1px solid var(--line); }
@@ -56,6 +60,10 @@
   .controls input[type=checkbox] { accent-color: var(--ink); }
   select { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 5px;
            padding: 4px 7px; font: 11px var(--font-mono); }
+  #tournamentEvalVersion { max-width: min(620px, 65vw); }
+  #tournamentEvalError, #tournamentContinueError, #tournamentReplayError { color: var(--attack, #a33f3b); }
+  #tournamentReplayGame { max-width: min(560px, 75vw); }
+  #tournamentAdditionalGames { width: 80px; padding: 5px 8px; }
 
   /* charts */
   #charts, #agreementCharts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
@@ -83,7 +91,53 @@
   </div>
 </header>
 <div class="shell">
+  <section class="card section" style="padding:16px" aria-label="Continue tournament">
+    <form id="tournamentContinueForm">
+      <div class="controls"><strong>Continue tournament</strong>
+        <label>Additional games <input id="tournamentAdditionalGames" type="number" min="1" max="1000" step="1" value="5" required></label>
+        <button class="btn" id="tournamentContinueRun" type="submit">Add games</button></div>
+      <p class="note" id="tournamentContinueHint"></p>
+      <p id="tournamentContinueStatus" role="status"></p>
+      <p id="tournamentContinueError" role="alert"></p>
+    </form>
+    <details>
+      <summary>Replay a tournament game</summary>
+      <form id="tournamentReplayForm" style="margin-top:14px">
+        <div class="controls"><label>Game <select id="tournamentReplayGame"></select></label>
+          <button class="btn" id="tournamentReplayRun" type="submit">Replay from start</button></div>
+        <p class="note" id="tournamentReplayHint"></p>
+        <p id="tournamentReplayStatus" role="status"></p>
+        <p id="tournamentReplayError" role="alert"></p>
+      </form>
+      <details id="tournamentReplayHistory" hidden></details>
+    </details>
+  </section>
+  <nav class="tournamentTabs" aria-label="Tournament panels">
+    <button id="researchTab" aria-pressed="true" onclick="showTournamentPanel('research')">Research evaluation</button>
+    <button id="contextTab" aria-pressed="false" onclick="showTournamentPanel('context')">Game context &amp; API usage</button>
+  </nav>
+  <section id="tournamentEvalControls" class="card section" style="padding:16px">
+    <div class="controls"><label>Evaluation version <select id="tournamentEvalVersion"></select></label>
+      <span id="tournamentEvalStatus" role="status"></span></div>
+    <details><summary>Configure tournament evaluations</summary>
+      <div class="controls" style="margin-top:14px"><label>Method <select id="tournamentEvalMethod">
+        <option value="whole_game">Whole game</option><option value="live_rounds">Replay rounds</option>
+      </select></label></div>
+      <div id="tournamentEvalRows"></div>
+      <div class="controls"><button class="btn" id="tournamentEvalAdd" disabled>Add evaluator</button>
+        <button class="btn" id="tournamentEvalRun" disabled>Rerun all evaluations</button></div>
+      <p class="note" id="tournamentEvalHint"></p>
+    </details>
+    <p id="tournamentEvalError" role="alert"></p>
+    <details id="tournamentEvalJobs" hidden></details>
+  </section>
+  <section id="tournamentResearch" aria-label="Research evaluation"></section>
+  <div id="tournamentContext" hidden>
   <div id="legend"></div>
+  <details id="seatingSchedule" class="section" hidden>
+    <summary>Configured seating schedule</summary>
+    <div class="card tableCard"><table id="seatingTable"></table></div>
+  </details>
 
   <div class="section">
     <div class="eyebrow">games</div>
@@ -108,23 +162,6 @@
     <div id="charts"></div>
   </div>
 
-  <div class="section" id="agreementSection" hidden>
-    <div class="eyebrow">annotator agreement</div>
-    <div class="note">How often the commentator panel agreed, pooled across all games. Each bar is one model's
-      tags of that type, split by how many of the panel's members flagged the same (turn, player, behavior):
-      darker = stronger consensus. Unanimous tags are the high-confidence signal; the lighter split segments
-      are the ambiguous cases worth a human read. The unanimous share per model is in the table below.</div>
-    <div class="controls">
-      <label>count
-        <select id="agreementMode">
-          <option value="total">summed across games</option>
-          <option value="pergame">per game</option>
-        </select></label>
-      <span id="agreementLegend"></span>
-    </div>
-    <div id="agreementCharts"></div>
-  </div>
-
   <div class="section">
     <div class="eyebrow">api usage per turn</div>
     <div class="note">Mean per turn across the games. Each turn shows two bars: input (the prompt sent) on the
@@ -144,6 +181,11 @@
     <div class="card tableCard"><table id="aggregateTable"></table></div>
   </div>
 </div>
+</div>
+<script src="/assets/research-report.js"></script>
+<script src="/assets/tournament-evaluate.js"></script>
+<script src="/assets/tournament-continue.js"></script>
+<script src="/assets/tournament-replay.js"></script>
 <script>
 const DATA = {{ tournament_json }};
 const LIVE = {{ live_json }};
@@ -158,103 +200,43 @@ const METRICS = [
   ["territories", "territories", v => Math.round(v)],
   ["income per turn", "income", v => Math.round(v)],
   ["cards in hand", "cards", v => Math.round(v)],
-  ["skill: strong play, cumulative", "skill_strong", v => Math.round(v)],
-  ["skill: weak play, cumulative", "skill_weak", v => Math.round(v)],
-  ["conduct: cooperative, cumulative", "conduct_cooperative", v => Math.round(v)],
-  ["conduct: adversarial, cumulative", "conduct_adversarial", v => Math.round(v)],
-  ["conduct: deception, cumulative", "conduct_deceptive", v => Math.round(v)],
 ];
 
 let latestData = null;
 
 function render(data) {
   latestData = data;
+  renderTournamentEvaluations(data);
+  renderTournamentContinuation(data);
+  renderTournamentReplay(data);
   el("tournamentId").textContent = data.id;
-  el("liveNote").textContent = data.games.every(game => game.finished)
-    ? `${data.games.length} games, all finished` : `${data.games.length} games — live, updating`;
+  el("liveNote").textContent = data.games.length === (data.total_games ?? data.games.length) && data.games.every(game => game.finished)
+    ? `${data.games.length} games, all finished` : `${data.games.length}/${data.total_games ?? data.games.length} games started · ${data.parallel_games ?? "—"} at once — updating`;
   el("legend").innerHTML = data.players
     .map((name, seat) => `<span class="key"><span class="swatch" style="background:${COLORS[seat]}"></span>${escapeHtml(name)}</span>`).join("");
   renderGamesTable(data);
+  const schedule = data.seating_schedule || [];
+  el("seatingSchedule").hidden = !schedule.length;
+  el("seatingTable").innerHTML = `<thead><tr><th>game</th><th>seed</th><th>seats, first to last</th></tr></thead><tbody>` +
+    schedule.map((row, i) => `<tr><td>${i + 1}</td><td>${row.seed}</td><td>${row.players
+      .map((player, j) => `Player ${row.order[j]}: ${escapeHtml(player)}`).join(" → ")}</td></tr>`).join("") + "</tbody>";
   drawCharts();
-  renderAgreement(data);
+  const openDetails = new Set([...el("tournamentResearch").querySelectorAll("details[open]")]
+    .map(d => d.querySelector("summary")?.textContent));
+  el("tournamentResearch").innerHTML = renderTournamentResearch(data.research, data.games, data.output_volume);
+  el("tournamentResearch").querySelectorAll("details").forEach(d => {
+    if (openDetails.has(d.querySelector("summary")?.textContent)) d.open = true;
+  });
   renderTokenChart();
   renderAggregateTable(data);
 }
 
-// One stacked bar per model, split by how many panel members agreed on each tag, pooled across games.
-// Chips suit a single game's per-turn series; a tournament wants the aggregate composition, so agreement
-// is shown rather than filtered. Darker segments = stronger consensus; the lighter ones are the splits.
-const AGREEMENT_VALENCES = [
-  ["strong", "skill: strong play"],
-  ["weak", "skill: weak play"],
-  ["cooperative", "conduct: cooperative"],
-  ["adversarial", "conduct: adversarial"],
-  ["deceptive", "conduct: deception"],
-];
-
-const agreementShade = (level, panelSize) => {
-  const t = panelSize <= 1 ? 1 : (level - 1) / (panelSize - 1);  // 0 at 1/m (light) .. 1 at m/m (dark)
-  return `hsl(212 32% ${Math.round(74 - 46 * t)}%)`;
-};
-
-function renderAgreement(data) {
-  const agreement = data.agreement;
-  const present = agreement && agreement.panel_size >= 2;
-  el("agreementSection").hidden = !present;
-  if (!present) return;
-  el("agreementLegend").innerHTML = agreement.levels.map(level =>
-    `<span><span class="swatch" style="background:${agreementShade(level, agreement.panel_size)}"></span>${level}/${agreement.panel_size}</span>`
-  ).join("");
-  drawAgreementCharts();
-}
-
-function drawAgreementCharts() {
-  if (!latestData?.agreement) return;
-  const mode = el("agreementMode").value;
-  const container = el("agreementCharts");
-  container.innerHTML = "";
-  for (const [valence, title] of AGREEMENT_VALENCES) {
-    container.appendChild(buildAgreementChart(latestData, valence, title, mode));
-  }
-}
-el("agreementMode").addEventListener("change", drawAgreementCharts);
-
-function buildAgreementChart(data, valence, title, mode) {
-  const agreement = data.agreement, m = agreement.panel_size, games = agreement.games;
-  const W = 470, rowH = 26, PAD = { left: 128, right: 12, top: 8, bottom: 20 };
-  const H = PAD.top + data.players.length * rowH + PAD.bottom;
-  const fmt = mode === "pergame" ? (v => v.toFixed(1)) : (v => String(v));
-  const scale = value => mode === "pergame" ? value / games : value;
-  const perPlayer = data.players.map((_, seat) => agreement.per_player[seat].by_valence[valence].map(scale));
-  const xMax = Math.max(1, ...perPlayer.map(levels => levels.reduce((sum, value) => sum + value, 0)));
-  const xAt = value => PAD.left + (value / xMax) * (W - PAD.left - PAD.right);
-  const parts = [];
-  for (const fraction of [0, 0.5, 1]) {
-    const gx = xAt(xMax * fraction);
-    parts.push(`<line x1="${gx}" y1="${PAD.top}" x2="${gx}" y2="${H - PAD.bottom}" stroke="${GRID}"/>`);
-    parts.push(`<text x="${gx}" y="${H - 6}" class="axis" text-anchor="middle">${fmt(xMax * fraction)}</text>`);
-  }
-  data.players.forEach((name, seat) => {
-    const y = PAD.top + seat * rowH;
-    const label = name.length > 16 ? name.slice(0, 15) + "…" : name;
-    // seat identity rides on the swatch; the label itself stays ink for readability
-    parts.push(`<rect x="${PAD.left - 14}" y="${y + rowH / 2 - 3.5}" width="7" height="7" rx="3.5" fill="${COLORS[seat]}"/>`);
-    parts.push(`<text x="${PAD.left - 20}" y="${y + rowH / 2 + 3}" class="axis" text-anchor="end">${escapeHtml(label)}<title>${escapeHtml(name)}</title></text>`);
-    let base = 0;
-    perPlayer[seat].forEach((value, levelIndex) => {
-      if (value > 0) {
-        const x0 = xAt(base), width = xAt(base + value) - x0;
-        parts.push(`<rect x="${x0.toFixed(2)}" y="${y + 4}" width="${Math.max(0, width).toFixed(2)}"
-          height="${rowH - 9}" fill="${agreementShade(levelIndex + 1, m)}"><title>${escapeHtml(name)} —
-          ${levelIndex + 1}/${m}: ${fmt(value)}</title></rect>`);
-      }
-      base += value;
-    });
-  });
-  const chart = document.createElement("div");
-  chart.className = "chart";
-  chart.innerHTML = `<h4>${title}</h4><svg viewBox="0 0 ${W} ${H}">${parts.join("")}</svg>`;
-  return chart;
+function showTournamentPanel(name) {
+  el("tournamentEvalControls").hidden = name !== "research";
+  el("tournamentResearch").hidden = name !== "research";
+  el("tournamentContext").hidden = name !== "context";
+  el("researchTab").setAttribute("aria-pressed", String(name === "research"));
+  el("contextTab").setAttribute("aria-pressed", String(name === "context"));
 }
 
 function drawCharts() {
@@ -267,6 +249,10 @@ function drawCharts() {
   };
   const charts = el("charts");
   charts.innerHTML = "";
+  if (!latestData.turns.length) {
+    charts.innerHTML = '<p class="note">Waiting for recorded gameplay from the current attempts.</p>';
+    return;
+  }
   for (const [title, metric, formatValue] of METRICS) {
     charts.appendChild(buildChart(latestData, title, metric, formatValue, show));
   }
@@ -431,11 +417,8 @@ function buildTokenChart(usage) {
 }
 
 function renderAggregateTable(data) {
-  const agreement = data.agreement && data.agreement.panel_size >= 2 ? data.agreement : null;
   const rows = data.table.map((row, seat) => {
     const interval = `${Math.round(row.win_rate_low * 100)}–${Math.round(row.win_rate_high * 100)}%`;
-    const tags = Object.entries(row.tags).sort((a, b) => b[1] - a[1])
-      .map(([behavior, count]) => `<span class="tag">${behavior}${count > 1 ? ` ×${count}` : ""}</span>`).join("");
     const cost = row.cost_usd == null ? "—" : `$${row.cost_usd.toFixed(2)}`;
     return `<tr><td style="white-space:nowrap"><span class="swatch" style="background:${COLORS[seat]};display:inline-block;margin-right:7px"></span><span style="font-weight:600">${row.name}</span></td>
       <td class="num">${row.wins} / ${row.finished_games}</td>
@@ -444,30 +427,27 @@ function renderAggregateTable(data) {
       <td class="num">${row.armies_destroyed} / ${row.armies_lost}</td>
       <td class="num">${row.public_messages} 📢 ${row.private_messages} 🔒</td>
       <td class="num">${row.input_tokens.toLocaleString("en-US")} / ${row.output_tokens.toLocaleString("en-US")}</td>
-      <td class="num">${cost}</td>${unanimousCell(agreement, seat)}<td>${tags || "—"}</td></tr>`;
+      <td class="num">${cost}</td></tr>`;
   });
-  const unanimousHeader = agreement
-    ? '<th title="share of this model\'s tags on which the whole panel agreed, across all games">% unanimous</th>'
-    : "";
   el("aggregateTable").innerHTML = `<thead><tr><th>player</th><th>wins</th><th>win rate 95% CI</th>
     <th>attacks</th><th>conquests</th><th>destroyed / lost</th><th>messages</th>
-    <th>tokens in / out</th><th>est. cost</th>${unanimousHeader}<th>behavior tags</th></tr></thead>
+    <th>tokens in / out</th><th>est. cost</th></tr></thead>
     <tbody>${rows.join("")}</tbody>`;
 }
 
-function unanimousCell(agreement, seat) {
-  if (!agreement) return "";
-  const player = agreement.per_player[seat];
-  if (!player.total) return '<td class="num">—</td>';
-  return `<td class="num">${Math.round(100 * player.unanimous / player.total)}%
-    <span style="color:var(--mute-2)">(${player.unanimous}/${player.total})</span></td>`;
-}
-
 render(DATA);
-if (LIVE) setInterval(async () => {
-  const response = await fetch(POLL_URL, { cache: "no-store" });
-  if (response.ok) render(await response.json());
-}, 3000);
+el('tournamentContinueForm').addEventListener('submit', continueTournament);
+el('tournamentReplayForm').addEventListener('submit', replayTournamentGame);
+el('tournamentReplayGame').addEventListener('change', () => renderTournamentReplay(latestData));
+if (POLL_URL) initTournamentEvaluations();
+// Evaluations can finish or be rerun after the games end. Avoid overlapping rebuilds.
+async function refreshTournament() {
+  try {
+    await fetchTournamentVersion();
+  } catch { /* Keep the last complete report during a transient failure. */ }
+  finally { setTimeout(refreshTournament, 5000); }
+}
+if (POLL_URL) setTimeout(refreshTournament, 5000);
 </script>
 </body>
 </html>

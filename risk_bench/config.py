@@ -4,6 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from risk_bench.agents.base import ReasoningEffort
 
+REPLAY_SETTING_FIELDS = frozenset(
+    {
+        "max_agent_tokens",
+        "agent_reasoning_effort",
+        "max_invalid_retries",
+        "max_concurrent_commentators",
+        "allow_private_messages",
+        "max_negotiation_rounds",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Application settings, loaded from environment variables and ``.env``."""
@@ -41,3 +52,20 @@ def load_settings() -> Settings:
         The populated settings.
     """
     return Settings()
+
+
+def settings_for_new_game(journal_path: Path) -> Settings:
+    """Use a replay's saved experimental settings with today's credentials and code."""
+    import json
+
+    settings = load_settings()
+    snapshot = journal_path.parent / "replay-settings.json"
+    if not snapshot.is_file():
+        return settings
+    recorded = json.loads(snapshot.read_text(encoding="utf-8"))
+    return Settings.model_validate(
+        {
+            **settings.model_dump(),
+            **{key: value for key, value in recorded.items() if key in REPLAY_SETTING_FIELDS},
+        }
+    )
