@@ -45,6 +45,9 @@ def test_human_game_plays_to_completion_and_records_actions_messages_and_reasoni
             if body["finished"]:
                 break
             request = body["request"]
+            assert request["view"]["round_number"] == (
+                0 if request["view"]["turn_number"] == 0 else (request["view"]["turn_number"] - 1) // 3 + 1
+            )
             assert request["view"]["notes"] == saved_notes
             last_request = request["request_id"]
             reply = {"request_id": last_request, "thought": "Testing a human decision"}
@@ -64,6 +67,7 @@ def test_human_game_plays_to_completion_and_records_actions_messages_and_reasoni
                     (i for i, a in enumerate(actions) if a["kind"] in ("end_attack_phase", "skip_fortify")), 0
                 )
             elif request["kind"] == "notes":
+                assert request["finished_round"] == (request["finished_turn"] - 1) // 3 + 1
                 noted_turns.append(request["finished_turn"])
                 reply = {"request_id": last_request}
                 if len(noted_turns) == 1:

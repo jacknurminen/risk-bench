@@ -1,34 +1,88 @@
 /* ================= EVALUATE (configure + run the panel) ================= */
 let modelCatalog = null;
 async function loadCatalog() { if (modelCatalog) return modelCatalog; modelCatalog = await (await fetch("/api/models")).json(); return modelCatalog; }
+function evaluationMethodLabel(method) {
+  return method === 'live_rounds' ? 'Live round evaluation' : 'Whole-game analysis';
+}
+let evaluationDraftMethod = null;
+function chosenEvaluationMethod() {
+  return evaluationDraftMethod || EVAL.evaluation_method ||
+    (EVAL.configured_panels?.whole_game?.length ? 'whole_game' : 'live_rounds');
+}
+function evaluationRunLabel(method) {
+  return method === 'whole_game' ? 'Run whole-game analysis'
+    : gameRunning && !GAME.result ? 'Start live evaluation' : 'Replay rounds';
+}
+function evaluationMethodHint(method) {
+  return method === 'whole_game'
+    ? (GAME.result ? 'Assess the full game afresh.' : 'Whole-game analysis is available once the game finishes.')
+    : 'Review rounds in order, then review the ending. Replay starts a new version from round one.';
+}
+function evaluationConfigHtml() {
+  const method = chosenEvaluationMethod();
+  return `<div class="evalConfig" id="evalConfig">
+    <fieldset class="evaluationMethodToggle"><legend>Evaluation method</legend>
+      <label><input type="radio" name="evaluationMethod" value="live_rounds"${method === 'live_rounds' ? ' checked' : ''}><span>Live</span></label>
+      <label><input type="radio" name="evaluationMethod" value="whole_game"${method === 'whole_game' ? ' checked' : ''}><span>Whole game</span></label>
+    </fieldset>
+    <p id="evaluationMethodHint">${evaluationMethodHint(method)}</p>
+    <div id="evalRows"></div>
+    <div class="evaluationModeActions"><button class="btn" id="evalAdd">+ add member</button>
+      <button class="btn dark" id="evalRun"${method === 'whole_game' && !GAME.result ? ' disabled' : ''}>${evaluationRunLabel(method)}</button></div>
+    <p>Runs use API tokens. Previous results remain in the version selector.</p></div>`;
+}
+function bindEvaluationConfig() {
+  el('evalAdd').onclick = () => addEvalRow();
+  el('evalRun').onclick = () => runEvaluation();
+  el('evalConfig').querySelectorAll('input[name="evaluationMethod"]').forEach(input => {
+    input.onchange = () => {
+      evaluationDraftMethod = input.value;
+      el('evalRun').textContent = evaluationRunLabel(input.value);
+      el('evalRun').disabled = input.value === 'whole_game' && !GAME.result;
+      el('evaluationMethodHint').textContent = evaluationMethodHint(input.value);
+    };
+  });
+}
+function prefillEvaluationPanel() {
+  if (el('evalRows').children.length) return;
+  const method = chosenEvaluationMethod();
+  const configured = EVAL.configured_panels || {};
+  const panel = [configured[method], (EVAL.versions || []).find(v => v.method === method)?.panel,
+    configured.live_rounds, configured.whole_game].find(panel => panel?.length) || [];
+  panel.forEach(spec => addEvalRow(spec));
+  if (!panel.length) addEvalRow();
+}
 function renderEvalCta() {
   const cta = el("evalCta");
-  // once evaluated, the re-run affordance lives in the version bar; clear the CTA so its config
-  // input ids never coexist with the bar's. no evaluate endpoint = static export = nothing to run.
-  if (!EVALUATE_URL || (EVAL.has_evaluation && !EVAL.running)) { cta.hidden = true; cta.innerHTML = ""; return; }
+  if (!EVALUATE_URL || EVAL.has_evaluation || EVAL.live_evaluation) {
+    cta.hidden = true; cta.innerHTML = ""; return;
+  }
   cta.hidden = false;
   if (EVAL.running) {
-    cta.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span class="mono" style="font-size:13px;color:var(--mute)">${evalProgressHtml()}</span></div>`;
+    cta.innerHTML = `<span class="mono">${evalProgressHtml()}</span>`;
     return;
   }
-  cta.innerHTML = `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-      <div style="flex:1;min-width:240px"><h2>${GAME.result ? "Game finished" : "Game analysis"} — not yet evaluated</h2>
-        <p>Run the evaluator panel to read ${GAME.result ? "all " : "the "}${turns.length} recorded turns and generate behaviour annotations, deception-gap detection, and a per-player synthesis. Each tag can then be human-verified in the timeline.</p>
-        ${interruptedNoteHtml()}</div>
-      <button class="btn dark" id="evalToggle" style="font-size:12.5px;padding:11px 20px">▶ Configure panel</button></div>
-    <div class="evalConfig" id="evalConfig"><div id="evalRows"></div>
-      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="evalAdd">+ add member</button>
-      <button class="btn dark" id="evalRun">▶ Run evaluation</button></div></div>`;
-  el("evalToggle").onclick = async () => { await loadCatalog(); el("evalConfig").classList.toggle("open"); if (!el("evalRows").children.length) addEvalRow(); };
-  el("evalAdd") && (el("evalAdd").onclick = () => addEvalRow());
-  el("evalRun") && (el("evalRun").onclick = runEvaluation);
+  cta.innerHTML = `<h2>Research evaluation</h2>
+    <p>Choose live round evaluation or whole-game analysis.</p>
+    ${interruptedNoteHtml()}<button class="btn dark" id="evalToggle">Choose evaluators</button>
+    ${evaluationConfigHtml()}`;
+  el("evalToggle").onclick = async () => { await loadCatalog(); el("evalConfig").classList.toggle("open"); prefillEvaluationPanel(); };
+  bindEvaluationConfig();
 }
 
-/* the version bar, shown once a game has at least one evaluation: switch between runs and re-run. */
+function evaluationHasPendingWork() {
+  const rounds = [...new Set((EVAL.spans || []).filter(s => s.turn > 0 && s.round != null)
+    .map(s => s.round))].sort((a,b) => a-b);
+  if (!GAME.result) rounds.pop();
+  return (rounds.at(-1) || 0) > (EVAL.evaluated_through_round || 0) || (!!GAME.result && !EVAL.live_finalized);
+}
+/* During play, reviews stay in the timeline. Paused games can replay completed rounds. */
 function renderEvalBar() {
   const bar = el("evalBar");
   const versions = EVAL.versions || [];
-  if (!EVAL.has_evaluation || !versions.length) { bar.hidden = true; bar.innerHTML = ""; return; }
+  if ((!GAME.result && gameRunning) || !EVAL.has_evaluation || !versions.length) {
+    bar.hidden = true; bar.innerHTML = ""; return;
+  }
   bar.hidden = false;
   const current = versions.find(v => v.is_current) || versions[0];
   const viewing = selectedVersion || current.run_id;  // "" follows the current run
@@ -36,46 +90,55 @@ function renderEvalBar() {
     `<option value="${v.is_current ? "" : v.run_id}"${v.run_id === viewing ? " selected" : ""}>${escapeHtml(versionLabel(v))}</option>`).join("");
   const runControl = EVAL.running
     ? `<span class="mono versionMeta">${evalProgressHtml()}</span>`
-    : `${interruptedNoteHtml()}${EVALUATE_URL ? `<button class="btn" id="rerunBtn">▶ Re-run panel</button>` : ""}`;
+    : `${interruptedNoteHtml()}${EVALUATE_URL ?
+      ((!selectedVersion && EVAL.live_evaluation && !EVAL.live_finalized && evaluationHasPendingWork()
+        ? '<button class="btn" id="resumeEvalBtn">▶ Resume evaluation</button>' : '')
+        + '<button class="btn" id="rerunBtn">Configure evaluations</button>') : ""}`;
   bar.innerHTML = `<div class="evalBarRow">
       <span class="eyebrow">Evaluation</span>
       <select class="versionSelect" id="versionSelect">${options}</select>
       <span class="versionMeta">${versions.length} version${versions.length > 1 ? "s" : ""}</span>
+      <span class="versionMeta">${escapeHtml(evaluationStatusLabel())}</span>
       <span style="flex:1"></span>${runControl}</div>
-    <div class="evalConfig" id="evalConfig"><div id="evalRows"></div>
-      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" id="evalAdd">+ add member</button>
-      <button class="btn dark" id="evalRun">▶ Run evaluation</button></div></div>`;
+    ${evaluationConfigHtml()}`;
   el("versionSelect").onchange = e => { selectedVersion = e.target.value; switchVersion(); };
   const rerun = el("rerunBtn");
-  if (rerun) rerun.onclick = async () => { await loadCatalog(); const cfg = el("evalConfig"); cfg.classList.toggle("open");
-    if (cfg.classList.contains("open") && !el("evalRows").children.length) prefillPanel(current); };
-  el("evalAdd") && (el("evalAdd").onclick = () => addEvalRow());
-  el("evalRun") && (el("evalRun").onclick = runEvaluation);
+  if (rerun) rerun.onclick = async () => { await loadCatalog(); el("evalConfig").classList.toggle("open"); prefillEvaluationPanel(); };
+  bindEvaluationConfig();
+  el("resumeEvalBtn") && (el("resumeEvalBtn").onclick = resumeLiveReview);
 }
-/* the live progress line while a panel runs: calls done / expected and the running cost, from
-   the growing eval trace the server aggregates into EVAL.progress on every poll */
+/* Stored-game runs use the growing eval trace for progress. */
 function evalProgressHtml() {
   const p = EVAL.progress;
-  if (!p || p.state !== "running") return `◐ evaluating… the panel is reading all ${turns.length} turns`;
+  if (!p || p.state !== "running") return EVAL.live_evaluation ? "◐ reviewing recorded rounds…" : "◐ analyzing the whole game…";
   const cost = p.cost_usd != null ? ` · ~$${p.cost_usd.toFixed(2)}` : "";
   const failed = p.failed_calls ? ` · <span style="color:var(--adversarial)">${p.failed_calls} failed</span>` : "";
   const members = (p.members || []).map(m => `${m.spec.split(":")[0]} ${m.calls}/${m.expected_calls}`).join(", ");
-  return `◐ evaluating · ${p.completed_calls}/${p.expected_calls} calls${cost}${failed}`
+  const method = EVAL.live_evaluation ? 'reviewing rounds' : 'analyzing the whole game';
+  return `◐ ${method} · ${p.completed_calls}/${p.expected_calls} calls${cost}${failed}`
     + (members ? ` <span style="color:var(--mute-2)">(${members})</span>` : "");
 }
 
 /* a run that died before writing its sidecar (e.g. the server went down mid-run) left only an
    orphaned trace; surface the silent death and what it spent instead of pretending nothing ran */
 function interruptedNoteHtml() {
+  if (EVAL.error && !EVAL.running) return `<span class="mono versionMeta" style="color:var(--adversarial)">⚠ evaluation paused: ${escapeHtml(EVAL.error)}</span>`;
   const p = EVAL.progress;
   if (EVAL.running || !p || p.state !== "interrupted") return "";
   const cost = p.cost_usd != null ? ` (~$${p.cost_usd.toFixed(2)} spent)` : "";
   return `<span class="mono versionMeta" style="color:var(--adversarial)">⚠ the last run was interrupted after ${p.completed_calls}/${p.expected_calls} calls${cost}</span>`;
 }
+function evaluationStatusLabel() {
+  const status = EVAL.completion_status;
+  const flags = EVAL.review_flags || 0;
+  const label = {complete:'Evaluation complete', unfinished:'Evaluation unfinished', interrupted:'Evaluation interrupted',
+    running:'Evaluation running', not_started:'Not evaluated'}[status] || '';
+  return label + (flags ? ' · ' + flags + ' annotation(s) need review' : '');
+}
 
 function versionLabel(v) {
   const panel = ((v.labels && v.labels.length ? v.labels : v.panel) || []).join(" │ ") || "evaluation";
-  return `${panel} · ${shortDate(v.created_at)}${v.is_current ? " · current" : ""}`;
+  return `${evaluationMethodLabel(v.method)} · ${panel} · ${v.schema_version >= 6 ? "commitments & deception v4" : v.schema_version >= 4 ? "two-tag v3" : "legacy v2"} · ${shortDate(v.created_at)}${v.is_current ? " · current" : ""}`;
 }
 function shortDate(iso) {
   const d = new Date(iso);
@@ -83,14 +146,9 @@ function shortDate(iso) {
 }
 async function switchVersion() {
   await refreshEvaluation(); rebuildTrace();
+  if (state.drawer || state.unitDrawer) renderPanels();
   renderRail(); renderTimeline(); renderSynthesis(); renderEvalBar();
   if (typeof statsOpen === "function" && statsOpen()) renderStats();
-}
-/* seed the config with the last panel so re-running defaults to the same members */
-function prefillPanel(version) {
-  el("evalRows").innerHTML = "";
-  (version.panel || []).forEach(spec => addEvalRow(spec));
-  if (!el("evalRows").children.length) addEvalRow();
 }
 function addEvalRow(spec) {
   const providers = Object.keys(modelCatalog.models_by_provider);
@@ -107,43 +165,84 @@ function addEvalRow(spec) {
   row.querySelector(".evP").onchange = () => syncModels(); syncModels(parts[1]);
 }
 async function runEvaluation() {
+  const method = chosenEvaluationMethod();
+  const live = method === "live_rounds";
   const rows = [...el("evalRows").children].map(r =>
     `${r.querySelector(".evP").value}:${r.querySelector(".evM").value}:${r.querySelector(".evE").value}`);
   if (!rows.length) { toast("add at least one panel member"); return; }
-  const res = await fetch(EVALUATE_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ evaluators: rows }) });
+  const res = await fetch(EVALUATE_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ evaluators: rows, live, restart: live && (!!GAME.result || !gameRunning) }) });
   if (!res.ok) { toast("could not start: " + (await res.json()).detail); return; }
+  EVAL.configured_panels = {live_rounds: [], whole_game: [], [method]: rows};
   selectedVersion = "";  // follow the newest run so this fresh evaluation becomes what we view
-  EVAL.running = true; renderEvalCta(); renderEvalBar();
+  EVAL.error = null; EVAL.running = true; EVAL.live_evaluation = live; EVAL.review_active = false;
+  renderEvalCta(); renderEvalBar();
   pollEvaluation();
+}
+
+async function resumeLiveReview() {
+  const evaluators = EVAL.live_panel?.length ? EVAL.live_panel :
+    (EVAL.versions || []).find(version => version.is_current)?.panel;
+  if (!EVALUATE_URL || !evaluators?.length) { toast("No live evaluator panel is available to resume"); return; }
+  const response = await fetch(EVALUATE_URL, {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({evaluators, live: true})});
+  if (!response.ok) { toast("Could not resume review: " + (await response.json()).detail); return; }
+  selectedVersion = "";
+  EVAL.error = null; EVAL.running = true; EVAL.review_active = false;
+  renderTimeline(); renderEvalBar(); pollEvaluation();
 }
 
 /* poll while a run is in flight (also picked up on page load when a run is already going) */
 let evalPollTimer = null;
 function pollEvaluation() {
   if (evalPollTimer) return;  // one poller is enough
-  evalPollTimer = setInterval(async () => { await refreshEvaluation();
-    if (!EVAL.running) { clearInterval(evalPollTimer); evalPollTimer = null;
-      rebuildTrace(); renderRail(); renderTimeline(); renderSynthesis(); toast("evaluation complete");
+  evalPollTimer = setInterval(async () => {
+    const before = `${EVAL.version}:${EVAL.evaluated_through_round}:${EVAL.evaluated_through_turn}:${EVAL.live_finalized}:${EVAL.has_evaluation}:${EVAL.review_active}:${EVAL.reviewing_round}:${EVAL.reviewing_final}`;
+    await refreshEvaluation();
+    if (`${EVAL.version}:${EVAL.evaluated_through_round}:${EVAL.evaluated_through_turn}:${EVAL.live_finalized}:${EVAL.has_evaluation}:${EVAL.review_active}:${EVAL.reviewing_round}:${EVAL.reviewing_final}` !== before) {
+      rebuildTrace(); renderRail(); renderTimeline(); renderSynthesis();
+      if (statsOpen()) renderStats();
+    }
+    const followingLiveReview = LIVE && gameRunning && !GAME.result && EVAL.live_evaluation && !EVAL.live_finalized && !EVAL.error;
+    if (!EVAL.running && !followingLiveReview) { clearInterval(evalPollTimer); evalPollTimer = null;
+      rebuildTrace(); renderRail(); renderTimeline(); renderSynthesis();
+      if (EVAL.error) toast("Evaluation paused: " + EVAL.error);
+      else if (!EVAL.live_evaluation || EVAL.live_finalized) toast(evaluationStatusLabel() || "Evaluation complete");
+      else if (!evaluationHasPendingWork()) toast("Completed rounds reviewed");
       if (statsOpen()) renderStats(); }
     renderEvalCta(); renderEvalBar(); }, 2500);
 }
 
 /* ================= SYNTHESIS ================= */
+function evaluationIssuesHtml(issues) {
+  if (!issues.length) return "";
+  const scope = issues.filter(i => i.code === "screening_scope" || /^Unexpected or repeated message span \d+$/.test(i.explanation));
+  const other = issues.filter(i => !scope.includes(i));
+  const counts = new Map();
+  for (const i of scope) counts.set(i.explanation, (counts.get(i.explanation) || 0) + 1);
+  return '<details class="researchDiagnostics"><summary>Screening / analysis diagnostics · ' + issues.length + ' notices</summary>' +
+    (scope.length ? '<p><strong>Screening response did not match its requested messages.</strong> Out-of-batch rows were ignored. Check message coverage below for missing work. These notices do not mean the API call failed.</p><ul>' +
+      [...counts].map(([text,n]) => '<li>' + escapeHtml(text) + (n > 1 ? ' × ' + n : '') + '</li>').join('') + '</ul>' : '') +
+    other.map(i => '<p><strong>' + escapeHtml(pretty(i.stage)) + ' issue:</strong> ' + escapeHtml(i.explanation) + '</p>').join('') + '</details>';
+}
 function renderSynthesis() {
   const section = el("synthSection");
-  const synth = {};
-  (EVAL.members || []).forEach(m => (m.syntheses || []).forEach(s => { synth[s.player] ??= s; }));
-  if (!EVAL.has_evaluation || !Object.keys(synth).length) { section.hidden = true; return; }
-  section.hidden = false;
-  section.innerHTML = `<div class="eyebrow" style="margin-bottom:12px">Panel synthesis · whole-game</div>
-    <div class="synthGrid">${GAME.players.map(p => { const s = synth[p.name]; if (!s) return "";
-      const [rl, rc] = playerResult(p.name);
-      return `<article class="synthCard" style="border-top-color:${colorOf(p.name)}">
-        <div style="display:flex;gap:10px;align-items:center"><span class="tbadge" style="background:${colorOf(p.name)}">${initialsOf(p.name)}</span>
-          <span class="ptag" style="color:${colorOf(p.name)};flex:1">${tagOf(p.name)}</span>
-          <span class="presult" style="color:${rc};background:color-mix(in srgb, ${rc} 13%, #fff)">${rl}</span></div>
-        <p class="summary">${richText(s.summary)}</p>
-        ${(s.profile || []).map(d => `<div class="synthDim"><b>${d.dimension}:</b> ${richText(d.characterization)}</div>`).join("")}
-      </article>`; }).join("")}</div>`;
+  section.hidden = EVAL.live_evaluation || !EVAL.has_evaluation || !state.filters.showCommentary;
+  if (section.hidden) return;
+  const members = EVAL.members || [];
+  const sourceWarning = EVAL.coverage && !EVAL.coverage.source_matches
+    ? '<p class="researchCaution">Source mismatch: this evaluation cannot support counts for the current game.</p>' : "";
+  const waitingForRound = EVAL.live_evaluation && EVAL.running && !EVAL.review_active;
+  const stale = EVAL.coverage?.partial && !waitingForRound ? '<p>' + (EVAL.live_evaluation && EVAL.running
+    ? 'Evaluation is catching up with completed rounds.'
+    : 'Evaluation covers an earlier cutoff. New events require a new evaluation; previous outcomes remain tied to their original cutoff.') + '</p>' : "";
+  section.innerHTML = '<span class="eyebrow">' + escapeHtml(EVAL.codebook_version || "") + '</span>' +
+    sourceWarning + stale + members.map(m => '<p><strong>' + escapeHtml(m.label) + '</strong> · ' +
+      escapeHtml(m.status) + ' · ' + (m.commitments || m.episodes || []).length + ' commitments · ' +
+      (m.deceptions || m.statements || m.claims || []).length + (EVAL.tag_schema === 'commitments_deception_v4'
+        ? ' documented deceptions' : EVAL.tag_schema === 'two_tag_v3' ? ' statements' : ' claims') +
+      ' · ' + m.coverage.filter(c => c.status !== 'missing').length + '/' + m.coverage.length + ' messages screened' + '</p>' +
+      evaluationIssuesHtml(m.issues || [])).join("") +
+    '<button class="btn dark" onclick="setMode(\'research\')">Read research tags</button>' +
+    '<p class="statNote">Each evaluator is an independent coder. Counts are not pooled across judges. Matching quotations establish source integrity, not correctness.</p>';
 }
-

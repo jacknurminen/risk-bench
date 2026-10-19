@@ -42,6 +42,9 @@ class GameState:
     conquered_territory_this_turn: bool
     turn_number: int
     winner: PlayerId | None
+    # Setup is round 0. Normal play starts at round 1; eliminated seats are skipped.
+    round_number: int = 0
+    previous_round_number: int = 0
 
     def territories_owned_by(self, player_id: PlayerId) -> frozenset[Territory]:
         """Return all territories currently owned by the given player.

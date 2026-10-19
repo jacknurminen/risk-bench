@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Any
 
 from risk_bench.agents.base import Tool, ToolCall, list_argument
@@ -60,7 +61,7 @@ def tools_for_decision(request: DecisionRequest) -> list[Tool]:
         tools.append(Tool(name="end_attack_phase", description="Stop attacking and move on.", parameters=_NO_ARGS))
     if any(isinstance(action, SkipFortify) for action in request.legal_actions):
         tools.append(Tool(name="skip_fortify", description="End your turn without fortifying.", parameters=_NO_ARGS))
-    return tools + _message_tools(view=request.view)
+    return [_with_private_memo(tool) for tool in tools + _message_tools(view=request.view)]
 
 
 def is_message_tool_call(call: ToolCall) -> bool:
@@ -128,7 +129,7 @@ def tools_for_negotiation(view: PlayerView) -> list[Tool]:
     """
     tools = _message_tools(view=view)
     tools.append(Tool(name="say_nothing", description="Send no message this round.", parameters=_NO_ARGS))
-    return tools
+    return [_with_private_memo(tool) for tool in tools]
 
 
 def parse_negotiation_tool_call(call: ToolCall, view: PlayerView) -> ChatMessage | None:
@@ -166,6 +167,28 @@ def parse_negotiation_tool_call(call: ToolCall, view: PlayerView) -> ChatMessage
 
 _NO_ARGS: dict[str, Any] = {"type": "object", "properties": {}, "required": []}
 _MESSAGE_TOOL_NAMES: frozenset[str] = frozenset({"send_public_message", "send_private_message", "say_nothing"})
+
+
+def requires_private_memo(tool_name: str) -> bool:
+    return tool_name not in {"say_nothing", "send_private_message"}
+
+
+def _with_private_memo(tool: Tool) -> Tool:
+    """Put the private decision summary in the advertised top-level signature."""
+    if not requires_private_memo(tool.name):
+        return tool
+    return replace(tool, parameters={
+        **tool.parameters,
+        "properties": {
+            "private_memo": {
+                "type": "string", "minLength": 1, "maxLength": 1200,
+                "description": "Required private decision summary: what you intend and why, in 1–1200 characters. "
+                "Never delivered to other players.",
+            },
+            **tool.parameters["properties"],
+        },
+        "required": ["private_memo", *tool.parameters["required"]],
+    })
 
 
 def _message_tools(view: PlayerView) -> list[Tool]:

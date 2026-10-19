@@ -4,6 +4,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from risk_bench.agents.base import ReasoningEffort
 
+REPLAY_SETTING_FIELDS = frozenset(
+    {
+        "max_agent_tokens",
+        "agent_reasoning_effort",
+        "max_invalid_retries",
+        "max_concurrent_commentators",
+        "allow_private_messages",
+        "max_negotiation_rounds",
+    }
+)
+
 
 class Settings(BaseSettings):
     """Application settings, loaded from environment variables and ``.env``."""
@@ -19,12 +30,10 @@ class Settings(BaseSettings):
     # agent limits; the budget covers hidden reasoning tokens too, so it must leave room for
     # a reasoning model to think AND still emit its tool call (4096 proved too tight for GPT)
     max_agent_tokens: int = 8192
-    # the evaluator panel writes a whole game's tags + syntheses in one response, so it needs a far
-    # larger output budget than the per-move game agents and per-turn commentators
+    # Whole-game adjudication emits linked research units, requiring more output than gameplay calls.
     max_evaluator_tokens: int = 32000
     agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
-    max_consecutive_provider_failures: int = 6
     # how many commentator-panel members may call their providers at once per commentary point
     max_concurrent_commentators: int = 4
 
@@ -33,7 +42,7 @@ class Settings(BaseSettings):
     allow_private_messages: bool = False
     max_negotiation_rounds: int = 3
     elo_k_factor: float = 32.0
-    output_directory: Path = Path("data")
+    output_directory: Path = Path("data/v3")
 
 
 def load_settings() -> Settings:
@@ -43,3 +52,20 @@ def load_settings() -> Settings:
         The populated settings.
     """
     return Settings()
+
+
+def settings_for_new_game(journal_path: Path) -> Settings:
+    """Use a replay's saved experimental settings with today's credentials and code."""
+    import json
+
+    settings = load_settings()
+    snapshot = journal_path.parent / "replay-settings.json"
+    if not snapshot.is_file():
+        return settings
+    recorded = json.loads(snapshot.read_text(encoding="utf-8"))
+    return Settings.model_validate(
+        {
+            **settings.model_dump(),
+            **{key: value for key, value in recorded.items() if key in REPLAY_SETTING_FIELDS},
+        }
+    )

@@ -62,6 +62,10 @@ def test_aggregates_count_wins_and_sum_per_game_totals(tmp_path: Path):
     model = build_tournament_view_model(tournament_directory=directory)
 
     assert [game["finished"] for game in model["games"]] == [True, True]
+    assert model["output_volume"]["game_count"] == 2
+    assert model["output_volume"]["unfinished_games"] == 0
+    assert [row["name"] for row in model["output_volume"]["players"]] == PLAYER_NAMES
+    assert all(row["games"] == 2 for row in model["output_volume"]["players"])
     total_wins = sum(row["wins"] for row in model["table"])
     winners = {game["winner"] for game in model["games"] if game["winner"]}
     assert total_wins == sum(1 for game in model["games"] if game["winner"])

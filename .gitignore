@@ -12,16 +12,18 @@ wheels/
 # Local API keys
 .env
 
-# Runtime data, except selected example games (journals, traces, evaluation, analysis)
+# Runtime data, except the selected tournament dataset and its audit history
 data/*
-!data/games/
-data/games/*
-!data/games/20260908-092609-seed0/
-!data/games/20260909-123257-seed1/
-!data/games/20260910-092103-seed7/
-!data/games/20260911-071339-seed8/
-data/games/*/game.human/
-data/games/*/*.log
+!data/v3/
+data/v3/*
+!data/v3/games/
+data/v3/games/*
+!data/v3/games/20261012-101836-seed8349/
+data/v3/games/**/*.log
+data/v3/games/**/game.human/
+data/v3/games/**/*.lock
+data/v3/games/**/*.active.json
+data/v3/games/**/*.pid
 
 # Local design scratch: UI prototypes and screenshots, kept out of history (heavy binaries)
 designs/
@@ -29,18 +31,11 @@ designs/
 # IDE
 .idea/
 
-# Thesis report: keep sources, exclude the heavy reference papers and LaTeX build artifacts
-docs/report/material/
-docs/report/thesis/thesis.pdf
-docs/report/**/*.aux
-docs/report/**/*.log
-docs/report/**/*.out
-docs/report/**/*.toc
-docs/report/**/*.lof
-docs/report/**/*.lot
-docs/report/**/*.bbl
-docs/report/**/*.blg
-docs/report/**/*.fls
-docs/report/**/*.fdb_latexmk
-docs/report/**/*.synctex.gz
-docs/report/**/*.run.xml
+# Research drafts and development notes live in the private thesis repository.
+/docs/report/
+/docs/log/
+/docs/plan.md
+/docs/forking-implementation-handoff.md
+/client-redesign-plan.md
+/evaluator-panel-plan.md
+/notepad-memory-plan.md

@@ -40,6 +40,7 @@ def make_state(
         armies_to_place=0,
         conquered_territory_this_turn=False,
         turn_number=1,
+        round_number=1,
         winner=None,
     )
 

@@ -178,19 +178,14 @@ def test_torn_transition_and_resume_append_repair(completed, tmp_path):
     assert read_journal(crash)[-1]["type"] == "result"
 
 
-def test_legacy_cursor_is_rejected_and_notes_reconstructed(tmp_path):
-    path = tmp_path / "old.jsonl"
+def test_v3_requires_a_complete_execution_checkpoint(tmp_path):
+    path = tmp_path / "partial.jsonl"
     writer = JournalWriter(path, False)
-    writer.write_header(JournalHeader(3, 19, dict.fromkeys(NAMES, "random"), 1, True, 1, []))
+    writer.write_header(JournalHeader(4, 19, dict.fromkeys(NAMES, "random"), 1, True, 1, []))
     writer.write_note("alice", 0, "Keep this promise")
     writer.close()
-    with pytest.raises(ValueError, match="legacy"):
-        restore_game(path, "12:after")
-    restored = restore_game(path)
-    assert restored.recovery_limitations
-    group = players()
-    runner(group, turns=1).resume(restored)
-    assert group["alice"].requests[0][1].view.notes == "Keep this promise"
+    with pytest.raises(ValueError, match="requires execution checkpoints"):
+        restore_game(path)
 
 
 def test_pending_action_override_and_redecision(completed, tmp_path):
@@ -248,7 +243,12 @@ def test_api_failure_pauses_exact_operation_and_resumes(completed, tmp_path, kin
     writer.close()
     paused = restore_game(branch)
     assert paused.checkpoint is not None
-    assert paused.checkpoint["progress"] == p
+    progress = dict(paused.checkpoint["progress"])
+    assert progress.pop("pause_error") == "provider temporarily down"
+    progress.pop("decision_id", None)
+    progress.pop("decision_context", None)
+    expected_progress = {k: v for k, v in p.items() if k not in {"decision_id", "decision_context"}}
+    assert progress == expected_progress
     recovered = players()
     result = runner(recovered).resume(paused)
     assert result == expected
@@ -258,7 +258,7 @@ def test_api_failure_pauses_exact_operation_and_resumes(completed, tmp_path, kin
             assert recovered[name].requests == original[name].requests[-len(recovered[name].requests) :]
 
 
-def test_llm_retry_conversation_counters_and_fallback_rng_survive_pause():
+def test_llm_retry_conversation_survives_pause_and_exhaustion():
     from tests.players.test_llm import INVALID_ATTACK_RESPONSE, attack_request
 
     class Outage:
@@ -279,21 +279,22 @@ def test_llm_retry_conversation_counters_and_fallback_rng_survive_pause():
             self.requests.append(copy.deepcopy(messages))
             return Response("No legal tool")
 
-    first = LLMPlayer("alice", Outage(), 2, 1, random.Random(8))
+    first = LLMPlayer("alice", Outage(), 2)
     with pytest.raises(ProviderUnavailableError):
         first.decide_action(attack_request())
     data = json.loads(json.dumps(checkpoint.player_state(first)))
     recovered_agent = Recovered()
-    restored = LLMPlayer("alice", recovered_agent, 99, 99, random.Random(99))
+    restored = LLMPlayer("alice", recovered_agent, 99)
     checkpoint.restore_player(restored, data)
     expected_agent = Recovered()
     first._agent = expected_agent
-    assert first.decide_action(attack_request()) == restored.decide_action(attack_request())
+    for player in (first, restored):
+        with pytest.raises(ProviderUnavailableError):
+            player.decide_action(attack_request())
     assert expected_agent.requests == recovered_agent.requests
     assert any(m.role == "tool" for m in recovered_agent.requests[0])
     assert restored.invalid_action_count == 1
     assert restored._consecutive_provider_failures == 0
-    assert restored._rng.getstate() == first._rng.getstate()
 
 
 def test_round_restoration_preserves_capture_elimination_and_card_transfer():
@@ -514,3 +515,101 @@ def test_context_given_at_launch_reaches_the_first_prompt_and_a_fork_adds_to_it(
     )
     alice = next(p for p in preview_next_prompts(journal_path=child, additional_context={}) if p.player == "alice")
     assert "The table has met before." in alice.before and "Carla just broke the pact." in alice.before
+
+
+def test_concurrent_context_edits_preserve_both_updates(completed, tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, BrokenBarrierError
+
+    from risk_bench.runner import forking
+
+    source, _, _ = completed
+    branch = tmp_path / "concurrent" / "game.jsonl"
+    fork_game(source, branch, "0:after")
+    read = forking.raw_journal
+    readers = Barrier(2)
+
+    def overlapping_reads(path):
+        records = read(path)
+        # Without serialization both editors read the same sequence before either commits.
+        # With serialization the first times out, commits, and the second sees that commit.
+        try:
+            readers.wait(timeout=0.2)
+        except BrokenBarrierError:
+            pass
+        return records
+
+    monkeypatch.setattr(forking, "raw_journal", overlapping_reads)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        edits = [pool.submit(apply_additional_context, branch, {"alice": text}, True) for text in ("one", "two")]
+        for edit in edits:
+            edit.result(timeout=5)
+
+    restored = restore_game(branch)
+    assert restored.checkpoint is not None
+    assert restored.checkpoint["additional_context"]["alice"] in {"one\n\ntwo", "two\n\none"}
+    assert [r["id"] for r in raw_journal(branch)[1:]] == list(range(4))
+
+
+@pytest.mark.parametrize("edit", ["append", "replace", "clear", "fork"])
+def test_retry_receives_previewed_context_edit_without_losing_corrections(tmp_path, monkeypatch, edit):
+    from tests.players.test_llm import INVALID_ATTACK_RESPONSE
+
+    monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
+    signed_call = replace(INVALID_ATTACK_RESPONSE.tool_calls[0], provider_data={"signature": b"\x00\xff"})
+
+    class Outage:
+        def __init__(self):
+            self.calls = []
+
+        def respond(self, messages, tools):
+            self.calls.append(copy.deepcopy(messages))
+            if len(self.calls) == 1:
+                return replace(INVALID_ATTACK_RESPONSE, tool_calls=(signed_call,))
+            raise RuntimeError("offline")
+
+    class Capture:
+        def __init__(self):
+            self.calls = []
+
+        def respond(self, messages, tools):
+            self.calls.append(copy.deepcopy(messages))
+            raise RuntimeError("stop after capturing the resumed request")
+
+    source = tmp_path / "outage" / "game.jsonl"
+    writer = JournalWriter(source, False)
+    writer.write_header(JournalHeader(4, 19, dict.fromkeys(NAMES, "random"), 2, True, 3, []))
+    group = {name: LLMPlayer(name, Outage(), 2) for name in NAMES}
+    with pytest.raises(ProviderUnavailableError):
+        GameRunner(group, {"alice": "Original briefing."}, 19, 2, True, 3, (), 1, writer, None, False).run()
+    writer.close()
+    parent_bytes = source.read_bytes()
+    original = restore_game(source)
+    assert original.checkpoint is not None
+    actor = original.state.current_player
+    retry = checkpoint.decode(original.checkpoint["players"][actor]["_retry_conversation"])
+    assert retry[2].tool_calls[0].provider_data == {"signature": b"\x00\xff"}
+    assert original.checkpoint["players"][actor]["_retry_index"] == 1
+
+    branch = tmp_path / "edited" / "game.jsonl"
+    text = "" if edit == "clear" else "Protect the eastern border."
+    fork_game(
+        source, branch, f"{raw_journal(source)[-1]['id']}:after", context={actor: text} if edit == "fork" else {}
+    )
+    if edit != "fork":
+        proposed = "Original briefing.\n\n" + text if edit == "append" else text
+        preview = next(p for p in preview_next_prompts(branch, {actor: proposed}) if p.is_next_request)
+        apply_additional_context(branch, {actor: text}, append=edit == "append")
+    else:
+        preview = next(p for p in preview_next_prompts(branch, {}) if p.is_next_request)
+
+    capture = Capture()
+    resumed = {name: LLMPlayer(name, capture, 99) for name in NAMES}
+    with pytest.raises(ProviderUnavailableError):
+        runner(resumed).resume(restore_game(branch))
+    sent = capture.calls[0]
+    assert sent[1].content == preview.after
+    assert sent[0] == retry[0] and sent[2:] == retry[2:]
+    assert resumed[actor]._retry_index == 1
+    assert resumed[actor].invalid_action_count == group[actor].invalid_action_count
+    assert source.read_bytes() == parent_bytes

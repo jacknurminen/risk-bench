@@ -3,14 +3,17 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import UTC, datetime
+from itertools import permutations
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 from starlette.types import Scope
 
 from risk_bench import analysis, specs
@@ -21,6 +24,7 @@ from risk_bench.api.human import install_human_routes
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
     CatalogModel,
+    ContinueTournamentRequest,
     EvaluateRequest,
     ForkRequest,
     GameListResponse,
@@ -29,11 +33,13 @@ from risk_bench.api.schemas import (
     NewGameRequest,
     NewGameResponse,
     PlayerContextRequest,
-    TagVerificationBody,
     TournamentSummary,
+    UnitVerificationBody,
 )
-from risk_bench.config import load_settings
+from risk_bench.config import REPLAY_SETTING_FIELDS, load_settings
 from risk_bench.game.engine import IllegalActionError
+from risk_bench.runner.control import journal_control_lock
+from risk_bench.runner.evaluation_config import configure_evaluation, configured_panel
 from risk_bench.runner.evaluation_store import (
     evaluation_path_for_journal,
     evaluation_trace_path_for_journal,
@@ -42,7 +48,10 @@ from risk_bench.runner.evaluation_store import (
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
+from risk_bench.runner.live_evaluation import review_activity_for_journal
+from risk_bench.runner.tournament_evaluation import create_batch
 from risk_bench.runner.verification_store import delete_verification, write_verification
+from risk_bench.version import require_v3
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
 from risk_bench.viewer.prompts import preview_next_prompts
@@ -107,12 +116,12 @@ def create_app(games_directory: Path) -> FastAPI:
         return FileResponse(UI_DIRECTORY / "index.html")
 
     @app.get("/games/{game_id}", include_in_schema=False)
-    def game_page(game_id: str) -> HTMLResponse:
+    def game_page(game_id: str, version: str | None = None) -> HTMLResponse:
         game_view_model = _load_view_model(games_directory=games_directory, game_id=game_id)
         with _journal_path(games_directory, game_id).open(encoding="utf-8") as journal:
             has_human = "human" in json.loads(journal.readline())["player_specs"].values()
         evaluation_view_model = _load_evaluation_view_model(
-            games_directory=games_directory, game_id=game_id, manager=manager, run_id=None, usage_cache=usage_cache
+            games_directory=games_directory, game_id=game_id, manager=manager, run_id=version, usage_cache=usage_cache
         )
         return HTMLResponse(
             render_reader_html(
@@ -138,16 +147,72 @@ def create_app(games_directory: Path) -> FastAPI:
         return RedirectResponse(url=f"/games/{game_id}")
 
     @app.get("/tournaments/{tournament_id}", include_in_schema=False)
-    def tournament_page(tournament_id: str) -> HTMLResponse:
-        view_model = _load_tournament_view_model(games_directory=games_directory, tournament_id=tournament_id)
-        live = not all(game["finished"] for game in view_model["games"])
+    def tournament_page(tournament_id: str, version: str | None = None) -> HTMLResponse:
+        directory = _tournament_directory(games_directory, tournament_id)
+        manager.reconcile_tournament_evaluations(directory)
+        view_model = _load_tournament_view_model(games_directory, tournament_id, version)
+        _add_tournament_replay_controls(view_model, directory, manager)
+        live = len(view_model["games"]) < view_model["total_games"] or not all(
+            game["finished"] for game in view_model["games"]
+        )
         return HTMLResponse(
             render_tournament_html(view_model=view_model, live=live, poll_url=f"/api/tournaments/{tournament_id}")
         )
 
     @app.get("/api/tournaments/{tournament_id}")
-    def tournament_view_model(tournament_id: str) -> dict[str, Any]:
-        return _load_tournament_view_model(games_directory=games_directory, tournament_id=tournament_id)
+    def tournament_view_model(tournament_id: str, version: str | None = None) -> dict[str, Any]:
+        directory = _tournament_directory(games_directory, tournament_id)
+        manager.reconcile_tournament_evaluations(directory)
+        view_model = _load_tournament_view_model(games_directory, tournament_id, version)
+        _add_tournament_replay_controls(view_model, directory, manager)
+        return view_model
+
+    @app.post("/api/tournaments/{tournament_id}/evaluate", status_code=202)
+    def evaluate_tournament(tournament_id: str, request: EvaluateRequest) -> dict:
+        directory = _tournament_directory(games_directory, tournament_id)
+        manager.reconcile_tournament_evaluations(directory)
+        if not request.evaluators:
+            raise HTTPException(status_code=400, detail="Provide at least one evaluator.")
+        try:
+            specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        with ExitStack() as locks:
+            locks.enter_context(journal_control_lock(directory / "tournament.json"))
+            manifest = json.loads((directory / "tournament.json").read_text())
+            for game_id in sorted(manifest["game_ids"]):
+                journal = directory / game_id / "game.jsonl"
+                locks.enter_context(journal_control_lock(journal))
+                if (manager.is_running(game_id) or manager.is_queued(game_id) or manager.is_evaluating(game_id)
+                        or review_activity_for_journal(journal)):
+                    raise HTTPException(status_code=409, detail=f"{game_id} is running, queued or being evaluated.")
+                if not journal.is_file() or not any(row["type"] == "result" for row in read_journal(journal)):
+                    raise HTTPException(
+                        status_code=409, detail="Finish all games before rerunning tournament evaluations."
+                    )
+            if not manifest["game_ids"]:
+                raise HTTPException(status_code=409, detail="This tournament has no games.")
+            path = create_batch(directory, manifest, request.evaluators, request.live)
+            manager.evaluate_tournament(path)
+        return {"version": path.stem, "games": len(manifest["game_ids"])}
+
+    @app.post("/api/tournaments/{tournament_id}/continue", status_code=202)
+    def continue_tournament(tournament_id: str, request: ContinueTournamentRequest) -> dict:
+        directory = _tournament_directory(games_directory, tournament_id)
+        with journal_control_lock(directory / "tournament.json"):
+            return _continue_tournament(directory, manager, request)
+
+    @app.post("/api/tournaments/{tournament_id}/games/{game_id}/replay", status_code=202)
+    def replay_tournament_game(tournament_id: str, game_id: str) -> dict:
+        directory = _tournament_directory(games_directory, tournament_id)
+        with journal_control_lock(directory / "tournament.json"):
+            manifest = json.loads((directory / "tournament.json").read_text())
+            if game_id not in manifest["game_ids"]:
+                raise HTTPException(
+                    status_code=409, detail="This game is no longer a current tournament attempt. Refresh the page."
+                )
+            with journal_control_lock(directory / game_id / "game.jsonl"):
+                return _replay_tournament_game(directory, manifest, game_id, manager)
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
@@ -186,43 +251,50 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.post("/api/games/{game_id}/pause", status_code=204)
     def pause_game(game_id: str) -> None:
-        _journal_path(games_directory=games_directory, game_id=game_id)
-        if not manager.pause_game(game_id=game_id):
-            raise HTTPException(status_code=409, detail="The game is not running.")
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id, allow_unstarted=True)
+        with journal_control_lock(journal_path):
+            if not manager.pause_game(game_id=game_id):
+                raise HTTPException(status_code=409, detail="The game is not running.")
+            if manager.evaluating_live(game_id):
+                manager.pause_evaluation(game_id)
 
     @app.post("/api/games/{game_id}/resume", status_code=204)
     def resume_game(game_id: str) -> None:
-        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id, allow_unstarted=True)
+        with journal_control_lock(journal_path):
+            _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
 
     @app.post("/api/games/{game_id}/fork", status_code=201)
     def fork_game_route(game_id: str, request: ForkRequest) -> dict:
         source = _journal_path(games_directory, game_id)
         branch_id = f"fork-{uuid.uuid4().hex[:12]}"
         destination = games_directory / branch_id / "game.jsonl"
-        try:
-            fork_game(source, destination, **request.model_dump(exclude={"start"}))
-        except (ValueError, KeyError, TypeError) as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
-        if request.start:
-            manager.resume_game(
-                branch_id,
-                destination,
-                restore_game(destination).header.commentators,
-                destination.parent / "worker.log",
-            )
-            _confirm_worker_started(game_directory=destination.parent, manager=manager)
+        with journal_control_lock(destination):
+            try:
+                fork_game(source, destination, **request.model_dump(exclude={"start"}))
+            except (ValueError, KeyError, TypeError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            if request.start:
+                manager.resume_game(
+                    branch_id,
+                    destination,
+                    restore_game(destination).header.commentators,
+                    destination.parent / "worker.log",
+                )
+                _confirm_worker_started(game_directory=destination.parent, manager=manager)
+
         return {"id": branch_id, "url": f"/games/{branch_id}"}
 
     @app.post("/api/games/{game_id}/context", status_code=204)
     def set_player_context(game_id: str, request: PlayerContextRequest) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        if manager.is_running(game_id=game_id):
-            raise HTTPException(status_code=409, detail="Pause the game before changing what its players know.")
-        try:
-            apply_additional_context(journal=journal_path, context=request.context, append=request.append)
-        except ValueError as error:
-            raise HTTPException(status_code=409, detail=str(error)) from None
+        with journal_control_lock(journal_path):
+            if manager.is_running(game_id=game_id):
+                raise HTTPException(status_code=409, detail="Pause the game before changing what its players know.")
+            try:
+                apply_additional_context(journal=journal_path, context=request.context, append=request.append)
+            except ValueError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
 
     @app.post("/api/games/{game_id}/prompt-preview")
     def prompt_preview(game_id: str, request: PlayerContextRequest) -> dict[str, Any]:
@@ -235,20 +307,24 @@ def create_app(games_directory: Path) -> FastAPI:
 
     @app.delete("/api/games/{game_id}", status_code=204)
     def delete_game(game_id: str) -> None:
-        journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        if manager.is_running(game_id=game_id):
-            raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
-        if manager.is_evaluating(game_id=game_id):
-            raise HTTPException(
-                status_code=409, detail="An evaluation is running for this game; wait for it to finish."
-            )
-        # removes the whole game folder: journal, trace, evaluation, and annotation sidecars alike
-        shutil.rmtree(journal_path.parent)
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id, allow_unstarted=True)
+        with journal_control_lock(journal_path):
+            if manager.is_queued(game_id):
+                raise HTTPException(status_code=409, detail="Cancel the queued game before deleting it.")
+            if manager.is_running(game_id=game_id):
+                raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
+            if manager.is_evaluating(game_id=game_id):
+                raise HTTPException(
+                    status_code=409, detail="An evaluation is running for this game; wait for it to finish."
+                )
+            # removes the whole game folder: journal, trace, evaluation, and annotation sidecars alike
+            shutil.rmtree(journal_path.parent)
 
     @app.post("/api/games/{game_id}/evaluate", status_code=202)
     def evaluate_game(game_id: str, request: EvaluateRequest) -> dict[str, bool]:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        _start_evaluation(manager=manager, game_id=game_id, journal_path=journal_path, request=request)
+        with journal_control_lock(journal_path):
+            _start_evaluation(manager=manager, game_id=game_id, journal_path=journal_path, request=request)
         return {"running": True}
 
     @app.get("/api/games/{game_id}/evaluation")
@@ -270,49 +346,50 @@ def create_app(games_directory: Path) -> FastAPI:
         resolved = version_for(journal_path=journal_path, run_id=version)
         if resolved is None:
             raise HTTPException(status_code=404, detail="No evaluation to analyze.")
-        if not resolved.analysis_path.is_file():
-            # the analysis is derived and cheap (no API calls), so a version that predates the
-            # artifact — or lost it — gets one computed and persisted on first request
-            try:
-                analysis.write_analysis(
-                    journal_path=journal_path, eval_path=resolved.eval_path, analysis_path=resolved.analysis_path
-                )
-            except ValueError as error:
-                raise HTTPException(status_code=409, detail=str(error)) from None
+        # Recheck the bound source on every request; a cached report must not hide later edits.
+        try:
+            analysis.write_analysis(
+                journal_path=journal_path, eval_path=resolved.eval_path, analysis_path=resolved.analysis_path
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
         return json.loads(resolved.analysis_path.read_text(encoding="utf-8"))
 
     @app.put("/api/games/{game_id}/verifications", status_code=204)
-    def set_tag_verification(game_id: str, body: TagVerificationBody) -> None:
+    def set_unit_verification(game_id: str, body: UnitVerificationBody) -> None:
         journal_path = _journal_path(games_directory=games_directory, game_id=game_id)
-        # verifications are per version: resolve the run the verdict is about (the one being viewed)
-        evaluation = version_for(journal_path=journal_path, run_id=body.version)
-        if evaluation is None:
-            raise HTTPException(status_code=404, detail="No such evaluation version.")
-        path = evaluation.verifications_path
-        if not body.verified:
-            # clearing is idempotent: un-verifying an unverified tag is a no-op, not an error
-            delete_verification(
+        with journal_control_lock(journal_path):
+            # verifications are per version: resolve the run the verdict is about (the one being viewed)
+            evaluation = version_for(journal_path=journal_path, run_id=body.version)
+            if evaluation is None:
+                raise HTTPException(status_code=404, detail="No such evaluation version.")
+            if evaluation.is_current and manager.is_evaluating(game_id=game_id):
+                raise HTTPException(
+                    status_code=409, detail="Evaluation is running; review the completed run afterward."
+                )
+            path = evaluation.verifications_path
+            if not body.verified:
+                # clearing is idempotent: un-verifying an unverified tag is a no-op, not an error
+                delete_verification(
+                    path=path,
+                    evaluator_index=body.evaluator_index,
+                    unit_type=body.unit_type,
+                    unit_id=body.unit_id,
+                )
+                return
+            # a verification must point at a tag this version's evaluation actually holds
+            if not _evaluation_has_unit(evaluation=evaluation, body=body):
+                raise HTTPException(status_code=404, detail="No such research unit in this evaluation.")
+            write_verification(
                 path=path,
-                evaluator_index=body.evaluator_index,
-                player=body.player,
-                behavior=body.behavior,
-                turn=body.turn,
+                verification={
+                    "type": "verification",
+                    "evaluator_index": body.evaluator_index,
+                    "unit_type": body.unit_type,
+                    "unit_id": body.unit_id,
+                    "verified_at": datetime.now(tz=UTC).isoformat(),
+                },
             )
-            return
-        # a verification must point at a tag this version's evaluation actually holds
-        if not _evaluation_has_tag(evaluation=evaluation, body=body):
-            raise HTTPException(status_code=404, detail="No such tag in the current evaluation.")
-        write_verification(
-            path=path,
-            verification={
-                "type": "verification",
-                "evaluator_index": body.evaluator_index,
-                "player": body.player,
-                "behavior": body.behavior,
-                "turn": body.turn,
-                "verified_at": datetime.now(tz=UTC).isoformat(),
-            },
-        )
 
     @app.get("/api/games/{game_id}/trace")
     def trace_call_list(game_id: str, source: str = "game", version: str | None = None) -> dict[str, Any]:
@@ -353,26 +430,39 @@ def create_app(games_directory: Path) -> FastAPI:
     return app
 
 
-def _journal_path(games_directory: Path, game_id: str) -> Path:
+def _journal_path(games_directory: Path, game_id: str, *, allow_unstarted: bool = False) -> Path:
     if not _GAME_ID_PATTERN.match(game_id):
         raise HTTPException(status_code=404, detail="No such game.")
     # a game folder lives at the top level (standalone) or inside its tournament's folder
     candidate_directories = [games_directory / game_id, *games_directory.glob(f"*/{game_id}")]
     for game_directory in candidate_directories:
         journal_path = game_directory / "game.jsonl"
+        if allow_unstarted and not journal_path.exists() and (game_directory / "launch.json").is_file():
+            return journal_path
         if journal_path.is_file():
+            try:
+                with journal_path.open(encoding="utf-8") as source:
+                    require_v3(json.loads(source.readline()))
+            except (ValueError, KeyError) as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
             return journal_path
     raise HTTPException(status_code=404, detail="No such game.")
 
 
-def _load_tournament_view_model(games_directory: Path, tournament_id: str) -> dict[str, Any]:
+def _tournament_directory(games_directory: Path, tournament_id: str) -> Path:
     if not _GAME_ID_PATTERN.match(tournament_id):
         raise HTTPException(status_code=404, detail="No such tournament.")
     tournament_directory = games_directory / tournament_id
     if not (tournament_directory / "tournament.json").is_file():
         raise HTTPException(status_code=404, detail="No such tournament.")
+    return tournament_directory
+
+
+def _load_tournament_view_model(games_directory: Path, tournament_id: str,
+                                version: str | None = None) -> dict[str, Any]:
+    tournament_directory = _tournament_directory(games_directory, tournament_id)
     try:
-        return build_tournament_view_model(tournament_directory=tournament_directory)
+        return build_tournament_view_model(tournament_directory=tournament_directory, evaluation_version=version)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=f"The tournament is not viewable yet: {error}") from None
     except IllegalActionError as error:
@@ -403,24 +493,65 @@ def _load_evaluation_view_model(
         raise HTTPException(
             status_code=409, detail=f"The journal does not replay cleanly or is not viewable yet: {error}"
         ) from None
-    view_model["running"] = manager.is_evaluating(game_id=game_id)
+    live_panel = _configured_live_evaluators(path)
+    view_model["configured_panels"] = {
+        "live_rounds": live_panel, "whole_game": configured_panel(path, "whole_game"),
+    }
+    live_in_game = run_id is None and manager.is_running(game_id) and not view_model["finished"] and bool(live_panel)
+    view_model["live_panel"] = live_panel
+    review_activity = review_activity_for_journal(path) if run_id is None else None
+    whole_active = bool(review_activity and review_activity["kind"] == "whole_game")
+    detached_active = run_id is None and manager.is_evaluating(game_id)
+    view_model["review_active"] = review_activity is not None
+    view_model["reviewing_round"] = review_activity.get("round") if review_activity else None
+    view_model["reviewing_final"] = bool(review_activity and review_activity["kind"] == "final")
+    view_model["reviewing_whole_game"] = whole_active
+    view_model["running"] = detached_active or live_in_game or bool(review_activity)
+    if run_id is None:
+        if whole_active or (detached_active and not manager.evaluating_live(game_id)):
+            view_model["live_evaluation"] = False
+        else:
+            view_model["live_evaluation"] = (
+                view_model["live_evaluation"] or manager.evaluating_live(game_id) or live_in_game
+                or bool(review_activity) or (bool(live_panel) and not view_model["has_evaluation"])
+            )
+    error_path = path.with_suffix(".eval.error.json")
+    view_model["error"] = None
+    if run_id is None:
+        try:
+            view_model["error"] = json.loads(error_path.read_text(encoding="utf-8")).get("detail")
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+    panel = (manager.evaluating_panel(game_id=game_id) or (review_activity or {}).get("panel")
+             or (live_panel if live_in_game else None)) if run_id is None else None
+    if view_model["live_evaluation"] and not whole_active:
+        rounds = {span["round"] for span in view_model["spans"] if span["turn"] > 0 and span.get("round") is not None}
+        completed_rounds = len(rounds) if view_model["finished"] else max(0, len(rounds) - 1)
+        expected_per_member = completed_rounds + (1 if view_model["finished"] else 0)
+    else:
+        expected_per_member = 1
     view_model["progress"] = _evaluation_progress(
         journal_path=path,
-        panel=manager.evaluating_panel(game_id=game_id),
-        turn_count=len({span["turn"] for span in view_model["spans"]}),
+        panel=panel,
+        expected_per_member=expected_per_member,
         usage_cache=usage_cache,
-    )
+    ) if run_id is None else None
+    if view_model["error"] or (view_model["progress"] or {}).get("state") == "interrupted":
+        view_model["completion_status"] = "interrupted"
+    elif view_model["review_active"] or detached_active:
+        view_model["completion_status"] = "running"
     return view_model
 
 
 def _evaluation_progress(
-    journal_path: Path, panel: list[str] | None, turn_count: int, usage_cache: _UsageCache
+    journal_path: Path, panel: list[str] | None, expected_per_member: int, usage_cache: _UsageCache
 ) -> dict[str, Any] | None:
     """Report the in-flight (or interrupted) evaluation run from its growing trace sidecar.
 
-    The evaluator flushes one trace record per provider call, and a per-turn sweep makes a known
-    number of calls (turns + one synthesis, per member), so the flat trace file doubles as a live
-    progress and running-cost signal without any cooperation from the worker. A flat trace left
+    The evaluator flushes one trace record per provider call. A stored-game sweep calls each
+    member once for a fresh whole-game assessment (plus corrections if needed); live research calls per round plus a
+    final pass. The flat trace file therefore doubles as a progress and running-cost signal
+    without any cooperation from the worker. A flat trace left
     behind without its eval sidecar means the last run died before finishing (e.g. a server
     shutdown killed the daemon worker) — surfaced as ``interrupted`` so the silent death and its
     spend are visible.
@@ -428,7 +559,7 @@ def _evaluation_progress(
     Args:
         journal_path: The game's journal path.
         panel: The running panel's specs from the process manager, or None when no run is alive.
-        turn_count: The number of turns the sweep covers (each member calls once per turn, plus one).
+        expected_per_member: Expected calls for one member at the current journal cutoff.
         usage_cache: The per-trace usage cache shared across requests.
 
     Returns:
@@ -444,7 +575,7 @@ def _evaluation_progress(
     if panel is not None:
         return {
             "state": "running",
-            "expected_calls": len(panel) * (turn_count + 1),
+            "expected_calls": len(panel) * expected_per_member,
             "completed_calls": completed_calls,
             "failed_calls": sum(entry["errors"] for entry in usage.values()),
             "cost_usd": cost_usd,
@@ -453,7 +584,7 @@ def _evaluation_progress(
                     "index": index,
                     "spec": spec,
                     "calls": usage.get(f"evaluator[{index}]", {}).get("calls", 0),
-                    "expected_calls": turn_count + 1,
+                    "expected_calls": expected_per_member,
                 }
                 for index, spec in enumerate(panel)
             ],
@@ -463,7 +594,7 @@ def _evaluation_progress(
     return {
         "state": "interrupted",
         # panel size is estimated from the callers seen, so a member that never called undercounts it
-        "expected_calls": len(usage) * (turn_count + 1),
+        "expected_calls": len(usage) * expected_per_member,
         "completed_calls": completed_calls,
         "cost_usd": cost_usd,
         "last_call_at": datetime.fromtimestamp(trace_path.stat().st_mtime, tz=UTC).isoformat(),
@@ -523,8 +654,21 @@ def _evaluator_usage_response(usage: dict[str, dict[str, Any]]) -> dict[str, Any
 
 
 def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: Path, request: EvaluateRequest) -> None:
-    if manager.is_evaluating(game_id=game_id):
+    if manager.is_queued(game_id):
+        raise HTTPException(status_code=409, detail="Cancel the queued game before starting an evaluation.")
+    if manager.is_evaluating(game_id=game_id) or review_activity_for_journal(journal_path):
         raise HTTPException(status_code=409, detail="An evaluation is already running for this game.")
+    if request.restart:
+        if not request.live:
+            raise HTTPException(status_code=400, detail="Fresh replay requires round-by-round evaluation.")
+        if manager.is_running(game_id):
+            raise HTTPException(status_code=409, detail="Pause the game before replaying its completed rounds.")
+    if not request.live and manager.is_running(game_id):
+        raise HTTPException(
+            status_code=409, detail="Wait for the game to finish or pause it before whole-game analysis."
+        )
+    if manager.is_running(game_id) and _configured_live_evaluators(journal_path):
+        raise HTTPException(status_code=409, detail="Pause the game before changing its live evaluator panel.")
     if not request.evaluators:
         raise HTTPException(status_code=400, detail="Provide at least one evaluator panel member.")
     # build every member up front so a bad spec or missing key fails fast, before the worker starts
@@ -532,22 +676,26 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
         specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
+    configure_evaluation(journal_path, "live_rounds" if request.live else "whole_game", request.evaluators)
+    if request.live and manager.is_running(game_id):
+        journal_path.with_suffix(".eval.error.json").unlink(missing_ok=True)
+        return  # the game worker will block at the next completed round and run this panel
     manager.evaluate_game(
         game_id=game_id,
         journal_path=journal_path,
         evaluator_specs=request.evaluators,
         log_path=journal_path.parent / "evaluation.log",
+        live=request.live,
+        restart=request.restart,
     )
 
 
-def _evaluation_has_tag(evaluation: EvaluationVersion, body: TagVerificationBody) -> bool:
+def _evaluation_has_unit(evaluation: EvaluationVersion, body: UnitVerificationBody) -> bool:
     eval_records = read_evaluation(path=evaluation.eval_path)
     return any(
-        record.get("type") == "eval_tag"
+        record.get("type") == "eval_" + body.unit_type
         and record.get("evaluator_index") == body.evaluator_index
-        and record.get("player") == body.player
-        and record.get("behavior") == body.behavior
-        and record.get("turn") == body.turn
+        and record.get("id") == body.unit_id
         for record in eval_records
     )
 
@@ -590,6 +738,7 @@ def _tournament_summary(manifest_path: Path) -> TournamentSummary:
         players=data["players"],
         game_ids=data["game_ids"],
         created_at=datetime.fromisoformat(data["created_at"]),
+        parallel_games=data.get("parallel_games", len(data["game_ids"])),
     )
 
 
@@ -601,14 +750,34 @@ def _summarize_game_directory(
 ) -> GameSummary | None:
     journal_path = game_directory / "game.jsonl"
     if not journal_path.is_file():
-        return None
-    return _summarize_journal(
+        launch_path = game_directory / "launch.json"
+        if not launch_path.is_file():
+            return None
+        launch = NewGameRequest.model_validate_json(launch_path.read_text(encoding="utf-8"))
+        return GameSummary(
+            id=game_directory.name, players=launch.players, seed=launch.seed,
+            max_turns=launch.max_turns or load_settings().max_turns,
+            has_commentary=bool(launch.commentators), has_evaluation=False, finished=False,
+            running=manager.is_running(game_directory.name), queued=manager.is_queued(game_directory.name),
+            started=False, winner=None, turn_count=None, input_tokens=None, output_tokens=None, cost_usd=None,
+            modified_at=datetime.fromtimestamp(launch_path.stat().st_mtime, tz=UTC), tournament_id=tournament_id,
+        )
+    with journal_path.open(encoding="utf-8") as source:
+        try:
+            require_v3(json.loads(source.readline()))
+        except (ValueError, KeyError):
+            return None
+    summary = _summarize_journal(
         path=journal_path,
         game_id=game_directory.name,
         running=manager.is_running(game_id=game_directory.name),
         tournament_id=tournament_id,
         usage=_usage_totals(journal_path=journal_path, cache=usage_cache),
     )
+
+    if summary is not None:
+        summary.queued = manager.is_queued(game_directory.name)
+    return summary
 
 
 def _usage_totals(journal_path: Path, cache: _UsageCache) -> _UsageTotals:
@@ -667,10 +836,14 @@ def _summarize_journal(
 
 def _launch_game(games_directory: Path, manager: GameProcessManager, request: NewGameRequest) -> NewGameResponse:
     _validate_launch_request(request=request)
+    orders = list(permutations(range(1, len(request.players) + 1))) if request.seating_mode == "cycle" else []
+    request = request.model_copy(update={
+        "seating_orders": [list(orders[index % len(orders)]) for index in range(request.games)] if orders else None,
+    })
     games_directory.mkdir(parents=True, exist_ok=True)
     base_id = _new_game_id(games_directory=games_directory, seed=request.seed)
 
-    if request.parallel_games == 1:
+    if request.games == 1:
         game_directory = games_directory / base_id
         _start_game_worker(game_directory=game_directory, manager=manager, request=request, seed=request.seed)
         _wait_for_journal_header(game_directory=game_directory, manager=manager)
@@ -680,28 +853,51 @@ def _launch_game(games_directory: Path, manager: GameProcessManager, request: Ne
     # each game in its own folder inside the tournament's folder
     tournament_directory = games_directory / base_id
     tournament_directory.mkdir(parents=True, exist_ok=True)
-    game_ids = [f"{base_id}-g{index}" for index in range(1, request.parallel_games + 1)]
+    game_ids = [f"{base_id}-g{index}" for index in range(1, request.games + 1)]
     manifest = {
         "id": base_id,
         "players": request.players,
         "game_ids": game_ids,
+        "parallel_games": min(request.parallel_games, request.games),
+        "seating_mode": request.seating_mode,
+        "seating_orders": request.seating_orders,
+        "seeds": [request.seed + index for index in range(request.games)],
         "created_at": datetime.now(tz=UTC).isoformat(),
+        "launch_config": request.model_copy(update={"games": 1, "seating_orders": None}).model_dump(),
     }
     (tournament_directory / "tournament.json").write_text(json.dumps(manifest), encoding="utf-8")
+    manager.register_tournament(base_id, game_ids, min(request.parallel_games, request.games))
     for index, game_id in enumerate(game_ids):
+        game_request = request.model_copy(update={
+            "games": 1,
+            "seating_orders": [request.seating_orders[index]] if request.seating_orders is not None else None,
+        })
         _start_game_worker(
-            game_directory=tournament_directory / game_id, manager=manager, request=request, seed=request.seed + index
+            game_directory=tournament_directory / game_id, manager=manager, request=game_request,
+            seed=request.seed + index
         )
-    for game_id in game_ids:
-        _wait_for_journal_header(game_directory=tournament_directory / game_id, manager=manager)
+    for game_id in game_ids[:min(request.parallel_games, request.games)]:
+        game_directory = tournament_directory / game_id
+        _wait_for_journal_header(game_directory=game_directory, manager=manager)
     return NewGameResponse(id=base_id, tournament=True)
 
 
 def _start_game_worker(game_directory: Path, manager: GameProcessManager, request: NewGameRequest, seed: int) -> None:
+    _prepare_game_launch(game_directory, request, seed)
+    _launch_prepared_game(game_directory, manager, request, seed)
+
+
+def _prepare_game_launch(game_directory: Path, request: NewGameRequest, seed: int) -> None:
     game_directory.mkdir(parents=True, exist_ok=True)
     # the launch record keeps the game's own seed so resume sees the game, not the tournament
-    launch_record = request.model_copy(update={"seed": seed, "parallel_games": 1})
+    launch_record = request.model_copy(update={"seed": seed, "games": 1, "parallel_games": 1})
     (game_directory / "launch.json").write_text(launch_record.model_dump_json(), encoding="utf-8")
+    configure_evaluation(game_directory / "game.jsonl", request.evaluation_method, request.evaluators)
+
+
+def _launch_prepared_game(
+    game_directory: Path, manager: GameProcessManager, request: NewGameRequest, seed: int
+) -> None:
     manager.launch_game(
         game_id=game_directory.name,
         players=request.players,
@@ -711,7 +907,178 @@ def _start_game_worker(game_directory: Path, manager: GameProcessManager, reques
         additional_context=_starting_context(request=request),
         journal_path=game_directory / "game.jsonl",
         log_path=game_directory / "worker.log",
+        seat_order=request.seating_orders[0] if request.seating_orders is not None else None,
     )
+
+
+def _continue_tournament(directory: Path, manager: GameProcessManager, extension: ContinueTournamentRequest) -> dict:
+    manifest_path = directory / "tournament.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    previous_count = len(manifest["game_ids"])
+    if extension.expected_total_games != previous_count:
+        raise HTTPException(status_code=409, detail="The tournament changed. Refresh before adding more games.")
+    if previous_count + extension.games > 1000:
+        raise HTTPException(status_code=400, detail="A tournament can contain at most 1000 games.")
+    config = manifest.get("launch_config")
+    if config is None:
+        # Tournaments created before continuation saved the setup in each game's launch record.
+        launch_path = next((directory / game / "launch.json" for game in manifest["game_ids"]
+                            if (directory / game / "launch.json").is_file()), None)
+        if launch_path is None:
+            raise HTTPException(status_code=409, detail="The original launch configuration is missing.")
+        config = json.loads(launch_path.read_text(encoding="utf-8"))
+    try:
+        request = NewGameRequest.model_validate(config)
+    except ValidationError:
+        raise HTTPException(status_code=409, detail="The saved launch configuration is invalid.") from None
+    request = request.model_copy(update={
+        "games": 1, "seating_orders": None,
+        "seating_mode": manifest.get("seating_mode", request.seating_mode),
+        "parallel_games": manifest.get("parallel_games", previous_count),
+    })
+    _validate_launch_request(request)
+    seeds = manifest.get("seeds")
+    if seeds is None:
+        try:
+            seeds = [json.loads((directory / game / "launch.json").read_text())["seed"]
+                     for game in manifest["game_ids"]]
+        except (OSError, ValueError, KeyError):
+            raise HTTPException(status_code=409, detail="The tournament's original seeds are missing.") from None
+    if len(seeds) != previous_count or not seeds:
+        raise HTTPException(status_code=409, detail="The tournament's saved seed schedule is incomplete.")
+    new_seeds = list(range(max(seeds) + 1, max(seeds) + 1 + extension.games))
+    game_ids = [f"{manifest['id']}-g{index + 1}" for index in range(previous_count, previous_count + extension.games)]
+    if any((directory / game).exists() for game in game_ids):
+        raise HTTPException(status_code=409, detail="A new game folder already exists; no games were added.")
+    orders = list(permutations(range(1, len(request.players) + 1))) if request.seating_mode == "cycle" else []
+    new_orders = [list(orders[index % len(orders)])
+                  for index in range(previous_count, previous_count + extension.games)] if orders else None
+    old_orders = manifest.get("seating_orders") or []
+    if orders and len(old_orders) != previous_count:
+        raise HTTPException(status_code=409, detail="The tournament's saved seating schedule is incomplete.")
+    requests = [request.model_copy(update={"seating_orders": [new_orders[index]] if new_orders else None})
+                for index in range(extension.games)]
+    updated = {**manifest, "game_ids": manifest["game_ids"] + game_ids, "seeds": seeds + new_seeds,
+               "seating_orders": old_orders + new_orders if new_orders else None,
+               "seating_mode": request.seating_mode, "parallel_games": request.parallel_games,
+               "launch_config": request.model_dump()}
+    prepared = []
+    temporary = manifest_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        # Persist all launch records before publishing membership or starting workers.
+        # A restart after publication leaves every new game individually resumable.
+        for game_id, game_request, seed in zip(game_ids, requests, new_seeds):
+            game_directory = directory / game_id
+            game_directory.mkdir()
+            prepared.append(game_directory)
+            _prepare_game_launch(game_directory, game_request, seed)
+        temporary.write_text(json.dumps(updated), encoding="utf-8")
+        temporary.replace(manifest_path)
+    except Exception:
+        for game_directory in prepared:
+            shutil.rmtree(game_directory)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+    manager.register_tournament(manifest["id"], updated["game_ids"], request.parallel_games)
+    for game_id, game_request, seed in zip(game_ids, requests, new_seeds):
+        _launch_prepared_game(directory / game_id, manager, game_request, seed)
+    return {"id": manifest["id"], "added_games": len(game_ids), "total_games": len(updated["game_ids"]),
+            "game_ids": game_ids}
+
+
+def _replay_unavailable_reason(directory: Path, game_id: str, manager: GameProcessManager) -> str | None:
+    journal = directory / game_id / "game.jsonl"
+    if manager.is_running(game_id) or manager.is_queued(game_id):
+        return "Pause the game or cancel its queue entry before replaying it."
+    if manager.is_evaluating(game_id) or review_activity_for_journal(journal):
+        return "Wait for this game's evaluation to finish before replaying it."
+    if not (journal.parent / "launch.json").is_file():
+        return "The original launch configuration is missing."
+    return None
+
+
+def _add_tournament_replay_controls(view: dict, directory: Path, manager: GameProcessManager) -> None:
+    manifest = json.loads((directory / "tournament.json").read_text())
+    view["replay_slots"] = [
+        {"slot": index + 1, "game_id": game_id,
+         "reason": _replay_unavailable_reason(directory, game_id, manager)}
+        for index, game_id in enumerate(manifest["game_ids"])
+    ]
+    view["previous_attempts"] = [
+        {**entry, "available": (directory / entry["previous_game_id"] / "game.jsonl").is_file()}
+        for entry in manifest.get("replays", [])
+    ]
+
+
+def _replay_tournament_game(directory: Path, manifest: dict, game_id: str, manager: GameProcessManager) -> dict:
+    reason = _replay_unavailable_reason(directory, game_id, manager)
+    if reason:
+        raise HTTPException(status_code=409, detail=reason)
+    source = directory / game_id
+    try:
+        request = NewGameRequest.model_validate_json((source / "launch.json").read_text())
+    except (ValueError, OSError):
+        raise HTTPException(status_code=409, detail="The saved launch configuration is invalid.") from None
+    index = manifest["game_ids"].index(game_id)
+    order = request.seating_orders[0] if request.seating_orders else None
+    if manifest.get("seating_orders"):
+        order = manifest["seating_orders"][index]
+    seed = manifest["seeds"][index] if manifest.get("seeds") else request.seed
+    snapshot = {}
+    saved_snapshot = source / "replay-settings.json"
+    if saved_snapshot.is_file():
+        snapshot = json.loads(saved_snapshot.read_text())
+    journal = source / "game.jsonl"
+    if journal.is_file():
+        try:
+            with journal.open(encoding="utf-8") as stream:
+                header = json.loads(stream.readline())
+            require_v3(header)
+            names = list(specs.named_specs(specs=request.players))
+            if set(header["player_specs"]) != set(names):
+                raise ValueError("Saved roster does not match the game")
+            # Pin even randomly assigned seats to the actual original order.
+            order = [names.index(name) + 1 for name in header["player_specs"]]
+            seed = header["seed"]
+            request = request.model_copy(update={"max_turns": header["max_turns"]})
+            snapshot.update(header.get("configuration", {}).get("settings", {}))
+            snapshot.update({key: header[key] for key in ("allow_private_messages", "max_negotiation_rounds")})
+        except (ValueError, KeyError):
+            raise HTTPException(
+                status_code=409, detail="Cannot recover the original game's setup from its header."
+            ) from None
+    request = request.model_copy(update={"games": 1, "parallel_games": 1, "seed": seed,
+                                         "seating_orders": [order] if order else None})
+    _validate_launch_request(request)
+    replay_id = f"{manifest['id']}-g{index + 1}-replay-{uuid.uuid4().hex[:8]}"
+    destination = directory / replay_id
+    destination.mkdir()
+    manifest_path = directory / "tournament.json"
+    temporary = manifest_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        _prepare_game_launch(destination, request, seed)
+        if snapshot:
+            (destination / "replay-settings.json").write_text(json.dumps({
+                key: value for key, value in snapshot.items() if key in REPLAY_SETTING_FIELDS
+            }), encoding="utf-8")
+        replacement_ids = list(manifest["game_ids"])
+        replacement_ids[index] = replay_id
+        entry = {"slot": index + 1, "previous_game_id": game_id, "game_id": replay_id,
+                 "created_at": datetime.now(tz=UTC).isoformat()}
+        updated = {**manifest, "game_ids": replacement_ids, "replays": [*manifest.get("replays", []), entry]}
+        temporary.write_text(json.dumps(updated), encoding="utf-8")
+        temporary.replace(manifest_path)
+    except Exception:
+        shutil.rmtree(destination)
+        raise
+    finally:
+        temporary.unlink(missing_ok=True)
+    manager.register_tournament(manifest["id"], replacement_ids,
+                                manifest.get("parallel_games", len(replacement_ids)))
+    _launch_prepared_game(destination, manager, request, seed)
+    return {"id": replay_id, "previous_game_id": game_id, "slot": index + 1,
+            "total_games": len(replacement_ids), "queued": manager.is_queued(replay_id)}
 
 
 def _starting_context(request: NewGameRequest) -> list[str]:
@@ -721,8 +1088,23 @@ def _starting_context(request: NewGameRequest) -> list[str]:
 
 
 def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: str, journal_path: Path) -> None:
-    if manager.is_running(game_id=game_id):
-        raise HTTPException(status_code=409, detail="The game is already running.")
+    if manager.is_running(game_id=game_id) or manager.is_queued(game_id):
+        raise HTTPException(status_code=409, detail="The game is already running or queued.")
+    manifest_path = journal_path.parent.parent / "tournament.json"
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manager.register_tournament(manifest["id"], manifest["game_ids"],
+                                    manifest.get("parallel_games", len(manifest["game_ids"])))
+    if not journal_path.exists():
+        request = NewGameRequest.model_validate_json((journal_path.parent / "launch.json").read_text())
+        _start_game_worker(journal_path.parent, manager, request, request.seed)
+        if not manager.is_queued(game_id):
+            _wait_for_journal_header(journal_path.parent, manager)
+        return
+    if manager.is_evaluating(game_id=game_id):
+        raise HTTPException(
+            status_code=409, detail="Wait for the evaluation replay to finish before resuming the game."
+        )
     summary = _summarize_journal(
         path=journal_path, game_id=game_id, running=False, tournament_id=None, usage=_NO_USAGE
     )
@@ -735,7 +1117,12 @@ def _resume_game(games_directory: Path, manager: GameProcessManager, game_id: st
         commentators=_launched_commentators(game_directory=game_directory),
         log_path=game_directory / "worker.log",
     )
-    _confirm_worker_started(game_directory=game_directory, manager=manager)
+    if not manager.is_queued(game_id):
+        _confirm_worker_started(game_directory=game_directory, manager=manager)
+
+
+def _configured_live_evaluators(journal_path: Path) -> list[str]:
+    return configured_panel(journal_path, "live_rounds")
 
 
 def _confirm_worker_started(game_directory: Path, manager: GameProcessManager) -> None:
@@ -771,7 +1158,7 @@ def _launched_commentators(game_directory: Path) -> list[str]:
 def _validate_launch_request(request: NewGameRequest) -> None:
     if not 3 <= len(request.players) <= 6:
         raise HTTPException(status_code=400, detail="Risk seats 3-6 players per game.")
-    if "human" in request.players and request.parallel_games != 1:
+    if "human" in request.players and (request.games != 1 or request.parallel_games != 1):
         raise HTTPException(status_code=400, detail="Human games must be launched one at a time.")
     if request.player_context and len(request.player_context) != len(request.players):
         raise HTTPException(status_code=400, detail="Per-player context must hold one entry per player.")
@@ -783,6 +1170,7 @@ def _validate_launch_request(request: NewGameRequest) -> None:
                 specs.build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
         # mirror player validation: build every panel member up front so a bad spec fails fast
         specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)
+        specs.build_evaluators(evaluator_specs=request.evaluators, settings=settings, trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
 

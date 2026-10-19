@@ -15,7 +15,9 @@ never read another judge's judgments (only the agents' own game data). The four
 in-the-moment trace layers plus the agents' notes are what remain.
 """
 
-from dataclasses import dataclass, replace
+import hashlib
+import json
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Final
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
@@ -23,6 +25,7 @@ from risk_bench.game.events import PlayerEliminated, TurnStarted
 from risk_bench.game.serialization import action_from_json, chat_message_from_json, event_from_json
 from risk_bench.game.types import PlayerId
 from risk_bench.players.rendering import describe_action, narrate_event
+from risk_bench.runner.checkpoint import restore_engine
 
 # the record types that contribute a citable span, mapped to the trace layer they render as;
 # 'commentary' and 'result' and the header are intentionally absent (never citable)
@@ -31,6 +34,10 @@ _MESSAGE: Final[str] = "message"
 _ACTION: Final[str] = "action"
 _NOTE: Final[str] = "note"
 _EVENT: Final[str] = "event"
+
+
+def trace_fingerprint(spans) -> str:
+    return hashlib.sha256(json.dumps([asdict(s) for s in spans], sort_keys=True).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -52,6 +59,14 @@ class TraceSpan:
     cursor: dict[str, str] | None = None
     inherited: bool = False
     origin: str | None = None
+    decision_id: str | None = None
+    phase: str | None = None
+    round: int | None = None
+    record: int | None = None
+    event_index: int | None = None
+    recipients: tuple[str, ...] = ()
+    data: dict | None = None
+    visibility: str | None = None
 
 
 def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
@@ -73,10 +88,29 @@ def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
     ancestry = records[0].get("ancestry", {}) if records and records[0].get("type") == "header" else {}
     inherited_through = ancestry.get("inherited_through", -1)
     current_turn = 0
+    rounds_by_turn = {}
     step = 0
-    for record in records:
+    for record_number, record in enumerate(records):
         start = len(spans)
+        recorded_state = None
+        if record.get("_checkpoint"):
+            recorded_state, _ = restore_engine(record["_checkpoint"])
+            rounds_by_turn[recorded_state.turn_number] = recorded_state.round_number
         match record.get("type"):
+            case "checkpoint" if record["checkpoint"]["sequence"] == 0:
+                state, _ = restore_engine(record["checkpoint"])
+                rounds_by_turn[state.turn_number] = state.round_number
+                _append(
+                    spans,
+                    turn=state.turn_number,
+                    step=step,
+                    layer="state",
+                    player=None,
+                    text="Initial board and recorded game rules.\n"
+                    + records[0].get("game_rules", "")
+                    + "\n"
+                    + json.dumps(_public_state(state)),
+                )
             case "action":
                 step += 1
                 action = action_from_json(record["action"])
@@ -125,15 +159,52 @@ def build_trace_index(records: list[dict[str, Any]]) -> tuple[TraceSpan, ...]:
                     text=str(record["text"]),
                 )
             # 'header', 'result', and 'commentary' are not citable and contribute no span
-        if record.get("cursor"):
-            for index in range(start, len(spans)):
+        for index in range(start, len(spans)):
+            cursor = record.get("cursor")
+            span_turn = (
+                record.get("recorded_turn", spans[index].turn) if record["type"] == "thought" else spans[index].turn
+            )
+            spans[index] = replace(
+                spans[index],
+                cursor=cursor,
+                turn=span_turn,
+                inherited=bool(cursor and int(cursor["after"].split(":")[0]) <= inherited_through),
+                origin=record.get("origin"),
+                decision_id=record.get("decision_id"),
+                phase=record.get("phase"),
+                round=rounds_by_turn.get(span_turn, record.get("round")),
+                record=record_number,
+                event_index=index - start if record["type"] == "events" else None,
+                recipients=(
+                    (message.recipient,)
+                    if message.recipient
+                    else tuple(name for name in records[0].get("player_specs", {}) if name != message.sender)
+                )
+                if record["type"] == "message"
+                else (),
+                visibility=str(message.visibility) if record["type"] == "message" else None,
+                data=record.get("action")
+                if record["type"] == "action"
+                else record["events"][index - start]
+                if record["type"] == "events"
+                else None,
+            )
+            if record["type"] == "action" and recorded_state is not None:
                 spans[index] = replace(
-                    spans[index],
-                    cursor=record["cursor"],
-                    inherited=int(record["cursor"]["after"].split(":")[0]) <= inherited_through,
-                    origin=record.get("origin"),
+                    spans[index], data={"action": record["action"], "state_after": _public_state(recorded_state)}
                 )
     return tuple(spans)
+
+
+def _public_state(state):
+    return {
+        "turn": state.turn_number,
+        "round": state.round_number,
+        "phase": str(state.phase),
+        "current_player": state.current_player,
+        "board": {str(t): [state.owner[t], state.armies[t]] for t in state.owner},
+        "cards_held": {name: len(p.cards) for name, p in state.players.items()},
+    }
 
 
 def living_players_by_turn(

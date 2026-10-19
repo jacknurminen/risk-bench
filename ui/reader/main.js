@@ -3,7 +3,11 @@ let lastFingerprint = null;
 async function refreshFromJournal() {
   const res = await fetch(POLL_URL, { cache: "no-store" }); if (!res.ok) return;
   const updated = await res.json();
+  GAME.pause_error = updated.pause_error;
+  const wasRunning = gameRunning;
   gameRunning = updated.running;
+  if (wasRunning !== gameRunning) renderEvalBar();
+  if (gameRunning && EVAL.live_evaluation) pollEvaluation();
   renderGameControl();
   renderForkPanel();
   document.dispatchEvent(new CustomEvent("reader:game-status"));
@@ -17,14 +21,18 @@ async function refreshFromJournal() {
   GAME.notes.splice(0, GAME.notes.length, ...updated.notes);
   GAME.commentary.splice(0, GAME.commentary.length, ...updated.commentary);
   GAME.commentators = updated.commentators ?? GAME.commentators;
+  if (updated.result && !GAME.result && humanPlayers.size && !researchVisibilityChosen)
+    state.filters.showCommentary = true;
   GAME.result = updated.result;
   GAME.cursors = updated.cursors;
   GAME.ancestry = updated.ancestry;
   GAME.additional_context = updated.additional_context;
   GAME.configuration_changes = updated.configuration_changes;
   GAME.stats = updated.stats;  // the modal's charts, token stacks, and usage columns all read off this
+  GAME.research_context = updated.research_context;
   // pull the fresh trace index too, so new turns and trace lines show on the timeline as they happen
   await refreshEvaluation(); rebuildTrace();
+  if (state.drawer || state.unitDrawer) renderPanels();
   el("slider").max = steps.length - 1;
   renderMasthead(); renderGameControl(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
   renderDriftNotice();
@@ -39,5 +47,13 @@ renderForkPanel();
 renderDriftNotice();
 show(LIVE ? steps.length - 1 : 0);
 if (LIVE) setInterval(refreshFromJournal, 1000);
-if (EVAL.running) pollEvaluation();  // a run already in flight (started before this page load)
+if (EVAL.running || (LIVE && EVAL.live_evaluation && !EVAL.live_finalized && !EVAL.error))
+  pollEvaluation();  // also watch live games launched outside this server
 if (location.hash === "#stats") openStats();  // deep link (kept from when stats lived only in the classic view)
+if (location.hash.startsWith("#unit=")) {
+  researchVisibilityChosen = true;
+  state.filters.showCommentary = true;
+  renderTimeline();
+  openUnitDrawer(decodeURIComponent(location.hash.slice(6)));
+}
+if (/^#span=\d+$/.test(location.hash)) openLineDrawer(Number(location.hash.slice(6)));

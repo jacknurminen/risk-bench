@@ -6,7 +6,7 @@ function renderMasthead() {
     ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
 }
 function renderModeToggle() {
-  el("modeToggle").innerHTML = [["read", "Timeline"], ["compare", "Compare"]].map(([k, l]) =>
+  el("modeToggle").innerHTML = [["read", "Timeline"], ["research", "Research tags"], ["compare", "Compare"]].map(([k, l]) =>
     `<button class="${state.mode === k ? "on" : ""}" onclick="setMode('${k}')">${l}</button>`).join("");
 }
 function setMode(m) { state.mode = m; renderModeToggle(); renderTimeline(); }
@@ -19,11 +19,19 @@ function renderGameControl() {
   if (!LIVE || GAME.result) { btn.style.display = "none"; return; }
   btn.style.display = "";
   btn.textContent = gameRunning ? "⏸ pause game" : "▶ resume game";
+  let reason = el("pauseReason");
+  if (!reason) {
+    reason = document.createElement("p");
+    reason.id = "pauseReason"; reason.className = "researchCaution";
+    el("timeline").before(reason);
+  }
+  reason.hidden = gameRunning || !GAME.pause_error;
+  reason.textContent = GAME.pause_error || "";
 }
 el("gameControl").onclick = async () => {
   const action = gameRunning ? "pause" : "resume";
   const res = await fetch(`${POLL_URL}/${action}`, { method: "POST" });
-  if (res.ok) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); toast("game " + (gameRunning ? "resumed" : "paused")); return; }
+  if (res.ok) { gameRunning = action === "resume"; renderGameControl(); renderEvalBar(); document.dispatchEvent(new CustomEvent("reader:game-status")); toast("game " + (gameRunning ? "resumed" : "paused")); return; }
   // a refused resume carries the worker's own words; without them the game just silently never moves
   const detail = await res.json().then(body => body.detail, () => "");
   if (res.status === 409 && !detail) { gameRunning = action === "resume"; renderGameControl(); document.dispatchEvent(new CustomEvent("reader:game-status")); return; }
@@ -73,7 +81,10 @@ document.addEventListener("keydown", e => {
   if (e.target.closest("input, textarea, select, [contenteditable=true]")) return;
   if (e.key === "Escape" && statsOpen()) { closeStats(); return; }
   if (e.key === "Escape" && el("notesModal").classList.contains("open")) { closeNotes(); return; }
-  if (state.drawer) { if (e.key === "Escape") { state.drawer = null; renderPanels(); } return; }
+  if (state.drawer || state.unitDrawer) {
+    if (e.key === "Escape") { if (state.drawer) state.drawer = null; else state.unitDrawer = null; renderPanels(); }
+    return;
+  }
   if (e.key === "ArrowLeft") show(index - 1);
   if (e.key === "ArrowRight") show(index + 1);
 });
@@ -82,4 +93,3 @@ document.addEventListener("keydown", e => {
 let toastTimer = null;
 function toast(message) { const t = el("toast"); t.textContent = message; t.style.display = "block";
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.style.display = "none", 2600); }
-

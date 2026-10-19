@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt, model_validator
 
 
 class GameSummary(BaseModel):
@@ -18,6 +19,8 @@ class GameSummary(BaseModel):
     has_evaluation: bool
     finished: bool
     running: bool
+    queued: bool = False
+    started: bool = True
     winner: str | None
     turn_count: int | None
     input_tokens: int | None
@@ -34,6 +37,7 @@ class TournamentSummary(BaseModel):
     players: list[str]
     game_ids: list[str]
     created_at: datetime
+    parallel_games: int = 1
 
 
 class GameListResponse(BaseModel):
@@ -46,19 +50,37 @@ class GameListResponse(BaseModel):
 class NewGameRequest(BaseModel):
     """A request to launch a game: player specs plus optional knobs.
 
-    ``parallel_games`` above 1 turns the launch into a tournament: that many
-    games with the same setup run in parallel on consecutive seeds.
+    ``games`` sets the total tournament size; ``parallel_games`` bounds how many
+    game workers can run at once, on consecutive seeds.
     """
 
     players: list[str]
     seed: int = 0
     commentators: list[str] = Field(default_factory=list)
+    evaluators: list[str] = Field(default_factory=list)
+    evaluation_method: Literal["live_rounds", "whole_game"] = "live_rounds"
     max_turns: int | None = None
+    games: int = Field(default=1, ge=1, le=1000)
     parallel_games: int = Field(default=1, ge=1, le=20)
+    seating_mode: Literal["random", "cycle"] = "random"
+    seating_orders: list[list[StrictInt]] | None = Field(
+        default=None,
+        description="Resolved orders saved for queue resumption; generated from seating_mode at launch.",
+    )
     # extra information the players start the game knowing: one line every player is given, plus
     # an optional per-player line aligned with ``players``
     common_context: str = ""
     player_context: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_seating_orders(self):
+        if self.seating_orders is not None:
+            if len(self.seating_orders) != self.games:
+                raise ValueError("Provide exactly one seating order per game.")
+            expected = list(range(1, len(self.players) + 1))
+            if any(sorted(order) != expected for order in self.seating_orders):
+                raise ValueError("Each seating order must contain every player number exactly once.")
+        return self
 
 
 class NewGameResponse(BaseModel):
@@ -68,25 +90,27 @@ class NewGameResponse(BaseModel):
     tournament: bool
 
 
+class ContinueTournamentRequest(BaseModel):
+    """Append games using the tournament's saved launch configuration."""
+
+    games: int = Field(ge=1, le=1000, strict=True)
+    expected_total_games: int = Field(ge=1, strict=True)
+
+
 class EvaluateRequest(BaseModel):
-    """A request to run the whole-game evaluator panel over a stored game."""
+    """A panel run, optionally reviewing each completed round during play."""
 
     evaluators: list[str] = Field(default_factory=list)
+    live: bool = False
+    restart: bool = False
 
 
-class TagVerificationBody(BaseModel):
-    """A human verdict on one panel tag: set or clear its human-verified mark.
-
-    The first four fields identify the tag — the same ``(evaluator_index, player, behavior,
-    turn)`` key the agreement aggregate groups on — and ``verified`` is the state to set.
-    ``version`` is the evaluation run whose verifications the verdict belongs to (None = current),
-    since verifications are kept per version.
-    """
+class UnitVerificationBody(BaseModel):
+    """A human review of one research unit within a selected evaluation run."""
 
     evaluator_index: int
-    player: str
-    behavior: str
-    turn: int
+    unit_type: Literal["agreement", "episode", "claim", "statement", "commitment", "deception", "deception_candidate"]
+    unit_id: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     verified: bool
     version: str | None = None
 

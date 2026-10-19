@@ -1,6 +1,7 @@
 """Running games as plain function calls, shared by the CLI and the web app's worker processes."""
 
 import hashlib
+import json
 import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,8 +16,11 @@ from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.players import rendering, tools
 from risk_bench.players.human import mailbox_for
+from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.players.rendering import render_board_text
+from risk_bench.runner.checkpoint import restore_engine
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
+from risk_bench.runner.evaluation_config import configured_panel
 from risk_bench.runner.evaluation_store import (
     EvaluationWriter,
     evaluation_path_for_journal,
@@ -24,8 +28,15 @@ from risk_bench.runner.evaluation_store import (
 )
 from risk_bench.runner.evaluation_versions import archive_current
 from risk_bench.runner.game_runner import GameRecord, GameRunner
-from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter, read_journal, restore_game
-from risk_bench.runner.trace_index import TraceSpan, build_trace_index, living_players_by_turn
+from risk_bench.runner.journal import (
+    SCHEMA_VERSION,
+    JournalHeader,
+    JournalWriter,
+    prefix_hash,
+    read_journal,
+    restore_game,
+)
+from risk_bench.runner.trace_index import TraceSpan, build_trace_index, trace_fingerprint
 
 
 def run_new_game(
@@ -38,12 +49,13 @@ def run_new_game(
     verbose: bool,
     additional_context: list[str],
     human_controls: bool = False,
+    seat_order: list[int] | None = None,
 ) -> tuple[GameRecord, Path]:
     """Play a fully journaled game between the given player specs.
 
     Args:
         models: Player specs ('random', 'provider:tier', 'provider:model'); their input order
-            does not fix the seating, which is randomly shuffled (seed-derived) before play.
+            is shuffled (seed-derived) unless seat_order explicitly specifies the seats.
         seed: The engine seed; fresh model responses are not seed-deterministic.
         settings: Provides API keys, agent limits, and game defaults.
         commentators: The commentator panel as one model spec per member; empty for none.
@@ -53,6 +65,7 @@ def run_new_game(
         additional_context: Extra information to give each player from the first turn on, aligned
             with ``models``; pass an empty list to give none.
         human_controls: True only for web workers with an API serving the human mailbox.
+        seat_order: Exact order of 1-based positions in models; None uses seeded shuffling.
 
     Returns:
         The finished game's record and its journal path.
@@ -68,7 +81,13 @@ def run_new_game(
     named = specs.named_specs(specs=models)
     # named_specs keeps the caller's order, so the context lines pair with the names before seating
     starting_context = {name: text for name, text in zip(named, additional_context) if text}
-    player_specs = _seat_in_random_order(player_specs=named, seed=seed)
+    if seat_order is None:
+        player_specs = _seat_in_random_order(player_specs=named, seed=seed)
+    else:
+        if sorted(seat_order) != list(range(1, len(models) + 1)):
+            raise ValueError("Seat order must contain every player number exactly once.")
+        names = list(named)
+        player_specs = {names[index - 1]: named[names[index - 1]] for index in seat_order}
     if journal_path is None:
         started_at = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
         journal_path = settings.output_directory / "games" / f"{started_at}-seed{seed}" / "game.jsonl"
@@ -107,9 +126,13 @@ def run_new_game(
         journal=journal,
         trace=trace,
         verbose=verbose,
+        round_review=lambda _: _review_live_evaluation(journal_path, settings, blocking=True),
     )
     try:
-        return runner.run(), journal_path
+        record = runner.run()
+        _review_live_evaluation(journal_path, settings, blocking=False)
+        _review_whole_game_evaluation(journal_path, settings)
+        return record, journal_path
     finally:
         journal.close()
         if trace is not None:
@@ -153,8 +176,6 @@ def resume_game(
         )
     if header.configuration:
         commentators = header.commentators
-    for limitation in restored.recovery_limitations:
-        print(f"[resume] {limitation}", file=sys.stderr)
     if "human" in header.player_specs.values() and not human_controls:
         raise ValueError("Resume human games from the web app (serve).")
     trace = _trace_writer(
@@ -183,22 +204,75 @@ def resume_game(
         journal=journal,
         trace=trace,
         verbose=verbose,
+        round_review=lambda _: _review_live_evaluation(journal_file, settings, blocking=True),
     )
     try:
-        return runner.resume(restored=restored)
+        record = runner.resume(restored=restored)
+        _review_live_evaluation(journal_file, settings, blocking=False)
+        _review_whole_game_evaluation(journal_file, settings)
+        return record
     finally:
         journal.close()
         if trace is not None:
             trace.close()
 
 
-def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Settings) -> Path:
+def _review_live_evaluation(journal_path: Path, settings: Settings, *, blocking: bool) -> None:
+    """At a round boundary, complete the research call before gameplay proceeds."""
+    config_path = journal_path.parent / "live-evaluators.json"
+    if not config_path.is_file():
+        return
+    error_path = journal_path.with_suffix(".eval.error.json")
+    try:
+        panel = json.loads(config_path.read_text(encoding="utf-8")).get("evaluators", [])
+        if not panel:
+            return
+        from risk_bench.runner.live_evaluation import run_live_evaluation
+
+        run_live_evaluation(journal_path, panel, settings, follow=False)
+        error_path.unlink(missing_ok=True)
+    except Exception as error:
+        error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
+        if blocking:
+            raise ProviderUnavailableError(f"Research evaluation paused: {error}") from error
+
+
+def _review_whole_game_evaluation(journal_path: Path, settings: Settings) -> None:
+    """Run the separately configured final panel after gameplay and live review finish."""
+    panel = configured_panel(journal_path, "whole_game")
+    if not panel:
+        return
+    error_path = journal_path.with_suffix(".eval.error.json")
+    try:
+        run_evaluation(journal_path, panel, settings)
+        error_path.unlink(missing_ok=True)
+    except Exception as error:
+        error_path.write_text(json.dumps({"detail": str(error), "method": "whole_game"}), encoding="utf-8")
+        print(f"[whole-game-evaluation-error] {error}", file=sys.stderr)
+
+
+def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Settings,
+                   *, run_id: str | None = None) -> Path:
+    """Run a fresh whole-game analysis and expose its activity to readers."""
+    from risk_bench.runner.live_evaluation import _mark_review_active
+
+    if not evaluator_specs:
+        raise ValueError("Provide at least one evaluator panel member.")
+    _mark_review_active(journal_path, kind="whole_game", panel=evaluator_specs)
+    try:
+        return _run_whole_game_evaluation(journal_path, evaluator_specs, settings, run_id=run_id)
+    finally:
+        journal_path.with_suffix(".eval.active.json").unlink(missing_ok=True)
+
+
+def _run_whole_game_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Settings,
+                               *, run_id: str | None = None) -> Path:
     """Evaluate a stored game with a panel of whole-game evaluators, writing the eval sidecar.
 
     Reads the journal (which may be a paused game's prefix), builds the trace index the panel
     cites, runs every member offline and concurrently over the same trace, and writes their
-    tags and syntheses to ``game.eval.jsonl`` — overwriting any prior run, since the
-    evaluation is a re-runnable derived artifact, never part of the canonical journal.
+    research units to ``game.eval.jsonl``, archiving earlier runs. Evaluation
+    is a derived artifact and never changes the canonical game journal.
 
     Args:
         journal_path: The stored game journal to evaluate; need not be a finished game.
@@ -214,40 +288,56 @@ def run_evaluation(journal_path: Path, evaluator_specs: list[str], settings: Set
     if not evaluator_specs:
         raise ValueError("Provide at least one evaluator panel member.")
     records = read_journal(path=journal_path)
-    restored = restore_game(path=journal_path)
     spans = build_trace_index(records=records)
-    overview = _render_game_overview(state=restored.state)
-    # the evaluator sweeps every turn present in the trace and must consider every player alive on it
-    turns = sorted({span.turn for span in spans})
-    living_by_turn = living_players_by_turn(records=records, player_ids=set(restored.state.players), turns=turns)
+    saved = next((r["checkpoint"] for r in reversed(records) if r["type"] == "checkpoint"), None)
+    if saved is None:
+        raise ValueError("No committed v3 checkpoint is available to evaluate.")
+    state, _ = restore_engine(saved)
+    overview = _render_game_overview(state=state)
+    overview += f"\nObservation cutoff: span {len(spans) - 1}; " + (
+        "game finished."
+        if any(r["type"] == "result" for r in records)
+        else "game still open; unresolved promises are censored."
+    )
     # keep the previous run: archive it aside before the flat sidecar paths are overwritten, so this
     # run becomes a new version rather than replacing the old one
     archive_current(journal_path=journal_path)
-    # the panel's API calls go to their own trace sidecar, so a re-run overwrites cleanly rather
-    # than appending duplicate evaluator calls into the game's own trace
-    trace = TraceWriter(path=evaluation_trace_path_for_journal(journal_path=journal_path), append=False)
-    trace.set_context(turn=restored.state.turn_number, kind="evaluation")
-    try:
-        evaluators = specs.build_evaluators(evaluator_specs=evaluator_specs, settings=settings, trace=trace)
-        evaluations = _gather_evaluations(
-            evaluators=evaluators,
-            players=set(restored.state.players),
-            spans=spans,
-            overview=overview,
-            living_by_turn=living_by_turn,
-            max_workers=min(settings.max_concurrent_commentators, len(evaluators)),
-        )
-    finally:
-        trace.close()
-
+    # Persist the identity before provider calls so interrupted runs and their traces can be archived.
     writer = EvaluationWriter(path=evaluation_path_for_journal(journal_path=journal_path))
     try:
-        writer.write_header(panel=evaluator_specs, record_count=len(records), span_count=len(spans))
+        writer.write_header(
+            run_id=run_id,
+            panel=evaluator_specs,
+            record_count=len(records),
+            span_count=len(spans),
+            source={
+                "game_id": journal_path.parent.name,
+                "file": journal_path.name,
+                "trace_hash": trace_fingerprint(spans),
+                "journal_hash": prefix_hash(records),
+                "ancestry": records[0].get("ancestry", {}),
+                "finished": any(r["type"] == "result" for r in records),
+            },
+        )
+        # the panel's API calls go to their own trace sidecar, so a re-run overwrites cleanly rather
+        # than appending duplicate evaluator calls into the game's own trace
+        trace = TraceWriter(path=evaluation_trace_path_for_journal(journal_path=journal_path), append=False)
+        trace.set_context(turn=state.turn_number, kind="evaluation")
+        try:
+            evaluators = specs.build_evaluators(evaluator_specs=evaluator_specs, settings=settings, trace=trace)
+            evaluations = _gather_evaluations(
+                evaluators=evaluators,
+                players=set(state.players),
+                spans=spans,
+                overview=overview,
+                max_workers=min(settings.max_concurrent_commentators, len(evaluators)),
+            )
+        finally:
+            trace.close()
+
         for index, result in enumerate(evaluations):
             if result is not None:
-                writer.write_evaluation(evaluator_index=index, evaluation=result.evaluation)
-                for coverage in result.coverage:
-                    writer.write_coverage(evaluator_index=index, coverage=coverage)
+                writer.write_evaluation(evaluator_index=index, evaluation=result)
     finally:
         writer.close()
 
@@ -275,7 +365,6 @@ def _gather_evaluations(
     players: set[str],
     spans: tuple[TraceSpan, ...],
     overview: str,
-    living_by_turn: dict[int, frozenset[str]],
     max_workers: int,
 ) -> list[EvaluatedGame | None]:
     if not evaluators:
@@ -289,7 +378,6 @@ def _gather_evaluations(
                 players=players,
                 spans=spans,
                 game_overview=overview,
-                living_by_turn=living_by_turn,
             ): index
             for index, evaluator in enumerate(evaluators)
         }
@@ -399,7 +487,6 @@ def persisted_configuration(settings: Settings) -> dict:
                 "max_agent_tokens",
                 "agent_reasoning_effort",
                 "max_invalid_retries",
-                "max_consecutive_provider_failures",
                 "max_concurrent_commentators",
             },
         ),

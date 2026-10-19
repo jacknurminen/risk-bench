@@ -17,6 +17,7 @@ from risk_bench.players.rendering import describe_action, narrate_event
 from risk_bench.runner.checkpoint import decode, restore_engine
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.journal import read_journal, ruleset_for_schema_version
+from risk_bench.viewer.research import game_context
 
 
 def build_view_model(journal_path: Path) -> dict[str, Any]:
@@ -61,11 +62,14 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     configuration_changes: list[str] = []
     additional_context: dict[str, str | None] = {}
     inherited_through = header.get("ancestry", {}).get("inherited_through", -1)
+    pause_error = None
+    termination_reason = "Observation cutoff (no recorded result)"
     for record in records[1:]:
         match record["type"]:
             case "checkpoint":
                 saved = record["checkpoint"]
                 p = saved["progress"]
+                pause_error = p.get("pause_error")
                 additional_context = saved.get("additional_context") or {}
                 cursors.append(
                     {
@@ -116,6 +120,11 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
                 )
                 continent_controllers = current_controllers
             case "events":
+                for event in record["events"]:
+                    if event["kind"] == "mission_completed":
+                        termination_reason = "Mission completed"
+                    elif event["kind"] == "turn_limit_reached":
+                        termination_reason = "Turn limit reached"
                 events = [event_from_json(data) for data in record["events"]]
                 steps[-1]["events"] = [narrate_event(event=event) for event in events]
                 _accumulate_combat_totals(combat_totals=combat_totals, events=events)
@@ -157,8 +166,10 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     for entry in commentary:
         entry["commentator"] = label_by_index.get(entry["commentator_index"], "commentator")
 
-    return {
+    model = {
         "title": journal_path.name,
+        "experiment_version": 3,
+        "pause_error": pause_error,
         "cursors": cursors,
         "ancestry": header.get("ancestry", {}),
         "additional_context": additional_context,
@@ -196,6 +207,12 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
             "per_turn_usage": per_turn_usage(trace_path=trace_path),
         },
     }
+    if result and termination_reason == "Observation cutoff (no recorded result)":
+        termination_reason = "Finished; termination reason not recorded"
+    elif not result and pause_error:
+        termination_reason = "Paused after error"
+    model["research_context"] = game_context(model, header["player_specs"], termination_reason)
+    return model
 
 
 def _step(
@@ -208,6 +225,7 @@ def _step(
     player_index = {name: index for index, name in enumerate(player_names)}
     return {
         "turn": state.turn_number,
+        "round": state.round_number,
         "phase": str(state.phase),
         "current_player": state.current_player,
         "action": action_text,

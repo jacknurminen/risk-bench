@@ -74,9 +74,31 @@ def test_negotiation_prompt_invites_a_message():
     request = attack_request()
 
     prompt = render_negotiation_prompt(view=request.view)
+    system = render_system_prompt(view=request.view)
 
-    assert "negotiation round" in prompt
-    assert "Send a message" in prompt
+    assert "Negotiation session" in prompt
+    assert "You may send a message or remain silent. Choose whichever best serves your game strategy." in prompt
+    assert "For a negotiation opportunity, call a message tool or say_nothing" in system
+    assert "Always act by calling exactly one action tool" not in system
+
+
+def test_prompts_distinguish_round_turn_and_negotiation_session():
+    request = attack_request()
+    view = replace(request.view, turn_number=7, round_number=3, previous_round_number=2)
+    for prompt in (render_decision_prompt(replace(request, view=view)), render_negotiation_prompt(view)):
+        assert "Round 3 · Turn 7 · alice's turn" in prompt
+        assert "Turn order (living players): alice → bob" in prompt
+        assert "negotiation round" not in prompt
+    notes = render_noting_prompt(view)
+    assert "Round 2 · Turn 6 just ended" in notes
+    assert "Current board: Round 3 · Turn 7" in notes
+    system = render_system_prompt(view)
+    assert "skipping eliminated players" in system
+    assert "until the end of round 4" in system
+    assert "negotiation session" in system and "negotiation round" not in system
+    setup = render_decision_prompt(replace(request, view=replace(view, turn_number=0, round_number=0)))
+    assert "Setup placement, before round 1" in setup
+    assert "Round 0" not in setup
 
 
 def test_decision_prompt_includes_private_notes_when_present():

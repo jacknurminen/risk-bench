@@ -181,6 +181,56 @@ def test_cost_estimates_price_the_cached_shares_at_their_own_rates():
     assert cached is not None and cached < 5.00 + 1.00
 
 
+@pytest.mark.parametrize("prompt,multiplier", [(100_000, 1), (100_001, 5)])
+def test_haiku_55_prices_the_entire_call_using_total_prompt_length(prompt, multiplier):
+    cost = estimate_cost_usd("claude-haiku-5-5", prompt, 20_000, 70_000, 5_000)
+    expected = ((prompt - 90_000) * 0.10 + 20_000 * 0.125 + 70_000 * 0.01 + 5_000 * 0.50) / 1_000_000
+    assert cost == pytest.approx(expected * multiplier)
+
+
+def test_haiku_55_aggregates_costs_after_pricing_each_request(tmp_path):
+    path = tmp_path / "game.trace.jsonl"
+    # Two short requests exceed the threshold only in aggregate; the third really is long.
+    rows = [{"caller": "haiku", "model": "claude-haiku-5-5", "turn": 1, "kind": "decision",
+             "input_tokens": prompt, "output_tokens": 1_000} for prompt in (60_000, 60_000, 120_000)]
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    expected_input = (120_000 * 0.10 + 120_000 * 0.50) / 1_000_000
+    expected_output = (2_000 * 0.50 + 1_000 * 2.50) / 1_000_000
+    assert usage_by_caller(path)["haiku"]["cost_usd"] == pytest.approx(expected_input + expected_output)
+    series = per_turn_usage(path)["by_caller"]["haiku"]
+    assert series["input_cost"] == pytest.approx([expected_input])
+    assert series["output_cost"] == pytest.approx([expected_output])
+
+
+@pytest.mark.parametrize(
+    "model,rates",
+    [
+        ("claude-fable-5-1", (10.0, 12.5, 0.25, 50.0)),
+        ("claude-opus-5-5", (4.0, 5.0, 0.20, 20.0)),
+        ("gpt-6-sol", (2.0, 2.5, 0.20, 10.0)),
+        ("gpt-6-luna", (0.10, 0.125, 0.01, 0.50)),
+    ],
+)
+def test_new_models_use_current_input_cache_and_output_rates(model, rates):
+    cost = estimate_cost_usd(
+        model=model,
+        input_tokens=1_000_000,
+        cache_write_tokens=200_000,
+        cache_read_tokens=700_000,
+        output_tokens=40_000,
+    )
+    input_rate, write_rate, read_rate, output_rate = rates
+    assert cost == pytest.approx(0.1 * input_rate + 0.2 * write_rate + 0.7 * read_rate + 0.04 * output_rate)
+
+
+@pytest.mark.parametrize("prompt,input_multiplier,output_multiplier", [(272_000, 1, 1), (272_001, 2, 1.5)])
+def test_sol_61_prices_cache_and_output_at_the_correct_prompt_length_tier(prompt, input_multiplier, output_multiplier):
+    cost = estimate_cost_usd("gpt-6.1-sol", prompt, 20_000, 200_000, 5_000)
+    expected_input = ((prompt - 220_000) * 2.00 + 20_000 * 2.50 + 200_000 * 0.10) * input_multiplier
+    expected_output = 5_000 * 10.00 * output_multiplier
+    assert cost == pytest.approx((expected_input + expected_output) / 1_000_000)
+
+
 def test_usage_by_caller_aggregates_cache_shares_into_the_cost(tmp_path: Path):
     writer = TraceWriter(path=tmp_path / "game.trace.jsonl", append=False)
     cached_response = Response(

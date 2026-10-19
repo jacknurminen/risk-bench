@@ -1,8 +1,8 @@
 """Player model-spec resolution, shared by the CLI and the web API.
 
-A spec is 'human' (web games), 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5'), optionally suffixed with
+A spec is 'human' (web games), 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5-5'), optionally suffixed with
 ':<effort>' (low / mid- via 'medium' / high) to set that player's reasoning effort, e.g.
-'anthropic:claude-opus-5:low'. Without the suffix the global default effort applies. Any model id
+'anthropic:claude-opus-5-5:low'. Without the suffix the global default effort applies. Any model id
 the provider accepts may be named, not only the ones listed in ``agents.models.MODELS`` — the
 registry is what the setup form offers and what usage reports can price, not a whitelist.
 Providers: anthropic, openai, google.
@@ -25,7 +25,7 @@ from risk_bench.players.human import HumanPlayer
 from risk_bench.players.llm import LLMPlayer
 from risk_bench.players.random import RandomPlayer
 from risk_bench.runner.commentary import Commentator
-from risk_bench.runner.evaluation import Evaluator
+from risk_bench.runner.evaluation_v4 import Evaluator
 from risk_bench.tournament.runner import PlayerFactory
 
 _PROVIDER_NAMES: Final[frozenset[str]] = frozenset(Provider)
@@ -112,8 +112,6 @@ def player_factory(
             player_id=player_id,
             agent=player_agent,
             max_invalid_retries=settings.max_invalid_retries,
-            max_consecutive_provider_failures=settings.max_consecutive_provider_failures,
-            rng=rng,
         )
 
     return create_llm_player
@@ -188,10 +186,10 @@ def _build_commentator(index: int, spec: str, settings: Settings, trace: TraceWr
 def build_evaluators(
     evaluator_specs: list[str], settings: Settings, trace: TraceWriter | None
 ) -> tuple[Evaluator, ...]:
-    """Build the evaluator panel: one independent whole-game annotator per member spec.
+    """Build the evaluator panel: one independent research coder per member spec.
 
     Mirrors ``build_commentators`` — members are built in panel order and each tags its trace
-    records with its index — but every member reads the full game offline rather than per turn.
+    records with its index. The caller decides between an offline sweep and live turn updates.
 
     Args:
         evaluator_specs: One model spec per panel member, in panel order; empty for no evaluation.

@@ -102,6 +102,8 @@ def test_setup_placement_cycles_players_then_starts_turn_one():
     assert state.phase is Phase.REINFORCE
     assert state.current_player == ALICE
     assert state.turn_number == 1
+    assert state.round_number == 1
+    assert state.previous_round_number == 0
     assert TurnStarted(player_id=ALICE, turn_number=1) in result.events
     assert state.armies_to_place == reinforcement_count(state=state, player_id=ALICE)
     for player_id in (ALICE, BOB, CARLA):
@@ -367,6 +369,37 @@ def test_turn_passes_over_eliminated_players():
     result = apply_action(state=state, action=SkipFortify(), rng=random.Random(0))
 
     assert result.state.current_player == CARLA
+
+
+@pytest.mark.parametrize(
+    "actor, eliminated, next_player, wraps",
+    [
+        (ALICE, None, BOB, False),
+        ("dave", None, ALICE, True),
+        ("dave", ALICE, BOB, True),
+        (CARLA, "dave", ALICE, True),
+        (ALICE, BOB, CARLA, False),
+    ],
+)
+def test_rounds_follow_seat_order_even_when_first_or_last_seats_are_eliminated(actor, eliminated, next_player, wraps):
+    rng = random.Random(9)
+    state = setup_game([ALICE, BOB, CARLA, "dave"], rng, CURRENT_RULESET)
+    state.phase = Phase.FORTIFY
+    state.turn_number, state.round_number, state.current_player = 10, 3, actor
+    for player in state.players.values():
+        player.mission = PLACEHOLDER_MISSION
+    if eliminated:
+        state.players[eliminated].eliminated_by = next_player
+        for territory in state.territories_owned_by(eliminated):
+            state.owner[territory] = next_player
+
+    result = apply_action(state, SkipFortify(), rng)
+
+    assert result.state.current_player == next_player
+    assert result.state.turn_number == 11
+    assert result.state.round_number == 3 + wraps
+    assert result.state.previous_round_number == 3
+    assert state.round_number == 3
 
 
 def test_illegal_actions_are_rejected_with_a_reason():

@@ -1,151 +1,77 @@
-"""Reading and writing the evaluator's sidecar artifact, ``game.eval.jsonl``.
-
-The evaluation is a re-runnable *derived* artifact, so it lives next to the game
-journal (like the trace sidecar) rather than inside it: the journal is append-only
-and canonical, while a fresh evaluation simply overwrites this file. The format
-mirrors the journal — a header line then one line per occurrence
-(``eval_tag`` / ``eval_synthesis``), each stamped with the panel
-member's index, flushed per line, read back tolerantly.
-
-The header records ``coverage`` (the journal record and span counts the evaluation
-was computed against) so a viewer can report "covers N of the journal's now-M
-spans" after a paused game resumes; because span handles are append-stable, an
-out-of-date evaluation is partial, never invalid.
-"""
+"""V3 evaluation sidecars: versioned, source-bound research observations."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
-from risk_bench.runner.evaluation import Evaluation, EvaluatorTag, Evidence, PlayerSynthesis, TurnCoverage
+from risk_bench.runner.codebook_v4 import CODEBOOK_HASH, CODEBOOK_VERSION
+from risk_bench.runner.evaluation import EvaluatedGame
 
-EVALUATION_SCHEMA_VERSION: Final[int] = 2  # v2 adds per-member per-turn eval_coverage records
+EVALUATION_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
 class EvaluationHeader:
-    """The first line of an evaluation sidecar: the panel and what it was computed against."""
-
     schema_version: int
-    run_id: str  # this run's stable id; the versioning key when several runs are kept side by side
-    panel: list[str]  # one model spec per member, in panel order
-    record_count: int  # journal records the evaluation covered
-    span_count: int  # trace-index spans the evaluation covered
+    run_id: str
+    panel: list[str]
+    record_count: int
+    span_count: int
     created_at: str
+    source: dict = field(default_factory=dict)
+    codebook_version: str = CODEBOOK_VERSION
+    codebook_hash: str = CODEBOOK_HASH
+    method: str = "whole_game"
 
 
 def evaluation_path_for_journal(journal_path: Path) -> Path:
-    """Derive the evaluation sidecar path that belongs to a game journal.
-
-    Args:
-        journal_path: The game's ``.jsonl`` journal path.
-
-    Returns:
-        The ``.eval.jsonl`` path next to the journal.
-    """
     return journal_path.with_suffix(".eval.jsonl")
 
 
 def evaluation_trace_path_for_journal(journal_path: Path) -> Path:
-    """Derive the evaluator panel's API-trace sidecar path that belongs to a game journal.
-
-    The panel's provider calls are traced apart from the game's own trace, so a re-run
-    overwrites cleanly; the file appears (and grows per call) as soon as a run starts, which
-    also makes it the progress signal for an evaluation in flight.
-
-    Args:
-        journal_path: The game's ``.jsonl`` journal path.
-
-    Returns:
-        The ``.eval.trace.jsonl`` path next to the journal.
-    """
     return journal_path.with_suffix(".eval.trace.jsonl")
 
 
 class EvaluationWriter:
-    """Writes one evaluation sidecar, overwriting any prior run (latest panel wins)."""
-
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self._file = path.open("w", encoding="utf-8")
 
-    def write_header(self, panel: list[str], record_count: int, span_count: int) -> None:
-        """Write the header line; must be the first write.
-
-        Args:
-            panel: The evaluator panel as one model spec per member, in panel order.
-            record_count: The number of journal records this evaluation covered.
-            span_count: The number of trace-index spans this evaluation covered.
-        """
-        created_at = datetime.now(tz=UTC)
+    def write_header(self, panel: list[str], record_count: int, span_count: int, source: dict | None = None,
+                     run_id: str | None = None) -> None:
+        created = datetime.now(tz=UTC)
         self._write_line(
-            record={
+            {
                 "type": "eval_header",
                 "schema_version": EVALUATION_SCHEMA_VERSION,
-                # a per-second timestamp is a legible, sortable run id; the writer dedupes collisions
-                "run_id": created_at.strftime("%Y%m%d-%H%M%S"),
+                "experiment_version": 3,
+                "method": "whole_game",
+                "codebook_version": CODEBOOK_VERSION,
+                "codebook_hash": CODEBOOK_HASH,
+                "run_id": run_id or created.strftime("%Y%m%d-%H%M%S-%f"),
+                "created_at": created.isoformat(),
                 "panel": panel,
                 "coverage": {"record_count": record_count, "span_count": span_count},
-                "created_at": created_at.isoformat(),
+                "source": source or {},
             }
         )
 
-    def write_evaluation(self, evaluator_index: int, evaluation: Evaluation) -> None:
-        """Write one member's tags and syntheses as separate stamped lines.
-
-        Args:
-            evaluator_index: The member's position in the panel roster (the agreement key).
-            evaluation: The member's validated output.
-        """
-        stamp = {"evaluator_index": evaluator_index, "evaluator": evaluation.evaluator_spec}
-        for tag in evaluation.tags:
-            self._write_line(record={"type": "eval_tag", **stamp, **_tag_to_json(tag=tag)})
-        for synthesis in evaluation.syntheses:
-            self._write_line(record={"type": "eval_synthesis", **stamp, **_synthesis_to_json(synthesis=synthesis)})
-
-    def write_coverage(self, evaluator_index: int, coverage: TurnCoverage) -> None:
-        """Write one member's forced-consideration bookkeeping for one turn.
-
-        The record is the consideration-coverage denominator: which living players the member
-        tagged, marked as an explicit no-op, or (the integrity signal) failed to consider at all.
-
-        Args:
-            evaluator_index: The member's position in the panel roster.
-            coverage: The turn's living / tagged / no-op / missing player sets.
-        """
-        self._write_line(
-            record={
-                "type": "eval_coverage",
-                "evaluator_index": evaluator_index,
-                "turn": coverage.turn,
-                "living": list(coverage.living),
-                "tagged": list(coverage.tagged),
-                "no_behaviour": list(coverage.no_behaviour),
-                "missing": list(coverage.missing),
-            }
-        )
+    def write_evaluation(self, evaluator_index: int, evaluation: EvaluatedGame) -> None:
+        for record in evaluation.records:
+            self._write_line({**record, "evaluator_index": evaluator_index, "evaluator": evaluation.evaluator_spec})
 
     def close(self) -> None:
-        """Close the underlying file."""
         self._file.close()
 
-    def _write_line(self, record: dict[str, Any]) -> None:
+    def _write_line(self, record: dict) -> None:
         self._file.write(json.dumps(record) + "\n")
         self._file.flush()
 
 
 def read_evaluation(path: Path) -> list[dict[str, Any]]:
-    """Read an evaluation sidecar's records, tolerating a truncated final line.
-
-    Args:
-        path: The ``.eval.jsonl`` file to read; a missing file yields an empty list.
-
-    Returns:
-        The parsed records in file order (header first when present).
-    """
     if not path.is_file():
         return []
     records = []
@@ -160,60 +86,21 @@ def read_evaluation(path: Path) -> list[dict[str, Any]]:
 
 
 def evaluation_header(records: list[dict[str, Any]]) -> EvaluationHeader | None:
-    """Reconstruct the header from an evaluation sidecar's records.
-
-    Args:
-        records: The records as ``read_evaluation`` returns them.
-
-    Returns:
-        The header, or None when the records do not begin with one.
-    """
     if not records or records[0].get("type") != "eval_header":
         return None
     data = records[0]
-    coverage = data.get("coverage", {})
+    if data.get("schema_version") not in {3, 4, 5, 6}:
+        raise ValueError("Older evaluations belong to the v2 application.")
+    coverage = data["coverage"]
     return EvaluationHeader(
-        schema_version=int(data.get("schema_version", EVALUATION_SCHEMA_VERSION)),
-        # runs written before versioning carried no run id; the caller derives one from created_at
-        run_id=str(data.get("run_id", "")),
-        panel=[str(spec) for spec in data.get("panel", [])],
-        record_count=int(coverage.get("record_count", 0)),
-        span_count=int(coverage.get("span_count", 0)),
-        created_at=str(data.get("created_at", "")),
+        schema_version=data["schema_version"],
+        run_id=data["run_id"],
+        panel=data["panel"],
+        record_count=coverage["record_count"],
+        span_count=coverage["span_count"],
+        created_at=data["created_at"],
+        source=data.get("source", {}),
+        codebook_version=data.get("codebook_version", ""),
+        codebook_hash=data.get("codebook_hash", ""),
+        method=data.get("method", "live_rounds" if data.get("live") else "whole_game"),
     )
-
-
-def _tag_to_json(tag: EvaluatorTag) -> dict[str, Any]:
-    return {
-        "player": tag.player,
-        "behavior": tag.behavior,
-        "turn": tag.turn,
-        "evidence": [_evidence_to_json(evidence=evidence) for evidence in tag.evidence],
-        "confidence": tag.confidence,
-        "note": tag.note,
-    }
-
-
-def _synthesis_to_json(synthesis: PlayerSynthesis) -> dict[str, Any]:
-    return {
-        "player": synthesis.player,
-        "profile": [
-            {
-                "dimension": dimension.dimension,
-                "characterization": dimension.characterization,
-                "evidence": [_evidence_to_json(evidence=evidence) for evidence in dimension.evidence],
-            }
-            for dimension in synthesis.profile
-        ],
-        "key_episodes": [_evidence_to_json(evidence=evidence) for evidence in synthesis.key_episodes],
-        "summary": synthesis.summary,
-    }
-
-
-def _evidence_to_json(evidence: Evidence) -> dict[str, Any]:
-    return {
-        "span": evidence.span,
-        "quote": evidence.quote,
-        "resolved": evidence.resolved,
-        "quote_matched": evidence.quote_matched,
-    }

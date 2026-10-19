@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from risk_bench.config import Settings
 from risk_bench.launch import run_new_game
 from risk_bench.players.human import mailbox_for
@@ -115,3 +117,72 @@ def test_a_game_can_be_launched_with_shared_and_per_player_context(tmp_path):
         mismatched = client.post("/api/games", json={"players": ["random"] * 3, "player_context": ["only one"]})
         assert mismatched.status_code == 400
         assert "one entry per player" in mismatched.json()["detail"]
+
+
+@pytest.mark.parametrize("first_operation", ["context", "resume"])
+def test_context_save_and_worker_start_are_serialized(tmp_path, monkeypatch, first_operation):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from risk_bench.api import app as api
+    from risk_bench.api.processes import GameProcessManager
+
+    monkeypatch.setattr("risk_bench.runner.journal.os.fsync", lambda fd: None)
+    source = tmp_path / "games" / "parent" / "game.jsonl"
+    run_new_game(["random"] * 3, 19, Settings(), [], source, 1, False, [])
+    branch = tmp_path / "games" / "branch" / "game.jsonl"
+    fork_game(source, branch, "0:after")
+    player = next(iter(restore_game(branch).header.player_specs))
+    first_entered, release_first, second_attempted, running = (Event() for _ in range(4))
+    observed_at_start = []
+    edit_context = api.apply_additional_context
+    control_lock = api.journal_control_lock
+
+    def observe_attempt(path):
+        if first_entered.is_set():
+            second_attempted.set()
+        return control_lock(path)
+
+    def save_context(**kwargs):
+        if first_operation == "context":
+            first_entered.set()
+            assert release_first.wait(5)
+        edit_context(**kwargs)
+
+    def start_worker(self, game_id, journal_path, commentators, log_path):
+        if first_operation == "resume":
+            first_entered.set()
+            assert release_first.wait(5)
+        restored = restore_game(journal_path)
+        assert restored.checkpoint is not None
+        observed_at_start.append(restored.checkpoint["additional_context"].get(player))
+        running.set()
+
+    monkeypatch.setattr(api, "journal_control_lock", observe_attempt)
+    monkeypatch.setattr(api, "apply_additional_context", save_context)
+    monkeypatch.setattr(GameProcessManager, "is_running", lambda self, game_id: running.is_set())
+    monkeypatch.setattr(GameProcessManager, "resume_game", start_worker)
+    monkeypatch.setattr(api, "_confirm_worker_started", lambda **kwargs: None)
+
+    with client_for(tmp_path) as client, ThreadPoolExecutor(max_workers=2) as pool:
+
+        def request(operation):
+            if operation == "context":
+                return client.post("/api/games/branch/context", json={"context": {player: "New briefing."}})
+            return client.post("/api/games/branch/resume")
+
+        first = pool.submit(request, first_operation)
+        try:
+            assert first_entered.wait(5)
+            second = pool.submit(request, "resume" if first_operation == "context" else "context")
+            assert second_attempted.wait(5)
+            assert not second.done()
+        finally:
+            release_first.set()
+        assert first.result(timeout=5).status_code == 204
+        assert second.result(timeout=5).status_code == (204 if first_operation == "context" else 409)
+
+    assert observed_at_start == (["New briefing."] if first_operation == "context" else [None])
+    restored = restore_game(branch)
+    assert restored.checkpoint is not None
+    assert restored.checkpoint["additional_context"].get(player) == observed_at_start[0]

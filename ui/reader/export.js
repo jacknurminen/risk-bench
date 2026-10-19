@@ -7,6 +7,7 @@
    (e.g. the standalone export file) they gracefully fall back to system fonts. */
 
 const EXPORTABLE = [
+  ".researchCard", ".researchTable",
   ".pill", ".traceline", ".tpills", ".tcard",             // timeline
   ".pcard", ".synthCard", "#synthSection", ".matrix",     // rail · synthesis · compare
   ".chart", "#tokenChart", "#statsTable",                 // stats
@@ -72,7 +73,7 @@ document.addEventListener("mouseover", event => {
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape" || !exporting) return;
   if (exportModalOpen()) { closeExportModal(); return; }
-  if (statsOpen() || el("notesModal").classList.contains("open") || state.drawer) return;
+  if (statsOpen() || el("notesModal").classList.contains("open") || state.drawer || state.unitDrawer) return;
   setExportMode(false);
 });
 

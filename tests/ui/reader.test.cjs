@@ -38,3 +38,19 @@ test('turn highlights count resolved events, not matching actions or private dia
   ]);
   assert.equal(run('turnSummary(1)'), 'human conquered alberta from alaska.');
 });
+
+test('round labels follow recorded snapshots across eliminations and live refreshes', () => {
+  const run = reader();
+  run(`steps.splice(0, steps.length,
+    {board: {}, turn: 0, round: 0},
+    {board: {}, turn: 3, round: 1, current_player: 'carla'},
+    {board: {}, turn: 4, round: 2, current_player: 'bob'},
+    {board: {}, turn: 6, round: 3, current_player: 'bob'});
+    rebuildTrace();`);
+  assert.equal(run('gameTimeLabel(0, 0)'), 'Setup');
+  assert.equal(run('gameTimeLabel(3, roundByTurn[3])'), 'Round 1 · Turn 3');
+  assert.equal(run('gameTimeLabel(6, roundByTurn[6])'), 'Round 3 · Turn 6');
+  assert.equal(run('gameTimeLabel(9, undefined)'), 'Turn 9');
+  run(`steps.push({board: {}, turn: 8, round: 4, current_player: 'bob'}); rebuildTrace();`);
+  assert.equal(run('gameTimeLabel(8, roundByTurn[8])'), 'Round 4 · Turn 8');
+});

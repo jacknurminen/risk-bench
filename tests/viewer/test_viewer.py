@@ -10,7 +10,7 @@ from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWrit
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from risk_bench.viewer.html import render_reader_export_html, render_reader_html
 from risk_bench.viewer.snapshots import build_view_model
-from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
+from tests.runner.test_journal import LEGACY_GAME_HEADERS, PLAYER_NAMES, write_game_journal
 
 
 def journal_with_game(tmp_path: Path) -> Path:
@@ -20,27 +20,12 @@ def journal_with_game(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize("game_id", ["20260909-123257-seed1", "20260910-092103-seed7", "20260911-071339-seed8"])
-def test_schema_three_reference_games_keep_their_capture_rules(game_id: str):
-    path = Path(__file__).parents[2] / "data" / "games" / game_id / "game.jsonl"
-    if not path.exists():
-        pytest.skip("the committed reference game is not checked out")
-    records = read_journal(path)
-    assert records[0]["schema_version"] == 3
-
-    # Applying the pre-v3 troop-advance rule changes the board and makes later attacks illegal.
-    model = build_view_model(path)
-    restored = restore_game(path)
-    assert restored.state.ruleset.minimum_advance_on_capture
-    assert model["steps"][-1]["turn"] == restored.state.turn_number
-    seats = {name: index for index, name in enumerate(restored.state.players)}
-    assert model["steps"][-1]["board"] == {
-        str(territory): [seats[owner], restored.state.armies[territory]]
-        for territory, owner in restored.state.owner.items()
-    }
-    result = next((record for record in records if record["type"] == "result"), None)
-    if result is not None:
-        assert model["result"] == {"winner": result["winner"], "turn_count": result["turn_count"]}
-        assert restored.state.winner == result["winner"]
+def test_schema_three_reference_headers_require_the_v2_application(game_id: str, tmp_path: Path):
+    path = tmp_path / "game.jsonl"
+    path.write_text(json.dumps(LEGACY_GAME_HEADERS[game_id]) + "\n", encoding="utf-8")
+    for read in (read_journal, build_view_model, restore_game):
+        with pytest.raises(ValueError, match="v2 Git tag"):
+            read(path)
 
 
 def test_view_model_has_one_snapshot_per_action_plus_the_start(tmp_path: Path):

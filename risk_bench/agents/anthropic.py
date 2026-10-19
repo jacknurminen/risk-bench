@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Literal
+from typing import Literal, cast
 
 import anthropic
 
@@ -16,8 +16,8 @@ class AnthropicAgent:
         self._model = model
         self._max_tokens = max_tokens
         self._reasoning_effort = reasoning_effort
-        # The effort parameter is rejected by Haiku-class models; only send it where it is supported.
-        self._supports_effort = "haiku" not in model.lower()
+        # Haiku 5.5 adds effort support; older Haiku versions reject the parameter.
+        self._supports_effort = "haiku" not in model.lower() or model.lower().startswith("claude-haiku-5-5")
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def respond(self, messages: list[Message], tools: list[Tool]) -> Response:
@@ -45,13 +45,28 @@ class AnthropicAgent:
             output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
         ) as stream:
             response = stream.get_final_message()
+            request_id = stream.request_id
         parsed = _parse_response(content_blocks=response.content)
+        parsed = dataclasses.replace(
+            parsed,
+            stop_reason=response.stop_reason,
+            provider_metadata={
+                "provider": "anthropic",
+                "request_id": request_id,
+                "response_id": response.id,
+                "model": response.model,
+                "stop_sequence": response.stop_sequence,
+                "max_tokens": self._max_tokens,
+                "reasoning_effort": self._reasoning_effort.value if self._supports_effort else None,
+                "content": [block.model_dump(mode="json", exclude_none=True) for block in response.content],
+            },
+        )
         return _with_usage(parsed=parsed, usage=response.usage)
 
 
 def _with_usage(parsed: Response, usage: anthropic.types.Usage) -> Response:
     # Anthropic reports cache traffic apart from input_tokens (a cache write at 1.25x the input
-    # rate, a cache read at 0.1x); normalize input_tokens to the call's total prompt tokens so
+    # rate, a cache read at a model-specific discount); normalize to total prompt tokens so
     # token counts mean the same thing across providers, and keep the cached shares for pricing
     cache_write_tokens = usage.cache_creation_input_tokens or 0
     cache_read_tokens = usage.cache_read_input_tokens or 0
@@ -93,6 +108,17 @@ def _to_anthropic_message(message: Message) -> anthropic.types.MessageParam:
         }
 
     if message.role == "assistant" and message.tool_calls:
+        provider_data = message.tool_calls[0].provider_data
+        if isinstance(provider_data, dict) and "anthropic_content" in provider_data:
+            # Echo the exact assistant turn, including signed thinking and block order.
+            # ToolCall provider data is also persisted by execution checkpoints.
+            return {
+                "role": "assistant",
+                "content": cast(
+                    list[anthropic.types.ContentBlockParam],
+                    cast(dict[str, object], provider_data)["anthropic_content"],
+                ),
+            }
         blocks: list[anthropic.types.ContentBlockParam] = []
         if message.content:
             blocks.append({"type": "text", "text": message.content})
@@ -124,5 +150,12 @@ def _parse_response(content_blocks: Sequence[anthropic.types.ContentBlock]) -> R
             arguments = block.input if isinstance(block.input, dict) else {}
             tool_calls.append(ToolCall(id=block.id, name=block.name, arguments=arguments))
 
+    if tool_calls and any(block.type in {"thinking", "redacted_thinking"} for block in content_blocks):
+        tool_calls[0] = dataclasses.replace(
+            tool_calls[0],
+            provider_data={
+                "anthropic_content": [block.model_dump(mode="json", exclude_none=True) for block in content_blocks]
+            },
+        )
     text = "".join(text_parts) or None
     return Response(text=text, tool_calls=tuple(tool_calls))

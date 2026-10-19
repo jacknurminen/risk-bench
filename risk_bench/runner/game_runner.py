@@ -1,5 +1,6 @@
 import random
 import sys
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 
@@ -42,14 +43,14 @@ class GameRecord:
 class GameRunner:
     """Runs one full game from setup to a completed mission or the turn limit.
 
-    Owns the game flow: each turn starts with a negotiation round of up to
+    Owns the game flow: each turn starts with a negotiation session of up to
     ``max_negotiation_rounds`` passes. In every pass the active player speaks
     first and each other living player may react; a pass in which nobody says
     anything ends the round, so quiet turns cost one pass while genuine
     exchanges (proposal, counter, acceptance) resolve within a single turn.
     Negotiation is followed by the decide/apply loop through the turn's phases,
     where a decision may carry one broadcast table-talk message alongside its
-    action; replies to it have to wait for the next negotiation round.
+    action; replies to it have to wait for the next negotiation session.
     A game that reaches ``max_turns`` without a completed mission is recorded
     as a draw. Setup placements happen before any negotiation, and their events
     are delivered only to the placing player, keeping starting placements blind.
@@ -69,6 +70,10 @@ class GameRunner:
     commentary is journaled and printed but never shown to the players, a member's
     failure yields no record for it that turn without affecting the others, and the
     panel never affects the game.
+
+    An optional research callback runs after the final turn of each gameplay
+    round has been committed and before the next turn begins. Its failure
+    pauses at that checkpoint, so resume retries the same round review.
     """
 
     def __init__(
@@ -84,6 +89,7 @@ class GameRunner:
         journal: JournalWriter | None,
         trace: TraceWriter | None,
         verbose: bool,
+        round_review: Callable[[int], None] | None = None,
     ) -> None:
         self._players = players
         # what the game starts each player knowing beyond the board; a resumed game's checkpoint
@@ -98,6 +104,7 @@ class GameRunner:
         self._journal = journal
         self._trace = trace
         self._verbose = verbose
+        self._round_review = round_review
         # per-game progress, (re)created by run()/resume()
         self._transcript = ChatTranscript()
         self._all_events: list[GameEvent] = []
@@ -170,9 +177,8 @@ class GameRunner:
                 checkpoint.restore_player(player, saved["players"][name])
         else:
             self._progress = self._initial_progress(restored.state.turn_number)
-            self._progress["legacy_assumptions"] = list(restored.recovery_limitations)
             self._sequence = 0
-            self._commit(restored.state, restored.rng, "legacy_reconstruction")
+            self._commit(restored.state, restored.rng, "setup")
         return self._play(state=restored.state, rng=restored.rng)
 
     def _reset_progress(self, transcript: ChatTranscript) -> None:
@@ -248,15 +254,39 @@ class GameRunner:
             self._commit(state, rng, "setup")
         while self._progress["stage"] != "done":
             stage = self._progress["stage"]
+            if stage in {"decision_request", "negotiation_request", "note_request"}:
+                # Persist this identity across pauses and pending response delivery.
+                self._progress.setdefault("decision_id", f"decision-{self._sequence}")
+                self._progress.setdefault(
+                    "decision_context",
+                    {
+                        "phase": str(state.phase),
+                        "round": state.round_number,
+                        "recorded_turn": state.turn_number,
+                    },
+                )
+            if self._journal is not None:
+                self._journal.evidence_context = {
+                    "decision_id": self._progress.get("decision_id"),
+                    **self._progress.get(
+                        "decision_context",
+                        {
+                            "phase": str(state.phase),
+                            "round": state.round_number,
+                            "recorded_turn": state.turn_number,
+                        },
+                    ),
+                }
             if self._journal is not None:
                 self._journal.begin_transition()
             try:
                 state = self._advance(state, rng)
-            except ProviderUnavailableError:
+            except ProviderUnavailableError as error:
                 # No effects from a failed call are published. Preserve its retry conversation,
                 # failure counters and exact request position for an ordinary later resume.
                 if self._journal is not None:
                     self._journal.abort_transition()
+                self._progress["pause_error"] = str(error)
                 self._commit(state, rng, "paused:" + stage)
                 raise
             except Exception:
@@ -264,6 +294,16 @@ class GameRunner:
                 if self._journal is not None:
                     self._journal.abort_transition()
                 raise
+            self._progress.pop("pause_error", None)
+            if self._progress.get("stage") in {
+                "route",
+                "commentary",
+                "decision_request",
+                "negotiation_request",
+                "note_request",
+            }:
+                self._progress.pop("decision_id", None)
+                self._progress.pop("decision_context", None)
             self._commit(state, rng, stage)
         return GameRecord(
             seed=self._seed,
@@ -327,6 +367,7 @@ class GameRunner:
                 p["pending"] = None
                 p.pop("message_override_index", None)
                 p["speaker"] += 1
+                p.pop("decision_id", None)
                 if p["speaker"] == len(p["order"]):
                     p["pass"] = p["pass"] + 1 if p["spoke"] else self._max_negotiation_rounds
                     p.update(speaker=0, spoke=False)
@@ -369,7 +410,10 @@ class GameRunner:
                         self._journal.write_action(
                             p["actor"],
                             action,
-                            origin="human" if p.get("action_override_index") == p["action_index"] else None,
+                            origin="human"
+                            if p.get("action_override_index") == p["action_index"]
+                            or type(self._players[p["actor"]]).__name__ == "HumanPlayer"
+                            else "agent_choice",
                         )
                         self._journal.write_events(result.events)
                     self._record_events(state, result.events)
@@ -395,6 +439,7 @@ class GameRunner:
             p.pop("action_override_index", None)
             p.pop("message_override_index", None)
             p.update(stage="route", pending=None)
+            p.pop("decision_id", None)
         elif stage == "note_request":
             names = list(self._players)
             if p["commented_turn"] < 1 or p["note_index"] == len(names):
@@ -413,9 +458,15 @@ class GameRunner:
                 if self._journal is not None:
                     self._journal.write_note(p["actor"], p["commented_turn"], p["pending"])
             p.update(stage="note_request", pending=None, note_index=p["note_index"] + 1)
+            p.pop("decision_id", None)
         elif stage == "commentary":
             self._commentate(state, p["commented_turn"])
-            p.update(stage="route", commented_turn=state.turn_number)
+            completed_round = state.previous_round_number > 0 and state.round_number > state.previous_round_number
+            p.update(stage="round_review" if completed_round else "route", commented_turn=state.turn_number)
+        elif stage == "round_review":
+            if self._round_review is not None:
+                self._round_review(state.previous_round_number)
+            p["stage"] = "route"
         elif stage == "final_commentary":
             self._commentate(state, state.turn_number)
             p["stage"] = "result"
@@ -429,7 +480,7 @@ class GameRunner:
 
     def _set_trace(self, turn: int, kind: str) -> None:
         if self._trace is not None:
-            self._trace.set_context(turn=turn, kind=kind)
+            self._trace.set_context(turn=turn, kind=kind, decision_id=self._progress.get("decision_id"))
 
     def _record_events(self, state: GameState, events: tuple[GameEvent, ...]) -> None:
         self._all_events.extend(events)

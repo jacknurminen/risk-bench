@@ -11,14 +11,17 @@ from risk_bench.game.rules import validate_action
 from risk_bench.game.serialization import action_from_json, chat_message_from_json
 from risk_bench.game.types import Phase
 from risk_bench.runner import checkpoint
+from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.journal import (
     JournalWriter,
     _header_from_json,
+    expand_records,
     prefix_hash,
     raw_journal,
     select_prefix,
 )
 from risk_bench.specs import resolve_model
+from risk_bench.version import require_v3
 
 
 def fork_game(
@@ -35,11 +38,13 @@ def fork_game(
     continuation_seed: int | None = None,
 ) -> Path:
     # Read once: a live parent's subsequent growth cannot enter this branch.
-    prefix = select_prefix(raw_journal(source), cursor)
+    raw = raw_journal(source)
+    require_v3(raw[0])
+    prefix = select_prefix(raw, cursor)
     transitions = [r for r in prefix if r["type"] == "transition"]
     if not transitions:
         raise ValueError("Exact forks require execution checkpoints; this legacy cursor is unrecoverable.")
-    saved = copy.deepcopy(transitions[-1]["checkpoint"])
+    saved = copy.deepcopy(next(r["checkpoint"] for r in reversed(expand_records(prefix)) if r["type"] == "checkpoint"))
     state, rng = checkpoint.restore_engine(saved)
     p = saved["progress"]
     if state.phase is Phase.GAME_OVER or p["stage"] in {"done", "result", "final_commentary"}:
@@ -68,6 +73,8 @@ def fork_game(
     )
     discarded = None
     if redecide:
+        p.pop("decision_id", None)
+        p.pop("decision_context", None)
         if p["stage"] in {"action", "decision_thought", "decision_delivery", "decision_request"}:
             next_stage = "decision_request"
         elif p["stage"] in {"negotiation_request", "negotiation_thought", "negotiation_delivery"}:
@@ -200,6 +207,11 @@ def apply_additional_context(journal: Path, context: dict[str, str], append: boo
         ValueError: If the journal predates execution checkpoints, the game has already
             finished, or a player identity is unknown.
     """
+    with journal_control_lock(journal):
+        _apply_additional_context(journal, context, append)
+
+
+def _apply_additional_context(journal: Path, context: dict[str, str], append: bool) -> None:
     records = raw_journal(journal)
     transitions = [record for record in records if record["type"] == "transition"]
     if not transitions:
@@ -208,7 +220,9 @@ def apply_additional_context(journal: Path, context: dict[str, str], append: boo
     unknown = context.keys() - header.player_specs.keys()
     if unknown:
         raise ValueError(f"Unknown player identities: {sorted(unknown)}")
-    saved = copy.deepcopy(transitions[-1]["checkpoint"])
+    saved = copy.deepcopy(
+        next(r["checkpoint"] for r in reversed(expand_records(records)) if r["type"] == "checkpoint")
+    )
     if saved["progress"]["stage"] == "done":
         raise ValueError("This game has finished; there is no later prompt left to change.")
     saved["additional_context"] = _merged_context(

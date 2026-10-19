@@ -9,11 +9,12 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/theme.css">
 <link rel="stylesheet" href="/assets/reader/reader.css">
+<link rel="stylesheet" href="/assets/research-report.css">
 </head>
 <body>
 <header class="masthead">
   <div class="inner">
-    <div><span class="brand">risk-bench</span><small>evaluation reader</small></div>
+    <div><span class="brand">risk-bench v3</span> <small>research annotations</small></div>
     <div class="mastmeta">
       <span id="mastStatus"></span>
       <span style="color:#c7c1b3">·</span>
@@ -28,8 +29,25 @@
 
 <div class="shell">
   <aside class="rail">
+    {% if mission_cards %}
+    <details class="card missionReference">
+      <summary><span aria-hidden="true">ⓘ</span> Mission reference</summary>
+      <p>All possible mission cards. Each player has one secret mission.</p>
+      <p>Click a continent or card to briefly highlight it on the map.</p>
+      <ul tabindex="0" aria-label="Possible mission cards">
+        {% for mission in mission_cards %}
+        <li{% if mission.continents %} data-mission-continents="{{ mission.continents | e }}"{% endif %}>
+          {% for part in mission.parts -%}
+            {% if part.continent %}<button class="tlink missionContinent" type="button" data-place="{{ part.continent | e }}">{{ part.text | e }}</button>{% else %}{{ part.text | e }}{% endif %}
+          {%- endfor %}
+          {% if mission.continents %}<button class="missionMap" type="button" aria-label="Highlight {{ mission.continents | replace('_', ' ') | e }} on the map">Show on map</button>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
     <div class="section">
-      <div class="railHead"><span class="eyebrow">Players</span><span class="railHint">✓ = shown in feed</span></div>
+      <div class="railHead"><span class="eyebrow">Players</span></div>
       <button class="toggle missionToggle" id="missionToggle" type="button" role="switch" aria-checked="false" hidden>
         <span class="switch" aria-hidden="true"><span class="knob"></span></span>
         <span>Hide opponent missions</span>
@@ -37,18 +55,16 @@
       <div id="railPlayers"></div>
     </div>
     <div class="card filters">
-      <div id="axisSection">
-        <div class="flabel">Behaviour axis</div>
-        <div class="axisrow" id="axisRow"></div>
-      </div>
-      <div class="flabel">Min confidence</div>
-      <div class="seg" id="confSeg"></div>
+      <label class="flabel">Player<select id="actorFilter"></select></label>
+      <label class="flabel">Code<select id="codeFilter"></select></label>
+      <label class="flabel">Status<select id="statusFilter"></select></label>
+      <label class="flabel">Evidence basis<select id="basisFilter"></select></label>
       <div class="flabel">Annotators</div>
       <div id="annList" style="display:flex;flex-direction:column;gap:5px;margin-bottom:16px"></div>
       <div class="toggle" id="privToggle" style="margin-top:0"><span class="switch"><span class="knob"></span></span>
         <span class="mono" style="font-size:11.5px">Private layers (thoughts · notes)</span></div>
       <div class="toggle" id="commToggle"><span class="switch"><span class="knob"></span></span>
-        <span class="mono" style="font-size:11.5px">Live commentary</span></div>
+        <span class="mono" style="font-size:11.5px">Show research annotations</span></div>
     </div>
   </aside>
 
@@ -88,6 +104,12 @@
     <section class="card humanTurn" id="humanTurn" hidden aria-labelledby="humanTitle">
       <div class="notesHead"><span class="serif" id="humanTitle">Your turn</span><span class="mono humanContext" id="humanContext"></span></div>
       <p id="humanHint" aria-live="polite"></p><p id="humanHelp"></p>
+      <details class="humanHand"><summary>Turns, rounds &amp; commitments</summary>
+        <p>A turn is one player's reinforcement, attack and fortification sequence. A round is one pass
+          through the seating order, skipping eliminated players. Round 1 begins after setup.</p>
+        <p>Negotiation sessions happen before each turn. Use clear deadlines such as “until the end of
+          round 4” or “until the start of your next turn” when making agreements.</p>
+      </details>
       <div id="humanLiveNotice" hidden><span>Return to the live board to continue your turn. Your draft is saved.</span>
         <button class="btn" id="humanGoLive" type="button">Return to live board</button></div>
       <p id="humanContextNote" hidden></p>
@@ -133,14 +155,6 @@
     </section>
     {% endif %}
 
-    <details class="readerAnalysis" id="readerAnalysis" open>
-    <summary>Game analysis</summary>
-    <section class="card evalBar" id="evalBar" hidden></section>
-    <section class="card ctaCard" id="evalCta" hidden></section>
-    <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
-
-    </details>
-
     <div class="subbar">
       <div><span class="count" id="turnCount"></span><span class="sub" id="subStat"></span></div>
       <div style="display:flex;align-items:center;gap:6px">
@@ -151,6 +165,11 @@
     </div>
 
     <div id="timeline"></div>
+    <div class="timelineResearch" aria-label="Research evaluation">
+      <section class="card evalBar" id="evalBar" hidden></section>
+      <section class="card ctaCard" id="evalCta" hidden></section>
+      <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+    </div>
     </section>
   </main>
   {% if human_url %}
@@ -173,6 +192,12 @@
     <div id="overviewSheet">
       <div id="statsLegend"></div>
       <div id="charts"></div>
+      <section id="playerOutput" aria-labelledby="outputHeading">
+        <h3 id="outputHeading">Player output</h3>
+        <p id="outputNote" class="statNote"></p>
+        <div id="outputCharts"></div>
+        <div class="researchTable"><table id="outputTable" class="statsTable" aria-label="Player output totals"></table></div>
+      </section>
       <div id="commentaryStats">
         <div id="memberToggles"></div>
         <div id="agreementFilter"></div>
@@ -251,6 +276,7 @@ window.BOOT = {
 <script src="/assets/reader/shell.js"></script>
 <script src="/assets/reader/stats.js"></script>
 <script src="/assets/reader/evalstats.js"></script>
+<script src="/assets/research-report.js"></script>
 <script src="/assets/reader/export.js"></script>
 <script src="/assets/reader/fork.js"></script>
 <script src="/assets/reader/main.js"></script>

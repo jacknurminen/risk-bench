@@ -13,7 +13,7 @@ const ANALYSIS_URL = window.BOOT.urls.analysis;
 let gameRunning = window.BOOT.live_running;  // whether the game's worker is currently playing (live games only)
 // which evaluation run is being viewed: "" follows the current (newest) run — so a re-run or a live
 // game's fresh evaluation shows automatically — while a specific run id pins an older archived run.
-let selectedVersion = "";
+let selectedVersion = typeof location !== "undefined" ? new URLSearchParams(location.search).get("version") || "" : "";
 const viewedVersionRunId = () => selectedVersion || null;
 
 
@@ -24,6 +24,7 @@ const MEMBER_COLORS = ["#7a6a55","#4a7a6e","#8a6f9e","#9e6a4a","#5a7a3c","#3c6a8
 GAME.notes ??= []; GAME.commentary ??= []; GAME.commentators ??= [];
 const steps = GAME.steps;
 const humanPlayers = new Set(GAME.human_players || []);
+let researchVisibilityChosen = false;
 let hideOpponentMissions = false;
 try { hideOpponentMissions = localStorage.getItem("risk-bench:hide-opponent-missions") === "true"; } catch {}
 let index = 0, timer = null;
@@ -31,13 +32,14 @@ let index = 0, timer = null;
 const el = id => document.getElementById(id);
 const pretty = name => (name ?? "").replaceAll("_", " ");
 const placeName = name => pretty(name).replace(/\b\w/g, letter => letter.toUpperCase());
+const gameTimeLabel = (turn, round) => turn === 0 ? "Setup" : `${round ? `Round ${round} · ` : ""}Turn ${turn}`;
 let humanPending = false;
 function readerStatus() {
   if (GAME.result) return GAME.result.winner ? "Game over" : "Draw";
   if (!gameRunning) return "Paused";
   return humanPending ? "Waiting for you" : "Agents playing";
 }
-const escapeHtml = t => (t ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+const escapeHtml = t => (t ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("\'", "&#39;");
 
 /* ---- player identity ---- */
 const seatOf = {}; GAME.players.forEach((p, seat) => seatOf[p.name] = seat);
@@ -63,58 +65,33 @@ const PLACE_PATTERN = new RegExp("\\b(" + [...Object.keys(steps[0].board), ...GA
   .sort((a, b) => b.length - a.length).join("|") + ")\\b", "g");
 const richText = t => colorizeNames(t).replace(PLACE_PATTERN, m => `<span class="tlink" data-place="${m}">${m}</span>`);
 
-/* ---- behaviour vocabulary + valence ---- */
-const VOCAB = {}; (EVAL.vocabulary || []).forEach(v => VOCAB[v.behavior] = v);
-const axisOf = b => VOCAB[b]?.axis ?? "conduct";
-const valenceOf = b => EVAL.tag_valence?.[b] ?? null;
-const AXES = [["skill", "Game skill", "var(--axis-skill)"], ["conduct", "Social conduct", "var(--axis-conduct)"], ["affect", "Affect", "var(--axis-affect)"]];
-const AXIS_COLOR = { skill: "var(--axis-skill)", conduct: "var(--axis-conduct)", affect: "var(--axis-affect)" };
-const VALENCE_COLORS = { cooperative: ["var(--coop)", "var(--coop-tint)"], strong: ["var(--coop)", "var(--coop-tint)"],
-  adversarial: ["var(--adversarial)", "var(--adversarial-tint)"], weak: ["var(--gold)", "#f6eede"],
-  deceptive: ["var(--deceptive)", "var(--deceptive-tint)"] };
-function valenceStyle(behavior) { return VALENCE_COLORS[valenceOf(behavior)] ?? ["var(--neutral)", "var(--neutral-tint)"]; }
-
-/* ---- code-grain projection: roll a behavior code up the taxonomy, entirely client-side ----
-   The vocabulary ships each code's subfamily and family alongside its axis, so re-grouping the
-   same tags at a coarser grain is a lookup, never a server round-trip or a re-evaluation. */
-const CODE_GRAINS = ["behavior", "subfamily", "family", "axis"];
-const LOCUS_GRAINS = ["span", "turn", "game"];
-const projectCode = (behavior, grain) => grain === "behavior" ? behavior : (VOCAB[behavior]?.[grain] ?? behavior);
-/* per grain, each grouping key's axis and valence — null when the key's codes mix (a mixed key
-   is a frequency bucket: charted as a count, never scored or valence-coloured) */
-const GRAIN_KEY_INFO = {};
-CODE_GRAINS.forEach(grain => {
-  const byKey = GRAIN_KEY_INFO[grain] = {};
-  Object.values(VOCAB).forEach(v => {
-    const info = byKey[projectCode(v.behavior, grain)] ??= { axis: v.axis, valence: v.valence };
-    if (info.axis !== v.axis) info.axis = null;
-    if (info.valence !== v.valence) info.valence = null;
-  });
-});
-const axisAtGrain = (key, grain) => grain === "behavior" ? axisOf(key) : (GRAIN_KEY_INFO[grain]?.[key]?.axis ?? null);
-const valenceAtGrain = (key, grain) => grain === "behavior" ? valenceOf(key) : (GRAIN_KEY_INFO[grain]?.[key]?.valence ?? null);
-const valenceStyleAtGrain = (key, grain) =>
-  VALENCE_COLORS[valenceAtGrain(key, grain)] ?? ["var(--neutral)", "var(--neutral-tint)"];
-
-/* ---- annotators (the LLM panel; humans verify its tags rather than authoring their own) ---- */
+/* Research units are identified within one evaluator run. */
 const annotators = () => EVAL.annotators || [];
 const annotatorColor = idx => MEMBER_COLORS[idx % MEMBER_COLORS.length];
-const annotatorLabel = idx => (annotators().find(a => a.index === idx) || {}).label || "evaluator";
-const annotatorBadge = idx => annotatorLabel(idx)[0].toUpperCase();
-
-/* every tag from every panel member, flattened and stamped with who authored it */
-function allTags() {
-  const out = [];
-  (EVAL.members || []).forEach(m => (m.tags || []).forEach(t => out.push({ ...t, annotator: m.index })));
-  return out;
+const annotatorLabel = idx => annotators().find(a => a.index === idx)?.label || "evaluator";
+const isThesisSchema = () => EVAL.tag_schema === "commitments_deception_v4";
+const isTwoTagSchema = () => isThesisSchema() || EVAL.tag_schema === "two_tag_v3";
+const allUnits = () => (EVAL.members || []).flatMap(m =>
+  (isThesisSchema() ? ["deceptions", "commitments"] : isTwoTagSchema() ? ["statements", "commitments"] : ["agreements", "episodes", "claims"]).flatMap(kind => (m[kind] || []).map(u =>
+    ({...u, kind: kind.slice(0,-1), annotator: m.index}))));
+const unitVisible = u => u.members ? u.members.some(unitVisible) : state.filters.annotators.has(u.annotator)
+  && (!state.filters.kind || u.kind === state.filters.kind)
+  && (!state.filters.validOnly || u.valid)
+  && (!state.filters.actor || u.actor === state.filters.actor || u.initiator === state.filters.actor ||
+    u.members?.some(m => m.actor === state.filters.actor))
+  && (!state.filters.code || (u.codes || []).includes(state.filters.code))
+  && (!state.filters.status || u.status === state.filters.status ||
+    u.members?.some(m => m.status === state.filters.status))
+  && (!state.filters.basis || (state.filters.basis === "unknown" ? u.basis == null : u.basis === state.filters.basis || u.contradictions?.some(b => b.basis === state.filters.basis)));
+const unitKey = u => u.annotator + ":" + u.kind + ":" + u.id;
+function unitCitations(value) {
+  if (Array.isArray(value)) return value.flatMap(unitCitations);
+  if (!value || typeof value !== "object") return [];
+  if ("span" in value && ("quote" in value || "field_path" in value)) return [value];
+  return Object.values(value).flatMap(unitCitations);
 }
-function tagVisible(t) {
-  return state.filters.axes.has(axisOf(t.behavior)) && t.confidence >= state.filters.minConf
-    && state.filters.annotators.has(t.annotator);
-}
-
 /* ---- trace spans grouped by turn (rebuilt on every evaluation refresh, so the trace grows live) ---- */
-let spanById = new Map(), spansByTurn = new Map(), turns = [], actorByTurn = {}, lastNoteSpanByPlayer = {};
+let spanById = new Map(), spansByTurn = new Map(), turns = [], actorByTurn = {}, roundByTurn = {}, lastNoteSpanByPlayer = {};
 function rebuildTrace() {
   spanById = new Map((EVAL.spans || []).map(s => [s.span, s]));
   spansByTurn = new Map();
@@ -123,7 +100,9 @@ function rebuildTrace() {
   // the acting player of a turn is whoever the engine had take the board actions — not whoever
   // happened to speak first during negotiation (which was pinning every card to one player)
   actorByTurn = {};
+  roundByTurn = {};
   steps.forEach(s => { if (s.current_player != null) actorByTurn[s.turn] = s.current_player; });
+  steps.forEach(s => { if (s.round != null) roundByTurn[s.turn] = s.round; });
   // remember each player's most recent note span; only that one stays in the feed (spans are in order)
   lastNoteSpanByPlayer = {};
   (EVAL.spans || []).forEach(s => { if (s.layer === "note" && s.player != null) lastNoteSpanByPlayer[s.player] = s.span; });
@@ -170,13 +149,13 @@ function turnSummary(turn) {
 
 /* ---- reader state ---- */
 const state = {
-  expanded: new Set(), openPrivate: new Set(), openAnno: new Set(), openEvidence: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
+  expanded: new Set(), openPrivate: new Set(), openAnno: new Set(), openEvidence: new Set(), openUnits: new Set(), mode: "read", focusTurn: turns[0] ?? 0,
   filters: {
-    axes: new Set(["skill", "conduct", "affect"]), minConf: 1,
+    actor: "", code: "", status: "", basis: "", kind: "", validOnly: false,
     annotators: new Set(annotators().map(a => a.index)),
-    showPrivate: true, showCommentary: true,
+    showPrivate: true, showCommentary: !(humanPlayers.size && !GAME.result),
   },
-  drawer: null,
+  drawer: null, unitDrawer: null, openTagEvidence: false,
 };
 // annotators the filter set has already decided on; lets a panel that finishes after page
 // load default to visible without re-enabling members the viewer explicitly hid

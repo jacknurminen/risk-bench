@@ -28,6 +28,7 @@
   .launchCard { padding: 18px 20px; }
   .row { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
   label { font-family: var(--font-mono); font-size: 11px; color: var(--mute); }
+  #evaluationMethodHint { font-size: 12px; color: var(--mute); }
   select, input[type=number], input[type=text] {
     background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 5px;
     padding: 6px 8px; font: 12px var(--font-mono); }
@@ -109,7 +110,7 @@
 <body>
 <header class="masthead">
   <div class="inner">
-    <div class="brand"><span class="dice">⚂</span> risk-bench</div>
+    <div class="brand"><span class="dice">⚂</span> risk-bench v3</div>
     <div class="tagline">strategy · diplomacy · deception — language models playing Risk</div>
   </div>
 </header>
@@ -124,23 +125,33 @@
     </div>
     <div class="sectionLabel">Additional context
       <span class="hint">— information every player is given from the first turn, rendered into their prompts
-        alongside the board and the chat. Use the 📝 button on a seat to add something only that player knows.</span></div>
+        alongside the board and the chat. Use a player's 📝 button to add something only that player knows.</span></div>
     <textarea class="context" id="commonContext" rows="2"
       placeholder="e.g. a rule of thumb, or background about the table — the same for everyone"></textarea>
-    <div class="sectionLabel">Commentator panel
-      <span class="hint">— each member annotates the whole game over the full vocabulary; every member's tags are
-        kept so you can read inter-annotator agreement. Leave empty for no commentary.</span></div>
-    <div id="commentatorRows"></div>
-    <div class="row">
-      <button class="subtle" id="addCommentator">+ add commentator</button>
-    </div>
+    <div class="sectionLabel">Research evaluation
+      <span class="hint">— choose a method and evaluator. Choose Off to skip evaluation.</span></div>
+    <fieldset class="evaluationMethodToggle">
+      <legend>Evaluation method</legend>
+      <label><input type="radio" name="evaluationMethod" value="live_rounds" checked><span>Live</span></label>
+      <label><input type="radio" name="evaluationMethod" value="whole_game"><span>Whole game</span></label>
+    </fieldset>
+    <p class="hint" id="evaluationMethodHint">Reviews each completed round during play; the game waits for each review.</p>
+    <div class="playerRow" id="evaluatorRow"></div>
     <div class="row">
       <label>seed <input type="number" id="seed" value="0" style="width:90px"></label>
       <label>max turns <input type="number" id="maxTurns" placeholder="default" style="width:90px"></label>
-      <label title="above 1 launches a tournament: the same setup replicated on consecutive seeds">
+      <label title="total games in the tournament, on consecutive seeds">
+        total games <input type="number" id="totalGames" value="1" min="1" max="1000" style="width:70px"></label>
+      <label title="maximum game workers running at once, including automatic evaluation">
         parallel games <input type="number" id="parallelGames" value="1" min="1" max="20" style="width:70px"></label>
-      <button id="launch">▶ start game</button>
     </div>
+    <fieldset class="evaluationMethodToggle">
+      <legend>Seating</legend>
+      <label><input type="radio" name="seatingMode" value="random" checked><span>Random</span></label>
+      <label><input type="radio" name="seatingMode" value="cycle" id="seatingCycle"><span>Cycle</span></label>
+    </fieldset>
+    <p class="hint">Cycle runs through every seat order in turn. With three players and 12 games, each order runs twice.</p>
+    <div class="row"><button id="launch">▶ start game</button></div>
     <div id="launchError"></div>
     </div>
   </div>
@@ -176,7 +187,7 @@ const PROVIDER_LOGOS = {
   google: "/assets/google-gemini.png",
   openai: "/assets/openai.png",
 };
-const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI" };
+const PROVIDER_LABELS = { anthropic: "Anthropic", google: "Google", openai: "OpenAI", off: "Off" };
 const DEFAULT_EFFORT = "low";
 
 let modelsByProvider = {};
@@ -188,6 +199,21 @@ async function loadModels() {
   modelsByProvider = catalog.models_by_provider;
   providers = Object.keys(modelsByProvider);
   efforts = catalog.efforts;
+  const evaluatorProvider = (modelsByProvider.openai || []).some(model => model.id === "gpt-6-luna")
+    ? "openai" : providers[0];
+  const evaluatorModel = evaluatorProvider === "openai" ? "gpt-6-luna" : defaultModel(evaluatorProvider);
+  const evaluatorRow = el("evaluatorRow");
+  evaluatorRow.innerHTML = `<span class="seat">model</span>
+    <div class="providerPicker">${["off", ...providers].map(name => providerTile(name, name === evaluatorProvider)).join("")}</div>
+    <select class="modelSelect">${modelOptions(evaluatorProvider, evaluatorModel)}</select>
+    <select class="effortSelect">${effortOptions("medium")}</select>`;
+  evaluatorRow.querySelectorAll(".providerTile").forEach(tile =>
+    tile.onclick = () => selectProvider(evaluatorRow, tile.dataset.provider));
+  document.querySelectorAll('input[name="evaluationMethod"]').forEach(input => input.onchange = () => {
+    el("evaluationMethodHint").textContent = input.value === "live_rounds"
+      ? "Reviews each completed round during play; the game waits for each review."
+      : "Analyzes the full record automatically after the game finishes.";
+  });
   addPlayerRow(); addPlayerRow(); addPlayerRow();
 }
 
@@ -219,7 +245,7 @@ function addPlayerRow() {
   const provider = providers[0];
   const row = document.createElement("div");
   row.className = "playerRow";
-  row.innerHTML = `<span class="seat">seat ${rows.children.length + 1}</span>
+  row.innerHTML = `<span class="seat">player ${rows.children.length + 1}</span>
     <div class="providerPicker">${[...providers, "human"].map(name => providerTile(name, name === provider)).join("")}</div>
     <select class="modelSelect">${modelOptions(provider, defaultModel(provider))}</select>
     <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
@@ -248,52 +274,40 @@ function selectProvider(row, provider) {
     tile.classList.toggle("active", tile.dataset.provider === provider));
   // model ids belong to one provider, so there is no selection to carry across; switching
   // providers falls back to that provider's first (most capable) model
-  const baseline = provider === "human" || provider === "random";
+  const baseline = provider === "human" || provider === "random" || provider === "off";
   row.querySelector(".modelSelect").hidden = baseline;
   row.querySelector(".effortSelect").hidden = baseline;
+  row.querySelector(".modelSelect").disabled = baseline;
+  row.querySelector(".effortSelect").disabled = baseline;
   row.querySelector(".modelSelect").innerHTML = modelOptions(provider, defaultModel(provider));
 }
 
 function renumber() {
   document.querySelectorAll("#playerRows .seat")
-    .forEach((seat, i) => seat.textContent = `seat ${i + 1}`);
-}
-
-// A commentator-panel row reuses the player row's provider/model/effort controls; a member
-// is just another provider:model:effort spec. The panel may hold any number (0 = no commentary).
-function addCommentatorRow() {
-  const provider = providers[0];
-  const row = document.createElement("div");
-  row.className = "playerRow commentatorRow";
-  row.innerHTML = `<span class="seat">🎙️</span>
-    <div class="providerPicker">${providers.map(name => providerTile(name, name === provider)).join("")}</div>
-    <select class="modelSelect">${modelOptions(provider, defaultModel(provider))}</select>
-    <select class="effortSelect">${effortOptions(DEFAULT_EFFORT)}</select>
-    <button type="button" class="subtle remove">✕</button>`;
-  row.querySelectorAll(".providerTile").forEach(tile =>
-    tile.onclick = () => selectProvider(row, tile.dataset.provider));
-  row.querySelector(".remove").onclick = () => row.remove();
-  el("commentatorRows").appendChild(row);
+    .forEach((seat, i) => seat.textContent = `player ${i + 1}`);
 }
 
 const specFromRow = row => {
   const provider = row.querySelector(".providerTile.active").dataset.provider;
-  if (provider === "human" || provider === "random") return provider;
+  if (provider === "human" || provider === "random" || provider === "off") return provider;
   return `${provider}:${row.querySelector(".modelSelect").value}:${row.querySelector(".effortSelect").value}`;
 };
 
 async function launch() {
   el("launchError").textContent = "";
   const players = [...document.querySelectorAll("#playerRows .playerRow")].map(specFromRow);
-  const commentators = [...document.querySelectorAll("#commentatorRows .commentatorRow")].map(specFromRow);
   const playerContext = [...document.querySelectorAll("#playerRows .playerRow")]
     .map(row => row.querySelector(".rowContext textarea").value.trim());
+  const evaluator = specFromRow(el("evaluatorRow"));
   const body = {
     players,
+    evaluators: evaluator === "off" ? [] : [evaluator],
+    evaluation_method: document.querySelector('input[name="evaluationMethod"]:checked').value,
     seed: Number(el("seed").value) || 0,
-    commentators,
     max_turns: el("maxTurns").value ? Number(el("maxTurns").value) : null,
+    games: Number(el("totalGames").value) || 1,
     parallel_games: Number(el("parallelGames").value) || 1,
+    seating_mode: el("seatingCycle").checked ? "cycle" : "random",
     common_context: el("commonContext").value.trim(),
     // one entry per seat, in the same order as `players`; all empty means nobody is told anything extra
     player_context: playerContext.some(Boolean) ? playerContext : [],
@@ -387,15 +401,18 @@ const avgPerTurnCell = (inputTokens, outputTokens, cost, turns) => {
 
 function gameRow(game, child) {
   const started = new Date(game.modified_at).toLocaleString();
-  const status = game.finished
+  const status = game.queued ? '<span class="status paused">queued</span>'
+    : game.finished && game.running ? '<span class="status live">● evaluating</span>' : game.finished
     ? '<span class="status done">finished</span>'
     : game.running
       ? '<span class="status live">● running</span>'
-      : '<span class="status paused">⏸ paused</span>';
-  const runControl = game.finished ? "" : game.running
+      : `<span class="status paused">${game.started === false ? "not started" : "⏸ paused"}</span>`;
+  const runControl = game.queued
+    ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">cancel queue</button>`
+    : game.finished ? "" : game.running
     ? `<button class="tiny subtle" onclick="gameAction(event, '${game.id}', 'pause')">⏸ pause</button>`
-    : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">▶ resume</button>`;
-  const deleteControl =
+    : `<button class="tiny" onclick="gameAction(event, '${game.id}', 'resume')">${game.started === false ? "▶ start" : "▶ resume"}</button>`;
+  const deleteControl = game.queued ? "" :
     `<button class="tiny subtle danger" onclick="confirmDelete(event, '${game.id}')" title="delete this game">🗑</button>`;
   const control = `${runControl} ${deleteControl}`;
   const winner = game.winner ? `<span class="winner">${game.winner}</span>` : (game.finished ? "draw" : "—");
@@ -404,7 +421,7 @@ function gameRow(game, child) {
   const first = child ? `seed ${game.seed}` : started;
   const players = child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`;
   const turn = game.turn_count == null ? "—" : game.finished ? game.turn_count : `${game.turn_count}…`;
-  return `<tr class="game${child ? " child" : ""}" onclick="location.href='/games/${game.id}'">
+  return `<tr class="game${child ? " child" : ""}" ${game.started === false ? "" : `onclick="location.href='/games/${game.id}'"`}>
     <td>${first}</td><td>${players}</td>
     <td>${status}</td><td>${winner}</td><td class="num">${turn}</td>
     <td class="num">${tokensCell(game.input_tokens, game.output_tokens)}</td>
@@ -416,10 +433,12 @@ function gameRow(game, child) {
 function tournamentRows(tournament, games) {
   const expanded = expandedTournaments.has(tournament.id);
   const running = games.filter(game => game.running).length;
-  const finished = games.filter(game => game.finished).length;
-  const paused = games.length - running - finished;
+  const finished = games.filter(game => game.finished && !game.running).length;
+  const queued = games.filter(game => game.queued).length;
+  const paused = games.length - running - finished - queued;
   const status = [
     running ? `<span class="status live">● ${running} running</span>` : "",
+    queued ? `<span class="status paused">${queued} queued</span>` : "",
     paused ? `<span class="status paused">⏸ ${paused} paused</span>` : "",
     finished ? `<span class="status done">${finished} finished</span>` : "",
   ].filter(Boolean).join(" ");
@@ -436,7 +455,7 @@ function tournamentRows(tournament, games) {
   const header = `<tr class="game" onclick="toggleTournament('${tournament.id}')">
     <td><span class="caret">${expanded ? "▾" : "▸"}</span>${started}</td>
     <td><span class="trophy">🏆</span>${tournament.players.join(", ")}${mic}
-      <span style="color:var(--mute)"> — ${games.length} games</span></td>
+      <span style="color:var(--mute)"> — ${tournament.game_ids.length} games · ${tournament.parallel_games} at once</span></td>
     <td>${status}</td><td>${winners}</td><td></td>
     <td class="num">${tokensCell(inputTokens, outputTokens)}</td>
     <td class="num">${costCell(cost)}</td>
@@ -472,7 +491,6 @@ async function loadGames() {
 }
 
 el("addPlayer").onclick = addPlayerRow;
-el("addCommentator").onclick = addCommentatorRow;
 el("launch").onclick = launch;
 loadModels(); loadGames();
 setInterval(loadGames, 5000);

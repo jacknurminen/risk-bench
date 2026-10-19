@@ -90,7 +90,6 @@ PLAYER_FIELDS = (
     "_retry_index",
     "additional_instructions",
     "_max_invalid_retries",
-    "_max_consecutive_provider_failures",
 )
 
 

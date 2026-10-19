@@ -5,7 +5,7 @@ const boardFrame = {};
 function renderBoardStatus() {
   const step = steps[index];
   const location = index === steps.length - 1 && !timer ? readerStatus() : "Replay";
-  el("status").textContent = `step ${index}/${steps.length - 1} · turn ${step.turn} · ${pretty(step.phase)} · ${location}`;
+  el("status").textContent = `step ${index}/${steps.length - 1} · ${gameTimeLabel(step.turn, step.round)} · ${pretty(step.phase)} · ${location}`;
 }
 
 /* Zoom the SVG itself so text stays sharp. Dragging never submits a territory click. */
@@ -123,7 +123,12 @@ function flashPlace(place) {
     shape.path.classList.remove("flash"); void shape.path.getBoundingClientRect(); shape.path.classList.add("flash");
   }
 }
-document.addEventListener("click", e => { const link = e.target.closest(".tlink"); if (link) flashPlace(link.dataset.place); });
+document.addEventListener("click", e => {
+  const link = e.target.closest(".tlink");
+  if (link) { flashPlace(link.dataset.place); return; }
+  const card = e.target.closest("[data-mission-continents]");
+  if (card) card.dataset.missionContinents.split(" ").forEach(flashPlace);
+});
 
 function show(newIndex) {
   index = Math.max(0, Math.min(steps.length - 1, newIndex));
@@ -141,7 +146,7 @@ function show(newIndex) {
     `<span style="color:${COLORS[seat]}${s.eliminated ? ";opacity:.45;text-decoration:line-through" : ""}">${tagOf(GAME.players[seat].name)} ${s.territories}▪ ${s.armies}⚔ ${s.cards}◈ +${s.income}</span>`).join("");
   el("slider").value = index;
   renderBoardStatus();
-  el("boardTurnLabel").textContent = "Board · turn " + String(step.turn).padStart(2, "0");
+  el("boardTurnLabel").textContent = "Board · " + gameTimeLabel(step.turn, step.round);
   state.focusTurn = step.turn;
   document.querySelectorAll(".tcard").forEach(card => card.classList.toggle("focus", Number(card.dataset.turn) === step.turn));
   // update rail stat lines
