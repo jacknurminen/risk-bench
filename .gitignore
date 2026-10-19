@@ -31,18 +31,11 @@ designs/
 # IDE
 .idea/
 
-# Thesis report: keep sources, exclude the heavy reference papers and LaTeX build artifacts
-docs/report/material/
-docs/report/thesis/thesis.pdf
-docs/report/**/*.aux
-docs/report/**/*.log
-docs/report/**/*.out
-docs/report/**/*.toc
-docs/report/**/*.lof
-docs/report/**/*.lot
-docs/report/**/*.bbl
-docs/report/**/*.blg
-docs/report/**/*.fls
-docs/report/**/*.fdb_latexmk
-docs/report/**/*.synctex.gz
-docs/report/**/*.run.xml
+# Research drafts and development notes live in the private thesis repository.
+/docs/report/
+/docs/log/
+/docs/plan.md
+/docs/forking-implementation-handoff.md
+/client-redesign-plan.md
+/evaluator-panel-plan.md
+/notepad-memory-plan.md

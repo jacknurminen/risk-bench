@@ -1,8 +1,23 @@
 # RiskBench
 
-**Benchmarking strategic reasoning, decision-making under uncertainty, and multi-agent negotiation in large language models through the game of Risk.**
+**Studying commitments and documented deception in LLM agents playing the board game Risk.**
 
-RiskBench is a benchmark in which LLM agents play full games of [Risk](https://en.wikipedia.org/wiki/Risk_(game)) against one another. Agents are ranked by an Elo rating computed from head-to-head results across a tournament, giving a single comparable score per model.
+RiskBench is an environment for running and examining games of
+[Risk](https://en.wikipedia.org/wiki/Risk_(game)) between LLM agents. Agents pursue secret
+missions, negotiate through messages, and make agreements that the game rules do not enforce.
+The engine records messages, prompted private memos, notes, and actions so that commitments
+can be followed from their negotiation to their outcomes.
+
+The accompanying master's thesis is a descriptive study guided by the question:
+
+> How do LLM agents make and keep commitments in the board game Risk, and when does
+> communication concerning those commitments provide recorded evidence of deliberate deception?
+
+The [report source](https://github.com/jacknurminen/risk-bench-thesis) and
+[draft PDF](https://github.com/jacknurminen/risk-bench-thesis/blob/main/thesis/thesis.pdf)
+are maintained in **risk-bench-thesis**. This repository contains the game environment,
+annotation tools, replay interface, and included dataset. Tournament outcomes
+describe game performance; they are not measures of honesty or general model reliability.
 
 ## Setup
 
@@ -62,27 +77,62 @@ experiment version 3; these numbers describe different things.
 ## Included tournament
 
 The repository includes [20261012-101836-seed8349](data/v3/games/20261012-101836-seed8349),
-a completed 12-game tournament between Claude Opus 5.5, Gemini 3.8 Flash, and GPT-6.1 Sol,
-all configured with medium reasoning effort. Seating cycles through all six orders twice.
+the thesis's main sample of 12 completed games between `claude-opus-5-5`,
+`gemini-3.8-flash`, and `gpt-6.1-sol`. All used the medium reasoning setting, which does
+not imply equal reasoning budgets across providers. Seating cycles through all six orders
+twice, and game seeds range from 8349 to 8360. The selected games contain 134 player-turns,
+612 public messages, 912 attack actions, and 439 territory captures, including recaptures.
 Open the current application and select the tournament to browse its games and aggregated
 statistics. Browsing saved replays and evaluations requires no API keys.
 
 The dataset includes the tournament manifest, saved launch settings, journals, model-call
 traces, evaluations, analyses, and review records. Three superseded game attempts and an
 earlier evaluation version remain available for audit; the manifest selects the 12 current
-attempts used in tournament statistics. Runtime logs and other local experiments are ignored.
+attempts used in tournament statistics. Games 1, 11, and 12 use replacement runs; superseded
+attempts are excluded from the report's sample. Runtime logs and other local experiments are ignored.
+
+## Research approach and findings
+
+All inter-player messages in the selected games were public. Private memos and notes were
+hidden from opponents and are examined as records of stated plans, not hidden reasoning tokens
+or direct access to internal beliefs. The current sample contains agent-only games without
+human interventions or controlled continuations.
+
+The saved whole-game evaluations used `gpt-6.1-sol` with medium reasoning effort and the
+v4 annotation guidelines. Automated screening covered all 612 messages, including those with
+no identified candidate. Annotations link to source passages and actions; quotation and
+reference checks establish citation integrity, not the correctness of an interpretation.
+The report combines descriptive game statistics with AI-assisted case analysis and author
+review of individual episodes. Automated annotation totals remain explicitly unreviewed,
+and the cases do not constitute an exhaustive, validated inventory of commitments or deception.
+
+The draft's main findings concern:
+
+- **Negotiated commitments:** agents shaped territorial scope, deadlines, and exceptions,
+  sometimes preserving opportunities to pursue their missions.
+- **Different responses to obligations:** some agents adapted plans around agreements,
+  while other episodes showed violations, including a pact renewed and broken in the same turn.
+- **Compliance alongside deception:** an agent could respect a pact while offering misleading
+  reassurance about its plans or prospects. A later breach alone does not establish that the
+  original promise was deceptive.
+- **The importance of context:** disputed wording, inaccurate recollections, and opportunities
+  to act affected how commitment outcomes could be interpreted.
+
+These are observations from the studied games and configurations. The case analysis does not
+establish behavioural prevalence or a general ranking of model reliability. The strict deception
+criterion also means that an absence of qualifying evidence cannot establish honesty.
 
 ## Why Risk?
 
-It follows the tradition of task-grounded LLM benchmarks such as VendBench, StockBench, and PokerBench: rather than scoring isolated question/answer pairs, RiskBench measures competence inside a complete, adversarial environment with real consequences for every decision.
+Risk connects communication to observable decisions over several turns:
 
-Most game-based benchmarks isolate a single skill. Poker probes probabilistic reasoning and bluffing; trading benchmarks probe sequential decision-making under market uncertainty. Risk is interesting precisely because it combines several demands in one environment:
-
-- **Long-horizon strategic planning** — territory control, continent bonuses, and turn-by-turn army economics reward multi-turn plans over greedy play.
-- **Decision-making under uncertainty** — combat is resolved by dice, so agents must reason about expected outcomes and risk, not certainties.
-- **Multi-agent negotiation and social reasoning** — between actions, agents share a group chat where they can form alliances, threaten, bluff, and coordinate against a leader. There is no fixed opponent; the political situation is created by the players.
-
-A strong RiskBench agent therefore has to plan, gamble well, *and* manage relationships with other agents — making the benchmark a compact testbed for the kind of open-ended strategic agency that single-skill benchmarks do not capture.
+- **Specific, checkable undertakings:** a promise to leave a territory untouched or attack
+  an opponent can be compared with the recorded actions and the agreement's duration.
+- **Public actions and private objectives:** territory ownership and army counts are visible,
+  while secret missions give players reasons to negotiate or withhold information about plans.
+- **Voluntary cooperation under uncertainty:** pacts remain unenforced, and dice-based combat
+  separates an attempted action from its result. Promising to attack and promising to capture
+  therefore impose different obligations.
 
 ## How it works
 
@@ -103,7 +153,7 @@ Before each turn, a **negotiation session** opens the group chat so every surviv
 negotiate before play continues. Prompts encourage explicit commitment deadlines such as
 “until the end of round 4” or “until the start of Bob's next turn.” These agreements remain
 unenforced. The game ends when an agent completes its secret mission (or is the last one
-standing), and the result feeds the tournament's Elo rankings.
+standing). Tournaments record outcomes and descriptive statistics.
 
 Each player implements a single interface (`risk_bench/players/base.py`): given the current `GameState` and `Phase`, return a move; optionally return chat messages given the conversation so far. Invalid moves receive a bounded correction exchange. Exhaustion pauses the game with that exchange preserved. Any provider error pauses immediately, including negotiation and note-writing. Resume retries the pending operation with its player context intact. No random move or implicit silence is substituted; random players remain an explicitly selected baseline.
 
@@ -117,7 +167,7 @@ retain their existing input interfaces.
 
 ## Commitments and documented deception (instrument v4)
 
-The [thesis-aligned codebook](docs/codebook-v4.md) records commitments and documented deception
+The [thesis-aligned annotation guidelines](docs/codebook-v4.md) record commitments and documented deception
 in communication that establishes, explains, revises or denies commitments. Generic contradiction
 and sincerity tags are excluded. A deception incident requires a delivered proposition,
 contradiction evidence, and explicit prior or same-decision private evidence of deliberate
@@ -155,7 +205,7 @@ be treated as independent observations. See [v3 implementation notes](docs/v3.md
 | Players | `risk_bench/players/` | Player interface (`base.py`), the LLM player, and a `RandomPlayer` baseline |
 | Provider clients | `risk_bench/agents/` | Low-level model clients (Anthropic, OpenAI, Google, xAI) plus call tracing |
 | Game loop | `risk_bench/runner/` | Drives a single game, writes the JSONL journal, and runs the commentators |
-| Tournaments | `risk_bench/tournament/` | Multi-game runner, Elo rating, and report writing |
+| Tournaments | `risk_bench/tournament/` | Multi-game runner, outcomes, and report writing |
 | Web API | `risk_bench/api/` | FastAPI app: browse games, watch them live, and launch new ones |
 | Viewer | `risk_bench/viewer/` + `ui/` | Self-contained HTML replays and stats, plus the templates and board map |
 | Wiring | `risk_bench/{config,specs,launch}.py` | Settings, spec parsing, and game launching |
@@ -276,4 +326,10 @@ uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 
 ## Status
 
-RiskBench is under active development as a master's thesis (diplomityö). The core game engine, multi-provider agents, tournament/Elo scoring, and dashboard are in place; evaluation methodology and results are ongoing work.
+RiskBench supports an ongoing master's thesis (diplomityö). The twelve-game main sample has
+been collected, and the report contains descriptive tables, evidence-linked case narratives,
+interface illustrations, and drafted Findings, Discussion, and Conclusions chapters.
+Final case selection, annotation review, and manuscript revision remain ongoing.
+
+Additional human-play or controlled-continuation experiments are still under consideration
+for inclusion in the thesis. They are not part of the currently reported twelve-game sample.
