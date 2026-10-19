@@ -322,3 +322,21 @@ def test_private_negotiation_calls_are_rejected_when_disallowed():
     view = request_for_phase(phase=Phase.ATTACK, hand=[], private_messages_allowed=False).view
     with pytest.raises(InvalidToolCallError, match="not allowed"):
         parse_negotiation_tool_call(call=call("send_private_message", recipient=BOB, text="Psst"), view=view)
+
+
+@pytest.mark.parametrize("phase", [Phase.REINFORCE, Phase.ATTACK, Phase.FORTIFY])
+def test_only_action_and_public_message_signatures_require_a_private_memo(phase):
+    request = request_for_phase(phase=phase, hand=[], private_messages_allowed=True)
+    tools = [*tools_for_decision(request), *tools_for_negotiation(request.view)]
+    for tool in tools:
+        if tool.name in {"say_nothing", "send_private_message"}:
+            assert "private_memo" not in tool.parameters["properties"]
+            continue
+        assert "private_memo" in tool.parameters["required"]
+        memo = tool.parameters["properties"]["private_memo"]
+        assert memo["type"] == "string"
+        assert (memo["minLength"], memo["maxLength"]) == (1, 1200)
+    silence = next(tool for tool in tools if tool.name == "say_nothing")
+    assert silence.parameters["required"] == []
+    private_message = next(tool for tool in tools if tool.name == "send_private_message")
+    assert set(private_message.parameters["required"]) == {"recipient", "text"}

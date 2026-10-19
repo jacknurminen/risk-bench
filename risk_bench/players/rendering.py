@@ -96,10 +96,12 @@ def render_system_prompt(view: PlayerView) -> str:
         f"mission under the game rules.\n"
         f"For a board decision, call exactly one action tool and optionally one message tool. "
         f"For a negotiation opportunity, call a message tool or say_nothing; no board action is available.\n"
-        # Anthropic models refuse a system prompt that asks for "private reasoning" or "private
-        # thoughts"; the same sentence without that phrasing is accepted and means the same thing.
-        f"Before your tool calls, briefly state your reasoning as plain text. It is not shown to the "
-        f"other players; it is recorded only for post-game analysis."
+        "Every game action and send_public_message call requires a private_memo string argument "
+        "INSIDE its arguments: 1–1200 characters briefly stating what you intend and why. "
+        "say_nothing and send_private_message need no memo. To stay silent, call say_nothing({}). "
+        "Plain response text is optional and does not replace private_memo. "
+        "This is a brief decision summary, not hidden reasoning. It is not shown to other players. "
+        "The memo and all tool calls are validated before anything is executed or sent."
     )
 
 
@@ -174,8 +176,7 @@ def render_negotiation_prompt(view: PlayerView) -> str:
         _render_players(view=view),
         _render_board(view=view),
         f"Reminder of your secret mission: {view.own_mission.description}",
-        "Send a message to the other players, or say nothing. If anyone speaks, everyone gets "
-        "another chance to reply; staying silent helps end the session. Keep it short.",
+        "You may send a message or remain silent. Choose whichever best serves your game strategy.",
     ]
     return "\n\n".join(section for section in sections if section)
 

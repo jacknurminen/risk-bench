@@ -77,7 +77,7 @@ def test_negotiation_prompt_invites_a_message():
     system = render_system_prompt(view=request.view)
 
     assert "Negotiation session" in prompt
-    assert "Send a message" in prompt
+    assert "You may send a message or remain silent. Choose whichever best serves your game strategy." in prompt
     assert "For a negotiation opportunity, call a message tool or say_nothing" in system
     assert "Always act by calling exactly one action tool" not in system
 
