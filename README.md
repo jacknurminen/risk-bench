@@ -50,29 +50,7 @@ Start the web app:
 uv run python -m risk_bench.main serve --port 8420
 ```
 
-Open [http://localhost:8420](http://localhost:8420). V3 games are saved under `data/v3/games/`.
-
-## Versioned datasets
-
-The Git tag `v2` preserves the earlier game engine, evaluator, reader, and four
-example games under `data/v2/`. Those examples are no longer tracked on this branch;
-existing local copies remain usable. These experiment versions are separate from
-the schema version numbers inside individual files.
-
-To open the v2 application alongside ongoing development, use a separate checkout
-with its saved example dataset:
-
-```bash
-git worktree add --detach ../risk-bench-v2 v2
-cd ../risk-bench-v2
-uv sync
-uv run python -m risk_bench.main serve --port 8421
-```
-
-V3 uses fresh games in `data/v3/`. Existing v2 games belong to the v2 application;
-v3 rejects them even if copied into the new folder. It does not migrate, resume,
-or fork v2 games. The thesis commitment/deception codebook is instrument version 4 within
-experiment version 3; these numbers describe different things.
+Open [http://localhost:8420](http://localhost:8420). Games are saved under `data/v3/games/`.
 
 ## Included tournament
 
