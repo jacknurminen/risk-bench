@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     max_invalid_retries: int = 3
     # how many commentator-panel members may call their providers at once per commentary point
     max_concurrent_commentators: int = 4
+    # caps for one agent-judge member over one game; hitting either fails that member cleanly
+    max_agent_judge_turns: int = 600
+    max_agent_judge_budget_usd: float = 40.0
 
     # game and tournament defaults
     max_turns: int = 150

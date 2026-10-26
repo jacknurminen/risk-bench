@@ -207,5 +207,27 @@ usual validation. Remaining review flags stay visible. If a later correction fai
 structurally complete assessment is retained with its review flags and a correction note;
 runs with no complete assessment fail.
 
+### Agent judge
+
+Prefix an evaluator spec with `agent:` to use the agent judge instead, for example
+`--evaluator agent:anthropic:claude-opus-5-5:high` (efforts: low, medium, high, xhigh, max). In the
+web app, tick **run as agent** next to an Anthropic evaluator on the setup page, the game's evaluation
+panel or the tournament rerun panel. It evaluates whole games only; the toggle is disabled for Live
+and Replay rounds, and live round-by-round panels reject it. Rather than answering in one call,
+the agent pages through the observed trace with read-only tools, screens every message, and writes
+each commitment, history event, deception and candidate through tools that validate the codebook
+model and every citation straight away. It runs `check`, and `submit` is refused while a message is
+unscreened or a hard error (an unresolvable citation, a wrong passage, a dangling link) remains. The
+accepted ledger goes through the same merge and validation as the single-call judge, so both judges
+write the same sidecar records; the member status records `method: "agent_whole_game"` plus the
+agent's turns and cost.
+
+Anthropic models run through the Claude Agent SDK (its bundled Claude Code CLI) with every built-in
+tool switched off and only `ANTHROPIC_AALTO_API_KEY` for authentication. Other providers drive the
+same tools through the ordinary tool-calling loop, e.g. `agent:openai:gpt-6-sol:high`. Each turn is
+logged to `game.eval.trace.jsonl` like other evaluator calls. `MAX_AGENT_JUDGE_TURNS` (default 600)
+and `MAX_AGENT_JUDGE_BUDGET_USD` (default 40) cap one member on one game; hitting either fails that
+member without saving partial findings.
+
 Prior evaluations are archived for comparison. Replaying rounds instead retains an incremental
 ledger within the new run.

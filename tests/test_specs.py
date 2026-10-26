@@ -7,6 +7,9 @@ from risk_bench.agents.anthropic import AnthropicAgent
 from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.models import MODELS
 from risk_bench.config import Settings
+from risk_bench.runner.evaluation_agent import AgentEvaluator, ToolUseLoop
+from risk_bench.runner.evaluation_agent_sdk import ClaudeAgentSdkLoop
+from risk_bench.runner.evaluation_v4 import Evaluator
 from risk_bench.specs import _split_effort
 
 
@@ -106,3 +109,38 @@ def test_missing_research_credentials_never_use_the_legacy_key(monkeypatch, rese
     with pytest.raises(ValueError, match="set ANTHROPIC_AALTO_API_KEY in the environment or .env"):
         specs.build_agent(spec="anthropic:claude-opus-5-5", settings=settings, max_tokens=settings.max_agent_tokens)
     client_constructor.assert_not_called()
+
+
+def test_agent_judge_spec_builds_the_sdk_loop_and_leaves_existing_specs_unchanged():
+    settings = Settings(_env_file=None, anthropic_aalto_api_key="research", openai_api_key="openai")
+    agent, sdk_default, single, other = specs.build_evaluators(
+        evaluator_specs=[
+            "agent:anthropic:claude-opus-5-5:xhigh",
+            "agent:anthropic:claude-opus-5-5",
+            "anthropic:claude-opus-5-5:high",
+            "agent:openai:gpt-6-sol:high",
+        ],
+        settings=settings,
+        trace=None,
+    )
+    assert isinstance(agent, AgentEvaluator) and agent.spec == "agent:anthropic:claude-opus-5-5:xhigh"
+    assert isinstance(agent._loop, ClaudeAgentSdkLoop)
+    assert (agent._loop._model, agent._loop._effort, agent._loop._api_key) == ("claude-opus-5-5", "xhigh", "research")
+    assert (agent._loop._max_turns, agent._loop._max_budget_usd) == (
+        settings.max_agent_judge_turns, settings.max_agent_judge_budget_usd,
+    )
+    assert sdk_default._loop._effort is None
+    assert type(single) is Evaluator
+    assert isinstance(other._loop, ToolUseLoop)
+
+
+def test_agent_judge_needs_the_research_key_and_whole_game_evaluation():
+    with pytest.raises(ValueError, match="ANTHROPIC_AALTO_API_KEY"):
+        specs.build_evaluators(
+            evaluator_specs=["agent:anthropic:claude-opus-5-5"],
+            settings=Settings(_env_file=None, anthropic_aalto_api_key=None, anthropic_api_key="legacy"),
+            trace=None,
+        )
+    with pytest.raises(ValueError, match="whole games only"):
+        specs.reject_whole_game_only_evaluators(evaluator_specs=["anthropic:a", "agent:anthropic:b"])
+    specs.reject_whole_game_only_evaluators(evaluator_specs=["anthropic:claude-opus-5-5"])

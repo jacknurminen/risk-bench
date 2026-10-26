@@ -73,3 +73,27 @@ test('failed submissions leave prior versions intact and display the server reas
   assert.equal(run("el('tournamentEvalError').textContent"),'Game is busy');
   assert.equal(run('tournamentEvalSubmitting'),false);
 });
+
+test('Anthropic rows can run as agents for whole-game reruns only', async () => {
+  const run=setup();
+  run(`tournamentEvalCatalog={}; el('tournamentEvalMethod').value='whole_game';
+    function fakeRow(provider) {
+      const input={checked:true,disabled:false}; const toggle={hidden:false,title:'',querySelector:()=>input};
+      const values={'.batchProvider':provider,'.batchModel':'model-x','.batchEffort':'medium'};
+      return {toggle,input,querySelector:selector=>selector==='.batchAgent'?toggle
+        :selector==='.batchAgent input'?input:{value:values[selector]}};
+    }
+    const anthropicRow=fakeRow('anthropic'); const googleRow=fakeRow('google');
+    el('tournamentEvalRows').children=[anthropicRow,googleRow];
+    syncTournamentAgentToggle(anthropicRow); syncTournamentAgentToggle(googleRow);
+    let requests=[]; fetch=async(url,options)=>{requests.push(options);
+      return {ok:true,json:async()=>({version:'v'})};}; function render(){}`);
+  assert.equal(run('anthropicRow.toggle.hidden'),false);
+  assert.equal(run('googleRow.toggle.hidden'),true);
+  await run('runTournamentEvaluation()');
+  assert.deepEqual(JSON.parse(run('requests[0].body')).evaluators,['agent:anthropic:model-x:medium','google:model-x:medium']);
+  run(`el('tournamentEvalMethod').value='live_rounds'; syncTournamentAgentToggle(anthropicRow);`);
+  assert.equal(run('anthropicRow.input.disabled'),true);
+  await run('runTournamentEvaluation()');
+  assert.deepEqual(JSON.parse(run('requests[2].body')).evaluators,['anthropic:model-x:medium','google:model-x:medium']);
+});

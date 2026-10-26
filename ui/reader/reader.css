@@ -747,4 +747,4 @@ body.readerSplit .subbar { gap: 6px 12px; }
 }
 
 .evaluationModeActions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
-.evalConfig .evalRow{flex-wrap:wrap}.evalConfig .evalRow select{min-width:0;max-width:100%}
+.evalConfig .evalRow{flex-wrap:wrap}.evalRow .evA{font-family:var(--font-mono);font-size:11px;display:flex;gap:4px;align-items:center}.evalRow .evA[hidden]{display:none}.evalRow .evA:has(input:disabled){opacity:.5}.evalConfig .evalRow select{min-width:0;max-width:100%}

@@ -66,6 +66,7 @@ def run_live_evaluation(
     """Catch up completed rounds, then follow the journal until the game ends."""
     if not evaluator_specs:
         raise ValueError("Provide at least one evaluator panel member.")
+    specs.reject_whole_game_only_evaluators(evaluator_specs=evaluator_specs)
     path = evaluation_path_for_journal(journal_path)
     saved = read_evaluation(path)
     resumable = bool(

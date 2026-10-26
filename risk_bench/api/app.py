@@ -175,6 +175,8 @@ def create_app(games_directory: Path) -> FastAPI:
         if not request.evaluators:
             raise HTTPException(status_code=400, detail="Provide at least one evaluator.")
         try:
+            if request.live:
+                specs.reject_whole_game_only_evaluators(evaluator_specs=request.evaluators)
             specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
@@ -678,6 +680,8 @@ def _start_evaluation(manager: GameProcessManager, game_id: str, journal_path: P
         raise HTTPException(status_code=400, detail="Provide at least one evaluator panel member.")
     # build every member up front so a bad spec or missing key fails fast, before the worker starts
     try:
+        if request.live:
+            specs.reject_whole_game_only_evaluators(evaluator_specs=request.evaluators)
         specs.build_evaluators(evaluator_specs=request.evaluators, settings=load_settings(), trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
@@ -1182,6 +1186,8 @@ def _validate_launch_request(request: NewGameRequest) -> None:
                 specs.build_agent(spec=spec, settings=settings, max_tokens=settings.max_agent_tokens)
         # mirror player validation: build every panel member up front so a bad spec fails fast
         specs.build_commentators(commentator_specs=request.commentators, settings=settings, trace=None)
+        if request.evaluation_method == "live_rounds":
+            specs.reject_whole_game_only_evaluators(evaluator_specs=request.evaluators)
         specs.build_evaluators(evaluator_specs=request.evaluators, settings=settings, trace=None)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None

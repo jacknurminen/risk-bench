@@ -20,7 +20,7 @@ from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
 from risk_bench.players.profiles import ExperimentPlayer, load_profile
 from risk_bench.players.rendering import render_board_text
 from risk_bench.runner.checkpoint import restore_engine
-from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
+from risk_bench.runner.evaluation import EvaluatedGame
 from risk_bench.runner.evaluation_config import configured_panel
 from risk_bench.runner.evaluation_store import (
     EvaluationWriter,
@@ -382,7 +382,7 @@ def _write_analysis_dump(journal_path: Path) -> None:
 
 
 def _gather_evaluations(
-    evaluators: tuple[Evaluator, ...],
+    evaluators: tuple[specs.PanelEvaluator, ...],
     players: set[str],
     spans: tuple[TraceSpan, ...],
     overview: str,

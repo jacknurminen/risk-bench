@@ -44,13 +44,15 @@ function addTournamentEvaluator(spec) {
   const providers = Object.keys(tournamentEvalCatalog.models_by_provider);
   const preferred = tournamentEvalCatalog.models_by_provider.openai?.some(model => model.id === 'gpt-6-luna')
     ? 'openai:gpt-6-luna:medium' : `${providers[0]}:${tournamentEvalCatalog.models_by_provider[providers[0]][0].id}:medium`;
-  const [provider, model, effort] = (spec || preferred).split(':');
+  const asAgent = (spec || '').startsWith('agent:');
+  const [provider, model, effort] = (spec || preferred).replace(/^agent:/, '').split(':');
   const row = document.createElement('div');
   row.className = 'controls';
   const options = values => values.map(value => `<option value="${evaluationEscape(value)}">${evaluationEscape(value)}</option>`).join('');
   row.innerHTML = `<select class="batchProvider" aria-label="Evaluator provider">${options(providers)}</select>` +
     '<select class="batchModel" aria-label="Evaluator model"></select>' +
     `<select class="batchEffort" aria-label="Reasoning effort">${options(tournamentEvalCatalog.efforts)}</select>` +
+    `<label class="batchAgent"><input type="checkbox"${asAgent ? ' checked' : ''}> run as agent</label>` +
     '<button type="button" class="btn">Remove</button>';
   row.querySelector('.batchProvider').value = providers.includes(provider) ? provider : providers[0];
   const sync = selected => {
@@ -59,10 +61,27 @@ function addTournamentEvaluator(spec) {
     if (models.some(model => model.id === selected)) row.querySelector('.batchModel').value = selected;
   };
   sync(model);
-  row.querySelector('.batchProvider').onchange = () => sync();
+  row.querySelector('.batchProvider').onchange = () => { sync(); syncTournamentAgentToggle(row); };
+  syncTournamentAgentToggle(row);
   row.querySelector('.batchEffort').value = tournamentEvalCatalog.efforts.includes(effort) ? effort : 'medium';
   row.querySelector('button').onclick = () => row.remove();
   el('tournamentEvalRows').appendChild(row);
+}
+
+/* The agent judge is an Anthropic option and reads whole games only. */
+function syncTournamentAgentToggle(row) {
+  const live = el('tournamentEvalMethod').value === 'live_rounds';
+  const toggle = row.querySelector('.batchAgent');
+  toggle.hidden = row.querySelector('.batchProvider').value !== 'anthropic';
+  toggle.querySelector('input').disabled = live;
+  toggle.title = live ? 'Agent judges analyze whole games only. Choose Whole game to use one.'
+    : 'Annotate each game with an agent that reads the trace and writes each record through checked tools.';
+}
+
+function tournamentEvaluatorSpec(row, live) {
+  const provider = row.querySelector('.batchProvider').value;
+  const spec = `${provider}:${row.querySelector('.batchModel').value}:${row.querySelector('.batchEffort').value}`;
+  return provider === 'anthropic' && !live && row.querySelector('.batchAgent input')?.checked ? `agent:${spec}` : spec;
 }
 
 async function initTournamentEvaluations() {
@@ -84,6 +103,8 @@ async function initTournamentEvaluations() {
     const panel = previous?.panel || [...new Set((latestData.research?.cohorts || []).map(cohort => cohort.evaluator))];
     (panel.length ? panel : [null]).forEach(addTournamentEvaluator);
     el('tournamentEvalMethod').value = previous?.method || 'whole_game';
+    el('tournamentEvalMethod').onchange = () => [...el('tournamentEvalRows').children].forEach(syncTournamentAgentToggle);
+    [...el('tournamentEvalRows').children].forEach(syncTournamentAgentToggle);
     el('tournamentEvalAdd').disabled = false;
     renderTournamentEvaluations(latestData);
   } catch (error) {
@@ -93,14 +114,13 @@ async function initTournamentEvaluations() {
 
 async function runTournamentEvaluation() {
   if (tournamentEvalSubmitting || el('tournamentEvalRun').disabled) return;
-  const evaluators = [...el('tournamentEvalRows').children].map(row =>
-    `${row.querySelector('.batchProvider').value}:${row.querySelector('.batchModel').value}:${row.querySelector('.batchEffort').value}`);
+  const live = el('tournamentEvalMethod').value === 'live_rounds';
+  const evaluators = [...el('tournamentEvalRows').children].map(row => tournamentEvaluatorSpec(row, live));
   el('tournamentEvalError').textContent = '';
   if (!evaluators.length) { el('tournamentEvalError').textContent = 'Add at least one evaluator.'; return; }
   tournamentEvalSubmitting = true;
   renderTournamentEvaluations(latestData);
   try {
-    const live = el('tournamentEvalMethod').value === 'live_rounds';
     const response = await fetch(`${POLL_URL}/evaluate`, {method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({evaluators, live, restart:live})});
     const result = await response.json();

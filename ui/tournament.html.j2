@@ -58,6 +58,8 @@
               font-size: 11px; color: var(--mute); align-items: center; }
   .controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
   .controls input[type=checkbox] { accent-color: var(--ink); }
+  .controls label[hidden] { display: none; }
+  .controls label:has(input:disabled) { opacity: .5; cursor: not-allowed; }
   select { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 5px;
            padding: 4px 7px; font: 11px var(--font-mono); }
   #tournamentEvalVersion { max-width: min(620px, 65vw); }

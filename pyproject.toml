@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.82.0",
+    "claude-agent-sdk>=0.2.174",
     "fastapi>=0.129.0",
     "google-genai>=2.8.0",
     "jinja2>=3.1.6",

@@ -40,6 +40,7 @@ function bindEvaluationConfig() {
       el('evalRun').textContent = evaluationRunLabel(input.value);
       el('evalRun').disabled = input.value === 'whole_game' && !GAME.result;
       el('evaluationMethodHint').textContent = evaluationMethodHint(input.value);
+      [...el('evalRows').children].forEach(syncEvalAgentToggle);
     };
   });
 }
@@ -152,23 +153,40 @@ async function switchVersion() {
 }
 function addEvalRow(spec) {
   const providers = Object.keys(modelCatalog.models_by_provider);
-  const parts = (spec || "").split(":");  // provider:model:effort
+  const asAgent = (spec || "").startsWith("agent:");
+  const parts = (spec || "").replace(/^agent:/, "").split(":");  // [agent:]provider:model:effort
   const row = document.createElement("div"); row.className = "evalRow";
   const opt = (arr, sel) => arr.map(v => `<option${v === sel ? " selected" : ""}>${v}</option>`).join("");
   const modelOpt = (models, sel) => models.map(m =>
     `<option value="${m.id}"${m.id === sel ? " selected" : ""}>${m.id} · $${m.input_usd_per_million}/$${m.output_usd_per_million}</option>`).join("");
   row.innerHTML = `<select class="evP">${opt(providers, parts[0])}</select><select class="evM"></select><select class="evE">${opt(modelCatalog.efforts, parts[2])}</select>
+    <label class="evA"><input type="checkbox"${asAgent ? " checked" : ""}> run as agent</label>
     <button class="btn" onclick="this.parentNode.remove()">✕</button>`;
   el("evalRows").appendChild(row);
   const syncModels = sel => { const models = modelCatalog.models_by_provider[row.querySelector(".evP").value] ?? [];
     row.querySelector(".evM").innerHTML = modelOpt(models, sel); };
-  row.querySelector(".evP").onchange = () => syncModels(); syncModels(parts[1]);
+  row.querySelector(".evP").onchange = () => { syncModels(); syncEvalAgentToggle(row); };
+  syncModels(parts[1]); syncEvalAgentToggle(row);
+}
+/* The agent judge is an Anthropic option and reads whole games only. */
+function syncEvalAgentToggle(row) {
+  const live = chosenEvaluationMethod() === "live_rounds";
+  const toggle = row.querySelector(".evA");
+  toggle.hidden = row.querySelector(".evP").value !== "anthropic";
+  toggle.querySelector("input").disabled = live;
+  toggle.title = live ? "Agent judges analyze whole games only. Choose Whole game to use one."
+    : "Annotate the game with an agent that reads the trace and writes each record through checked tools.";
+}
+function evalRowSpec(row, method) {
+  const provider = row.querySelector(".evP").value;
+  const spec = `${provider}:${row.querySelector(".evM").value}:${row.querySelector(".evE").value}`;
+  const asAgent = provider === "anthropic" && method === "whole_game" && row.querySelector(".evA input")?.checked;
+  return asAgent ? `agent:${spec}` : spec;
 }
 async function runEvaluation() {
   const method = chosenEvaluationMethod();
   const live = method === "live_rounds";
-  const rows = [...el("evalRows").children].map(r =>
-    `${r.querySelector(".evP").value}:${r.querySelector(".evM").value}:${r.querySelector(".evE").value}`);
+  const rows = [...el("evalRows").children].map(row => evalRowSpec(row, method));
   if (!rows.length) { toast("add at least one panel member"); return; }
   const res = await fetch(EVALUATE_URL, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ evaluators: rows, live, restart: live && (!!GAME.result || !gameRunning) }) });
