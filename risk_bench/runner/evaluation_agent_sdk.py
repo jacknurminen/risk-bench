@@ -7,9 +7,9 @@ empty temporary directory. Requests authenticate with the research key passed ex
 legacy ``ANTHROPIC_API_KEY`` or a logged-in Claude account in the environment is never used.
 
 ``TracingAgent`` cannot see calls the CLI makes, so ``_SdkTraceRecorder`` writes one record per
-model turn to the evaluation trace in the same shape: the turn's new input (the opening prompt,
-then the tool results since the previous turn), the tool schemas, the reply, its token usage and
-latency. Cost and usage views therefore keep working unchanged.
+model API call to the evaluation trace in the same shape: the call's new input (the opening prompt,
+then the tool results since the previous call), the tool schemas, the reply, its final token usage
+and latency. Cost and usage views therefore keep working unchanged.
 """
 
 import asyncio
@@ -118,6 +118,8 @@ class ClaudeAgentSdkLoop:
                 effort=self._effort,
                 max_turns=self._max_turns,
                 max_budget_usd=self._max_budget_usd,
+                # final per-call usage (output and thinking tokens) arrives only as stream events
+                include_partial_messages=True,
                 cwd=empty_directory,
                 env=_research_credentials(api_key=self._api_key),
             )
@@ -152,38 +154,69 @@ class ClaudeAgentSdkLoop:
 
 
 class _SdkTraceRecorder:
-    """Folds the SDK's message stream into one trace record per model turn."""
+    """Folds the SDK's message stream into one trace record per model API call.
+
+    The CLI streams one reply as several assistant messages, one per content block, and when a reply
+    makes parallel tool calls it interleaves each call's result between them. Records are therefore
+    grouped by API message id, never split at a tool result, and every result belongs to the input of
+    the next call. The usage on an assistant message is the snapshot from the start of the stream (a
+    handful of output tokens, no thinking); the final usage comes from the ``message_delta`` stream
+    event, so the loop enables partial messages and the snapshot is only a fallback.
+    """
 
     def __init__(self, trace: TraceWriter | None, caller: str, tools: list[Tool], opening: list[Message]) -> None:
         self._trace = trace
         self._caller = caller
         self._tools = tools
         self._pending_input: list[Message] = list(opening)
+        self._turn_input: list[Message] = []
         self._turn_id: str | None = None
         self._turn_messages: list[sdk.AssistantMessage] = []
-        self._turn_started = time.monotonic()
+        self._request_sent = time.monotonic()
+        self._turn_requested = self._request_sent
+        self._turn_answered = self._request_sent
+        self._streamed_id: str | None = None
+        self._streamed_usage: dict[str, dict[str, Any]] = {}
         self.turns = 0
         self.estimated_cost_usd: float | None = 0.0
 
     def observe(self, message: object) -> None:
+        if isinstance(message, sdk.StreamEvent):
+            self._observe_stream(event=message.event)
+            return
         if isinstance(message, sdk.AssistantMessage):
-            # the CLI streams one assistant reply as several messages, one per content block
             turn_id = message.message_id or message.uuid
             if self._turn_messages and turn_id != self._turn_id:
                 self.flush()
-            self._turn_id = turn_id
+            if not self._turn_messages:
+                self._turn_id = turn_id
+                self._turn_input, self._pending_input = self._pending_input, []
+                self._turn_requested = self._request_sent
             self._turn_messages.append(message)
+            self._turn_answered = time.monotonic()
             return
         if isinstance(message, sdk.UserMessage):
-            self.flush()
             self._pending_input.extend(_tool_result_messages(message=message))
+            self._request_sent = time.monotonic()
+
+    def _observe_stream(self, event: dict[str, Any]) -> None:
+        if event.get("type") == "message_start":
+            started = event.get("message") or {}
+            self._streamed_id = started.get("id")
+            if self._streamed_id:
+                self._streamed_usage[self._streamed_id] = dict(started.get("usage") or {})
+        elif event.get("type") == "message_delta" and self._streamed_id in self._streamed_usage:
+            final = {key: value for key, value in (event.get("usage") or {}).items() if value is not None}
+            self._streamed_usage[self._streamed_id].update(final)
 
     def flush(self) -> None:
         if not self._turn_messages:
             return
         messages, self._turn_messages = self._turn_messages, []
         blocks = [block for message in messages for block in message.content]
-        usage = next((m.usage for m in reversed(messages) if m.usage), None) or {}
+        snapshot = next((m.usage for m in reversed(messages) if m.usage), None) or {}
+        streamed = self._streamed_usage.pop(self._turn_id, None) if self._turn_id else None
+        usage = streamed or snapshot
         cache_write = usage.get("cache_creation_input_tokens") or 0
         cache_read = usage.get("cache_read_input_tokens") or 0
         response = Response(
@@ -211,19 +244,18 @@ class _SdkTraceRecorder:
             None if self.estimated_cost_usd is None or cost is None else (self.estimated_cost_usd + cost)
         )
         self.turns += 1
-        error = messages[-1].error
+        error = next((m.error for m in reversed(messages) if m.error), None)
         if self._trace is not None:
             self._trace.write_call(
                 caller=self._caller,
                 model=model,
-                messages=self._pending_input,
+                messages=self._turn_input,
                 tools=self._tools,
                 response=response,
                 error=str(error) if error else None,
-                latency_ms=int((time.monotonic() - self._turn_started) * 1000),
+                latency_ms=int((self._turn_answered - self._turn_requested) * 1000),
             )
-        self._pending_input = []
-        self._turn_started = time.monotonic()
+        self._turn_input = []
 
 
 def _sdk_tool(workspace: JudgeWorkspace, definition: JudgeToolDefinition) -> sdk.SdkMcpTool[Any]:

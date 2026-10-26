@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import pytest
 
-from risk_bench.agents.base import Response, ToolCall
+from risk_bench.agents.base import Message, Response, ToolCall
 from risk_bench.agents.tracing import TraceWriter, usage_by_caller
 from risk_bench.config import Settings
 from risk_bench.runner import codebook_v4 as cb
@@ -464,6 +464,8 @@ def test_sdk_loop_runs_only_the_judge_tools_with_the_research_key_and_traces_eac
     assert len(options.allowed_tools) == len(JudgeWorkspace(build_trace_index(records()), PLAYERS, True)
                                              .tool_definitions())
     assert options.setting_sources == [] and options.strict_mcp_config
+    assert options.include_partial_messages
+    assert options.include_partial_messages
     assert options.env["ANTHROPIC_API_KEY"] == "research-key" and options.env["ANTHROPIC_AUTH_TOKEN"] == ""
     assert options.env["CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"] == ""
     assert (options.model, options.effort, options.max_turns, options.max_budget_usd) == (
@@ -485,6 +487,46 @@ def test_sdk_loop_runs_only_the_judge_tools_with_the_research_key_and_traces_eac
     assert second["messages"] == [{"role": "tool", "content": "2 messages", "tool_call_id": "t1"}]
     usage_summary = usage_by_caller(tmp_path / "game.eval.trace.jsonl")["evaluator[0]"]
     assert usage_summary["calls"] == 2 and usage_summary["cost_usd"] > 0
+
+
+def test_sdk_trace_keeps_one_record_per_api_call_with_its_final_streamed_usage(tmp_path):
+    sdk = evaluation_agent_sdk.sdk
+    snapshot = {"input_tokens": 10, "output_tokens": 3, "cache_creation_input_tokens": 1000,
+                "cache_read_input_tokens": 4000}
+
+    def stream(event):
+        return sdk.StreamEvent(uuid="u", session_id="s", event=event)
+
+    def tool_result(tool_id):
+        return sdk.UserMessage(content=[sdk.ToolResultBlock(tool_use_id=tool_id, content="ok")])
+
+    trace = TraceWriter(path=tmp_path / "game.eval.trace.jsonl", append=False)
+    recorder = evaluation_agent_sdk._SdkTraceRecorder(
+        trace=trace, caller="evaluator[0]", tools=[], opening=[Message(role="user", content="Go.")]
+    )
+    # one reply making two parallel tool calls: the CLI interleaves each call's result with the blocks
+    for message in [
+        stream({"type": "message_start", "message": {"id": "m1", "usage": snapshot}}),
+        assistant("m1", [sdk.ToolUseBlock(id="t1", name="mcp__judge__screen_message", input={})], snapshot),
+        tool_result("t1"),
+        assistant("m1", [sdk.ToolUseBlock(id="t2", name="mcp__judge__screen_message", input={})], snapshot),
+        tool_result("t2"),
+        stream({"type": "message_delta", "usage": {"output_tokens": 900, "cache_read_input_tokens": 4000}}),
+        stream({"type": "message_start", "message": {"id": "m2", "usage": snapshot}}),
+        assistant("m2", [sdk.TextBlock(text="Done.")], snapshot),
+    ]:
+        recorder.observe(message=message)
+    recorder.flush()
+    trace.close()
+
+    first, second = [json.loads(line) for line in (tmp_path / "game.eval.trace.jsonl").read_text().splitlines()]
+    assert [call["id"] for call in first["response"]["tool_calls"]] == ["t1", "t2"]
+    assert first["messages"] == [{"role": "user", "content": "Go."}]
+    assert (first["output_tokens"], first["input_tokens"], first["cache_write_tokens"]) == (900, 5010, 1000)
+    # both results feed the next call; without a message_delta the snapshot is the fallback
+    assert [message["tool_call_id"] for message in second["messages"]] == ["t1", "t2"]
+    assert second["output_tokens"] == 3
+    assert recorder.turns == 2
 
 
 def test_sdk_tool_handler_returns_validation_errors_as_tool_errors():
