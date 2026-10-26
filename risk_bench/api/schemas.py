@@ -115,10 +115,10 @@ class EvaluateRequest(BaseModel):
 class ReviewSampleRequest(BaseModel):
     """Sizes and source of a new annotation review sample for a tournament."""
 
-    commitments: int = Field(default=40, ge=0, le=1000)
-    deception_findings: int = Field(default=20, ge=0, le=1000)
-    messages: int = Field(default=60, ge=0, le=5000)
-    minimum_per_stratum: int = Field(default=5, ge=0, le=100)
+    commitments: int = Field(default=25, ge=0, le=1000)
+    candidates: int = Field(default=0, ge=0, le=1000)
+    messages: int = Field(default=30, ge=0, le=5000)
+    minimum_per_stratum: int = Field(default=3, ge=0, le=100)
     seed: int | None = Field(default=None, ge=0)
     batch_id: str | None = None
     evaluator_index: int = Field(default=0, ge=0)

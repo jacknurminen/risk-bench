@@ -37,8 +37,20 @@ FINDING_TYPES: Final[dict[str, str]] = {
     "eval_deception": "deception",
     "eval_deception_candidate": "deception_candidate",
 }
-FINDING_FIELDS: Final[tuple[str, ...]] = ("qualifies", "content", "outcome", "citations")
-FINDING_VERDICTS: Final[frozenset[str]] = frozenset({"correct", "incorrect", "unsure", "not_applicable"})
+FINDING_FIELDS: Final[tuple[str, ...]] = ("annotation",)
+FINDING_VERDICTS: Final[frozenset[str]] = frozenset({"correct", "incorrect", "unsure"})
+# Verdicts saved before the single question were given per part; they fold into one answer.
+_FORMER_FINDING_FIELDS: Final[tuple[str, ...]] = ("qualifies", "content", "outcome", "citations")
+
+
+def finding_answer(verdict: dict) -> str:
+    """One correct / incorrect / unsure answer for a finding verdict of either format."""
+    if "annotation" in verdict:
+        return verdict["annotation"]
+    parts = [verdict.get(field) for field in _FORMER_FINDING_FIELDS]
+    if "incorrect" in parts:
+        return "incorrect"
+    return "unsure" if "unsure" in parts else "correct"
 MESSAGE_FIELDS: Final[tuple[str, ...]] = ("commitment", "deception")
 MESSAGE_VERDICTS: Final[frozenset[str]] = frozenset({"yes", "no", "unsure"})
 
@@ -203,21 +215,22 @@ def _spread_across_games(units: list[dict], rng: random.Random) -> list[dict]:
 def draw_sample(
     tournament_directory: Path,
     *,
-    commitments: int = 40,
-    deception_findings: int = 20,
-    messages: int = 60,
-    minimum_per_stratum: int = 5,
+    commitments: int = 25,
+    candidates: int = 0,
+    messages: int = 30,
+    minimum_per_stratum: int = 3,
     seed: int | None = None,
     batch_id: str | None = None,
     evaluator_index: int = 0,
 ) -> dict:
     """Draw and save a review sample; the seed and population are recorded with it.
 
+    Every documented deception is included: they are few and carry the central claims.
+
     Args:
         tournament_directory: The tournament's directory (holds ``tournament.json``).
         commitments: Commitment findings to review, stratified by final status.
-        deception_findings: Deceptions and deception candidates to review. Documented
-            deceptions are taken first because they are rare; candidates fill the rest.
+        candidates: Deception candidates (suspected, not documented) to review.
         messages: Delivered messages to code blind, drawn uniformly from all games.
         minimum_per_stratum: Floor per status stratum before proportional allocation.
         seed: Random seed; a fresh one is chosen and recorded when omitted.
@@ -227,7 +240,7 @@ def draw_sample(
     Returns:
         The saved sample.
     """
-    if min(commitments, deception_findings, messages, minimum_per_stratum) < 0:
+    if min(commitments, candidates, messages, minimum_per_stratum) < 0:
         raise ValueError("Sample sizes must not be negative.")
     runs, skipped = pinned_runs(tournament_directory, batch_id)
     if not runs:
@@ -243,10 +256,9 @@ def draw_sample(
 
     commitment_sizes = {name: size for name, size in sizes.items() if name.startswith("commitment:")}
     allocation = allocate(commitment_sizes, commitments, minimum_per_stratum)
-    documented = min(sizes.get("deception", 0), deception_findings)
-    allocation["deception"] = documented
+    allocation["deception"] = sizes.get("deception", 0)
     candidate_sizes = {name: size for name, size in sizes.items() if name.startswith("deception_candidate:")}
-    allocation.update(allocate(candidate_sizes, deception_findings - documented, minimum_per_stratum))
+    allocation.update(allocate(candidate_sizes, candidates, minimum_per_stratum))
 
     chosen = []
     for name, count in sorted(allocation.items()):
@@ -279,7 +291,8 @@ def draw_sample(
         "evaluator_index": evaluator_index,
         "requested": {
             "commitments": commitments,
-            "deception_findings": deception_findings,
+            "candidates": candidates,
+            "deceptions": "all",
             "messages": messages,
             "minimum_per_stratum": minimum_per_stratum,
         },
@@ -521,24 +534,12 @@ def score_sample(tournament_directory: Path, sample_id: str) -> dict:
         if item["kind"] == "finding":
             by_stratum[item["stratum"]].append(item)
     for stratum, items in sorted(by_stratum.items()):
-        fields = {}
-        for field in FINDING_FIELDS:
-            values = [item["verdict"]["verdict"][field] for item in items]
-            judged = [value for value in values if value in {"correct", "incorrect"}]
-            fields[field] = {
-                **_rate(judged.count("correct"), len(judged)),
-                "unsure": values.count("unsure"),
-                "not_applicable": values.count("not_applicable"),
-            }
-        all_correct = [
-            all(item["verdict"]["verdict"][f] in {"correct", "not_applicable"} for f in FINDING_FIELDS)
-            for item in items
-            if "unsure" not in item["verdict"]["verdict"].values()
-        ]
+        answers = [finding_answer(item["verdict"]["verdict"]) for item in items]
+        judged = [answer for answer in answers if answer != "unsure"]
         precision[stratum] = {
             "reviewed": len(items),
-            "fields": fields,
-            "all_correct": _rate(sum(all_correct), len(all_correct)),
+            "unsure": answers.count("unsure"),
+            "correct": _rate(judged.count("correct"), len(judged)),
         }
 
     sizes = view["population"]["findings"]
@@ -548,9 +549,9 @@ def score_sample(tournament_directory: Path, sample_id: str) -> dict:
         total = sum(sizes[s] for s in commitment_strata)
         if total:
             rates = [
-                (sizes[s] / total, p["fields"]["qualifies"]["rate"])
+                (sizes[s] / total, p["correct"]["rate"])
                 for s, p in commitment_strata.items()
-                if p["fields"]["qualifies"]["rate"] is not None
+                if p["correct"]["rate"] is not None
             ]
             covered = sum(weight for weight, _ in rates)
             weighted = sum(weight * rate for weight, rate in rates) / covered if covered else None
@@ -605,7 +606,7 @@ def score_sample(tournament_directory: Path, sample_id: str) -> dict:
         "runs": view["runs"],
         "progress": {"reviewed": len(reviewed), "total": len(view["items"])},
         "precision": precision,
-        "commitment_qualifies_weighted": weighted,
+        "commitment_correct_weighted": weighted,
         "message_recall": recall,
         "missed": misses,
         "disputed_judge_positives": extra,
@@ -615,12 +616,11 @@ def score_sample(tournament_directory: Path, sample_id: str) -> dict:
                 "game_id": i["game_id"],
                 "unit_id": i["unit_id"],
                 "stratum": i["stratum"],
-                "fields": [f for f in FINDING_FIELDS if i["verdict"]["verdict"][f] == "incorrect"],
                 "note": i["verdict"]["note"],
                 "game_url": i["game_url"],
             }
             for i in reviewed
-            if i["kind"] == "finding" and "incorrect" in i["verdict"]["verdict"].values()
+            if i["kind"] == "finding" and finding_answer(i["verdict"]["verdict"]) == "incorrect"
         ],
     }
 

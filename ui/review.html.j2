@@ -26,14 +26,14 @@
     </div>
     <details id="newSample">
       <summary>Draw a new sample</summary>
-      <p class="note">The sample is drawn once with a recorded seed and saved before any review. Findings are
-        stratified by type and final status, with a floor per stratum so rare outcomes appear; the report
-        reweights by population size. Messages are drawn uniformly from all games and reviewed blind.</p>
+      <p class="note">The sample is drawn once with a recorded seed and saved before any review. Every documented
+        deception is included. Commitments are stratified by final status, with a floor per stratum so rare
+        outcomes appear; the report reweights by population size. Messages are drawn uniformly from all games and reviewed blind.</p>
       <form id="sampleForm" class="controls">
-        <label>Commitments <input id="sampleCommitments" type="number" min="0" value="40"></label>
-        <label>Deceptions &amp; candidates <input id="sampleDeceptions" type="number" min="0" value="20"></label>
-        <label>Messages <input id="sampleMessages" type="number" min="0" value="60"></label>
-        <label>Floor per stratum <input id="sampleFloor" type="number" min="0" value="5"></label>
+        <label>Commitments <input id="sampleCommitments" type="number" min="0" value="25"></label>
+        <label>Deception candidates <input id="sampleCandidates" type="number" min="0" value="0"></label>
+        <label>Messages <input id="sampleMessages" type="number" min="0" value="30"></label>
+        <label>Floor per stratum <input id="sampleFloor" type="number" min="0" value="3"></label>
         <label>Seed <input id="sampleSeed" type="number" min="0" placeholder="random"></label>
         <label>Runs <select id="sampleBatch"><option value="">Newest whole-game run per game</option></select></label>
         <button class="btn dark" type="submit" id="drawSample">Draw sample</button>

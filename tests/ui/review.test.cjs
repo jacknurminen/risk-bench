@@ -18,12 +18,10 @@ test('quotes are highlighted inside escaped span text', () => {
 
 test('a verdict needs an answer to every question of its item type', () => {
   const run = load();
-  run('globalThis.answers = {qualifies: "correct", content: "correct", outcome: "unsure"}');
-  assert.equal(run('collectVerdict({kind: "finding", unit_type: "commitment"}, f => answers[f])'), null);
-  run('answers.citations = "not_applicable"');
+  assert.equal(run(`collectVerdict({kind: "finding", unit_type: "commitment"}, f => undefined)`), null);
   assert.deepEqual(
-    JSON.parse(run('JSON.stringify(collectVerdict({kind: "finding", unit_type: "deception"}, f => answers[f]))')),
-    {qualifies: 'correct', content: 'correct', outcome: 'unsure', citations: 'not_applicable'},
+    JSON.parse(run(`JSON.stringify(collectVerdict({kind: "finding", unit_type: "deception"}, f => "unsure"))`)),
+    {annotation: "unsure"},
   );
   assert.deepEqual(
     JSON.parse(run('JSON.stringify(collectVerdict({kind: "message"}, f => ({commitment: "yes", deception: "no"})[f]))')),
@@ -50,4 +48,12 @@ test('queues run game by game in trace order and link into the pinned game view'
 
 test('the shared review script does not redeclare the reader escape helper', () => {
   assert.doesNotMatch(readFileSync('ui/review.js', 'utf8'), /\bescapeHtml\b/);
+});
+
+test('verdicts saved per part fold into one finding answer', () => {
+  const run = load();
+  assert.equal(run('findingAnswer({annotation: "correct"})'), 'correct');
+  assert.equal(run('findingAnswer({qualifies: "correct", content: "incorrect", outcome: "unsure", citations: "correct"})'), 'incorrect');
+  assert.equal(run('findingAnswer({qualifies: "correct", content: "correct", outcome: "unsure", citations: "not_applicable"})'), 'unsure');
+  assert.equal(run('findingAnswer({qualifies: "correct", content: "correct", outcome: "correct", citations: "not_applicable"})'), 'correct');
 });

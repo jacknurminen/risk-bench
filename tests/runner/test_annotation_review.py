@@ -122,10 +122,10 @@ def test_allocate_keeps_a_floor_and_sums_exactly():
 
 def test_sample_is_reproducible_saved_and_skips_failed_runs(tournament):
     first = review.draw_sample(
-        tournament, commitments=4, deception_findings=2, messages=3, minimum_per_stratum=1, seed=11
+        tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11
     )
     second = review.draw_sample(
-        tournament, commitments=4, deception_findings=2, messages=3, minimum_per_stratum=1, seed=11
+        tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11
     )
     def keys(sample):
         return [(i["kind"], i["game_id"], i.get("unit_id"), i["span"]) for i in sample["items"]]
@@ -154,7 +154,7 @@ def test_population_counts_only_the_chosen_panel_member(tournament):
 
 
 def test_message_review_is_blind_until_coded_and_scores_recall(tournament):
-    sample = review.draw_sample(tournament, commitments=1, deception_findings=0, messages=6, seed=3)
+    sample = review.draw_sample(tournament, commitments=1, messages=6, seed=3)
     view = review.review_view(tournament, sample["id"])
     messages = [i for i in view["items"] if i["kind"] == "message"]
     assert all("judge" not in item for item in messages)
@@ -180,7 +180,7 @@ def test_message_review_is_blind_until_coded_and_scores_recall(tournament):
 
 
 def test_finding_verdicts_are_validated_replaced_and_scored(tournament):
-    sample = review.draw_sample(tournament, commitments=5, deception_findings=0, messages=0, seed=5)
+    sample = review.draw_sample(tournament, commitments=5, messages=0, seed=5)
     items = [i for i in sample["items"] if i["kind"] == "finding"]
     with pytest.raises(ValueError):
         review.save_verdict(tournament, sample["id"], items[0]["item_id"], {"qualifies": "correct"})
@@ -189,7 +189,7 @@ def test_finding_verdicts_are_validated_replaced_and_scored(tournament):
     good = dict.fromkeys(review.FINDING_FIELDS, "correct")
     for item in items:
         review.save_verdict(tournament, sample["id"], item["item_id"], good)
-    review.save_verdict(tournament, sample["id"], items[0]["item_id"], {**good, "outcome": "incorrect"}, " late ")
+    review.save_verdict(tournament, sample["id"], items[0]["item_id"], {"annotation": "incorrect"}, " late ")
     verdicts = review.read_verdicts(tournament, sample["id"])
     assert len(verdicts) == len(items) and verdicts[items[0]["item_id"]]["note"] == "late"
 
@@ -199,10 +199,35 @@ def test_finding_verdicts_are_validated_replaced_and_scored(tournament):
 
     report = review.score_sample(tournament, sample["id"])
     assert report["progress"] == {"reviewed": len(items), "total": len(items)}
-    assert len(report["incorrect_findings"]) == 1
-    assert report["commitment_qualifies_weighted"] == 1.0
+    assert [row["item_id"] for row in report["incorrect_findings"]] == [items[0]["item_id"]]
+    assert 0 < report["commitment_correct_weighted"] < 1
     review.clear_verdict(tournament, sample["id"], items[0]["item_id"])
     assert items[0]["item_id"] not in review.read_verdicts(tournament, sample["id"])
+
+
+def test_documented_deceptions_are_always_sampled(tournament):
+    game = tournament / "t1-g1"
+    rows = [json.loads(line) for line in (game / "game.eval.jsonl").read_text().splitlines()]
+    deception = {**candidate("d1"), "type": "eval_deception", "proposition": "No attack."}
+    deception.pop("review_history")
+    rows.insert(1, deception)
+    (game / "game.eval.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    sample = review.draw_sample(tournament, commitments=0, candidates=0, messages=0, seed=1)
+    assert [(i["unit_type"], i["unit_id"]) for i in sample["items"]] == [("deception", "d1")]
+
+
+def test_verdicts_saved_per_part_still_count(tournament):
+    sample = review.draw_sample(tournament, commitments=2, messages=0, seed=2)
+    first, second = (i["item_id"] for i in sample["items"])
+    parts = dict.fromkeys(("qualifies", "content", "outcome", "citations"), "correct")
+    rows = [
+        {"item_id": first, "kind": "finding", "verdict": {**parts, "citations": "not_applicable"}, "note": ""},
+        {"item_id": second, "kind": "finding", "verdict": {**parts, "outcome": "incorrect"}, "note": ""},
+    ]
+    review.verdicts_path(tournament, sample["id"]).write_text("".join(json.dumps(row) + "\n" for row in rows))
+    report = review.score_sample(tournament, sample["id"])
+    assert [row["item_id"] for row in report["incorrect_findings"]] == [second]
+    assert sum(row["correct"]["correct"] for row in report["precision"].values()) == 1
 
 
 def test_wilson_interval_bounds():
