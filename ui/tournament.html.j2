@@ -87,7 +87,7 @@
 <header class="masthead">
   <div class="inner">
     <div class="brand"><span class="dice">⚂</span> risk-bench<small>tournament · <span id="tournamentId"></span></small></div>
-    <div class="mastmeta"><span id="liveNote"></span><a href="/">← all games</a></div>
+    <div class="mastmeta"><span id="liveNote"></span><a id="reviewLink" href="#">annotation review</a><a href="/">← all games</a></div>
   </div>
 </header>
 <div class="shell">
@@ -210,6 +210,7 @@ function render(data) {
   renderTournamentContinuation(data);
   renderTournamentReplay(data);
   el("tournamentId").textContent = data.id;
+  el("reviewLink").href = `/tournaments/${encodeURIComponent(data.id)}/review`;
   el("liveNote").textContent = data.games.length === (data.total_games ?? data.games.length) && data.games.every(game => game.finished)
     ? `${data.games.length} games, all finished` : `${data.games.length}/${data.total_games ?? data.games.length} games started · ${data.parallel_games ?? "—"} at once — updating`;
   el("legend").innerHTML = data.players

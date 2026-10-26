@@ -15,6 +15,7 @@ _BOARD_SVG_PATH = UI_DIRECTORY / "board.svg"
 _BOARD_SVG = _BOARD_SVG_PATH.read_text(encoding="utf-8")
 _READER_TEMPLATE = jinja2.Template((UI_DIRECTORY / "reader" / "reader.html.j2").read_text(encoding="utf-8"))
 _TOURNAMENT_TEMPLATE = jinja2.Template((UI_DIRECTORY / "tournament.html.j2").read_text(encoding="utf-8"))
+_REVIEW_TEMPLATE = jinja2.Template((UI_DIRECTORY / "review.html.j2").read_text(encoding="utf-8"))
 
 
 def render_reader_html(
@@ -135,6 +136,11 @@ def render_tournament_html(view_model: dict[str, Any], live: bool, poll_url: str
     return _TOURNAMENT_TEMPLATE.render(
         tournament_json=json.dumps(view_model), live_json=json.dumps(live), poll_url_json=json.dumps(poll_url)
     )
+
+
+def render_review_html(tournament_id: str) -> str:
+    """Render the annotation review page; it loads samples and items from the API."""
+    return _REVIEW_TEMPLATE.render(tournament_id_json=json.dumps(tournament_id))
 
 
 def _inline_assets(html: str) -> str:

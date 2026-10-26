@@ -33,12 +33,15 @@ from risk_bench.api.schemas import (
     NewGameRequest,
     NewGameResponse,
     PlayerContextRequest,
+    ReviewSampleRequest,
+    ReviewVerdictBody,
     TournamentSummary,
     UnitVerificationBody,
 )
 from risk_bench.config import REPLAY_SETTING_FIELDS, load_settings
 from risk_bench.game.engine import IllegalActionError
 from risk_bench.players.profiles import ExperimentProfile, load_profile, profile_catalog
+from risk_bench.runner import annotation_review
 from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.evaluation_config import configure_evaluation, configured_panel
 from risk_bench.runner.evaluation_store import (
@@ -50,11 +53,11 @@ from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
 from risk_bench.runner.live_evaluation import review_activity_for_journal
-from risk_bench.runner.tournament_evaluation import create_batch
+from risk_bench.runner.tournament_evaluation import create_batch, list_batches
 from risk_bench.runner.verification_store import delete_verification, write_verification
 from risk_bench.version import require_v3
 from risk_bench.viewer.evaluation import build_evaluation_view_model
-from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_tournament_html
+from risk_bench.viewer.html import UI_DIRECTORY, render_reader_html, render_review_html, render_tournament_html
 from risk_bench.viewer.prompts import preview_next_prompts
 from risk_bench.viewer.snapshots import build_view_model
 from risk_bench.viewer.tournament import build_tournament_view_model
@@ -214,6 +217,59 @@ def create_app(games_directory: Path) -> FastAPI:
                 )
             with journal_control_lock(directory / game_id / "game.jsonl"):
                 return _replay_tournament_game(directory, manifest, game_id, manager)
+
+    # --- annotation review: sampled human checks of the evaluator's findings and misses ---
+
+    @app.get("/tournaments/{tournament_id}/review", include_in_schema=False)
+    def review_page(tournament_id: str) -> HTMLResponse:
+        _tournament_directory(games_directory, tournament_id)
+        return HTMLResponse(render_review_html(tournament_id=tournament_id))
+
+    @app.get("/api/tournaments/{tournament_id}/reviews")
+    def list_review_samples(tournament_id: str) -> dict[str, Any]:
+        directory = _tournament_directory(games_directory, tournament_id)
+        batches = [
+            {"id": batch["id"], "created_at": batch["created_at"], "panel": batch["panel"], "method": batch["method"]}
+            for batch in list_batches(directory)
+            if batch["method"] == "whole_game"
+        ]
+        return {"samples": annotation_review.list_samples(directory), "batches": batches}
+
+    @app.post("/api/tournaments/{tournament_id}/reviews", status_code=201)
+    def create_review_sample(tournament_id: str, request: ReviewSampleRequest) -> dict[str, Any]:
+        directory = _tournament_directory(games_directory, tournament_id)
+        try:
+            sample = annotation_review.draw_sample(directory, **request.model_dump())
+        except ValueError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from None
+        return {key: value for key, value in sample.items() if key != "items"}
+
+    @app.get("/api/tournaments/{tournament_id}/reviews/{sample_id}")
+    def review_sample(tournament_id: str, sample_id: str) -> dict[str, Any]:
+        directory = _tournament_directory(games_directory, tournament_id)
+        try:
+            return annotation_review.review_view(directory, sample_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
+
+    @app.put("/api/tournaments/{tournament_id}/reviews/{sample_id}/items/{item_id}")
+    def set_review_verdict(tournament_id: str, sample_id: str, item_id: str, body: ReviewVerdictBody) -> dict:
+        directory = _tournament_directory(games_directory, tournament_id)
+        try:
+            if body.verdict is None:
+                annotation_review.clear_verdict(directory, sample_id, item_id)
+                return {"verdict": None}
+            return annotation_review.save_verdict(directory, sample_id, item_id, body.verdict, body.note)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+
+    @app.get("/api/tournaments/{tournament_id}/reviews/{sample_id}/report")
+    def review_report(tournament_id: str, sample_id: str) -> dict[str, Any]:
+        directory = _tournament_directory(games_directory, tournament_id)
+        try:
+            return annotation_review.score_sample(directory, sample_id)
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from None
 
     @app.get("/api/games")
     def list_games() -> GameListResponse:
