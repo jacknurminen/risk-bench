@@ -1,5 +1,6 @@
 import random
 from collections import Counter
+from dataclasses import replace
 
 from risk_bench.chat.diplomacy import ChatMessage, MessageVisibility
 from risk_bench.game.actions import PlaceArmies
@@ -328,6 +329,56 @@ def test_each_player_notes_on_the_turn_that_just_ended_and_notes_feed_back():
     assert any(view.recent_events for player in players.values() for view in player.noting_views)
     # the latest notes are injected back into later decision prompts (None only before the first noting)
     assert any(notes is not None for player in players.values() for notes in player.notes_in_decision_views)
+
+
+class MemoNotingPlayer(NotingPlayer):
+    """Records unique private memos and checks exactly what reaches each notes update."""
+
+    def __init__(self, player_id: PlayerId, rng: random.Random) -> None:
+        super().__init__(player_id=player_id, rng=rng)
+        self.sent_memos: list[str] = []
+        self.consumed_memos = 0
+
+    def decide_action(self, request: DecisionRequest) -> Decision:
+        assert not request.view.own_memos
+        decision = super().decide_action(request=request)
+        return replace(decision, thought=self._memo(context=str(request.view.phase)))
+
+    def compose_messages(self, view: PlayerView) -> NegotiationTurn:
+        assert not view.own_memos
+        turn = super().compose_messages(view=view)
+        return replace(turn, thought=self._memo(context="negotiation"))
+
+    def update_notes(self, view: PlayerView) -> str | None:
+        assert view.own_memos == tuple(self.sent_memos[self.consumed_memos:])
+        self.consumed_memos = len(self.sent_memos)
+        return super().update_notes(view=view)
+
+    def _memo(self, context: str) -> str:
+        memo = f"{self.player_id} private memo {len(self.sent_memos)}: {context}"
+        self.sent_memos.append(memo)
+        return memo
+
+
+def test_notes_receive_only_the_authors_pending_memos_including_the_turn_ending_action():
+    players = {
+        name: MemoNotingPlayer(player_id=name, rng=random.Random(4)) for name in PLAYER_IDS
+    }
+    talking_runner(players=dict(players), seed=4, max_turns=3, allow_private_messages=True).run()
+
+    for name, player in players.items():
+        assert len(player.noting_views) == 3
+        assert any(str(Phase.SETUP_PLACEMENT) in memo for memo in player.noting_views[0].own_memos)
+        received = [memo for view in player.noting_views for memo in view.own_memos]
+        assert all(memo.startswith(f"{name} private memo ") for memo in received)
+        assert len(received) == len(set(received))
+        assert any("negotiation" in memo for memo in received)
+    assert any(
+        str(Phase.FORTIFY) in memo
+        for player in players.values()
+        for view in player.noting_views
+        for memo in view.own_memos
+    )
 
 
 def test_live_views_show_only_the_current_turns_chat():

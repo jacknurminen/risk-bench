@@ -47,6 +47,42 @@ test('cycle toggle sends the mode without an editable schedule', async () => {
   assert.doesNotMatch(readFileSync('ui/index.html','utf8'), /id="seatingOrders"|Fill all seat orders/);
 });
 
+test('experiment player is appended to the roster with matching context and a profile', async () => {
+  const run = setup();
+  run(`el('experimentProfile').value='mission_prober';
+    el('experimentRow').querySelector=selector=>selector==='.providerTile.active'
+      ? {dataset:{provider:'google'}} : {value:selector==='.modelSelect'?'gemini-4-argon':'high'};
+    el('evaluatorRow').querySelector=()=>({dataset:{provider:'off'}});
+    fetch=async (url,options)=>{globalThis.sent=JSON.parse(options.body);
+      return {ok:true,json:async()=>({id:'test',tournament:false})};};`);
+  await run('launch()');
+  assert.equal(run('sent.players.length'), 4);
+  assert.equal(run('sent.players[3]'), 'google:gemini-4-argon:high');
+  assert.equal(run('sent.experiment_player.player'), 4);
+  assert.equal(run('sent.experiment_player.profile'), 'mission_prober');
+  assert.equal(run('sent.evaluators.length'), 0);
+  run(`el('experimentProfile').value=''`);
+  await run('launch()');
+  assert.equal(run('sent.players.length'), 3);
+  assert.equal(run('sent.experiment_player'), null);
+});
+
+test('profile selection previews instructions and enforces the six-player limit', () => {
+  const run = setup();
+  run(`experimentProfiles=[{id:'deceiver',objective:'Test responses to a breached pact.',instructions:'Keep the role private.'}];
+    el('playerRows').children=[1,2,3];
+    el('experimentProfile').value='deceiver';
+    selectExperimentProfile();`);
+  assert.equal(run("el('experimentRow').hidden"), false);
+  assert.match(run("el('experimentPrompt').textContent"), /Keep the role private/);
+  run(`el('experimentProfile').value=''; selectExperimentProfile();`);
+  assert.equal(run("el('experimentRow').hidden"), true);
+  run(`el('playerRows').children=[1,2,3,4,5,6];
+    el('experimentProfile').value='deceiver'; selectExperimentProfile();`);
+  assert.equal(run("el('experimentProfile').value"), '');
+  assert.match(run("el('launchError').textContent"), /limit is six/);
+});
+
 test('queued rows show queue cancellation without links to missing journals', () => {
   const run = setup();
   run(`let queued={id:'t-g3',seed:3,players:['a','b','c'],queued:true,started:false,

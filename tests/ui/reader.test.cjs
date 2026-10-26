@@ -54,3 +54,32 @@ test('round labels follow recorded snapshots across eliminations and live refres
   run(`steps.push({board: {}, turn: 8, round: 4, current_player: 'bob'}); rebuildTrace();`);
   assert.equal(run('gameTimeLabel(8, roundByTurn[8])'), 'Round 4 · Turn 8');
 });
+
+test('sidebar shows full identities and marks only the experimental player without changing game names', () => {
+  const players = [
+    {name: 'claude-opus-5-5#2', mission: 'Test mission', experiment_profile: {id: 'deceiver', label: 'Deceiver'}},
+    {name: 'claude-opus-5-5', mission: 'Test mission'},
+    {name: 'gemini-4-argon', mission: 'Test mission'},
+  ];
+  const elements = {};
+  const game = {players, continents: [], steps: [{board: {}, turn: 1, players: players.map(() => ({eliminated: false}))}], result: null};
+  const before = JSON.stringify(players);
+  const context = vm.createContext({
+    window: {BOOT: {game, evaluation: {spans: []}, urls: {}}},
+    document: {getElementById: id => elements[id] ??= {}},
+  });
+  vm.runInContext(readFileSync('ui/reader/state.js', 'utf8'), context);
+  vm.runInContext(readFileSync('ui/reader/timeline.js', 'utf8'), context);
+  vm.runInContext('renderFilters = () => {}; renderMissionToggle = () => {}; renderPlayerHands = () => {}; renderRail();', context);
+  const cards = elements.railPlayers.innerHTML.split('</article>');
+  assert.match(cards[0], />claude-opus-5-5#2<\/span>/);
+  assert.match(cards[0], /class="experimentBadge"[^>]*>Deceiver<\/span>/);
+  assert.match(cards[1], />claude-opus-5-5#1<\/span>/);
+  assert.doesNotMatch(cards[1], /experimentBadge/);
+  assert.match(cards[2], />gemini-4-argon<\/span>/);
+  assert.doesNotMatch(cards[2], /experimentBadge/);
+  assert.equal(JSON.stringify(players), before);
+  players[0].experiment_profile.label = 'Mission <Prober>';
+  vm.runInContext('renderRail()', context);
+  assert.match(elements.railPlayers.innerHTML, /Mission &lt;Prober&gt;/);
+});

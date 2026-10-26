@@ -21,6 +21,7 @@ from risk_bench import launch
 from risk_bench.config import load_settings, settings_for_new_game
 from risk_bench.players.human import mailbox_for
 from risk_bench.players.llm import ProviderUnavailableError
+from risk_bench.players.profiles import ExperimentPlayer
 from risk_bench.runner.tournament_evaluation import interrupt_batch, list_batches, run_batch
 
 
@@ -92,6 +93,7 @@ class GameProcessManager:
         journal_path: Path,
         log_path: Path,
         seat_order: list[int] | None = None,
+        experiment_player: ExperimentPlayer | None = None,
     ) -> None:
         """Start a game, or queue it until its tournament has a free worker slot.
 
@@ -106,9 +108,10 @@ class GameProcessManager:
             journal_path: Where the worker writes the journal.
             log_path: Where the worker's output goes.
             seat_order: Exact 1-based roster positions in seat order; None uses seeded shuffling.
+            experiment_player: The selected roster player and frozen experiment prompt, if enabled.
         """
         arguments = (str(log_path), players, seed, commentators, max_turns, additional_context,
-                     str(journal_path), seat_order)
+                     str(journal_path), experiment_player, seat_order)
         self._start(game_id=game_id, target=_run_new_game_in_worker, arguments=arguments)
 
     def resume_game(self, game_id: str, journal_path: Path, commentators: list[str], log_path: Path) -> None:
@@ -322,6 +325,7 @@ def _run_new_game_in_worker(
     max_turns: int | None,
     additional_context: list[str],
     journal_path: str,
+    experiment_player: ExperimentPlayer | None = None,
     seat_order: list[int] | None = None,
 ) -> None:
     _redirect_output(log_path=log_path, append=False)
@@ -337,6 +341,7 @@ def _run_new_game_in_worker(
             additional_context=additional_context,
             human_controls=True,
             seat_order=seat_order,
+            experiment_player=experiment_player,
         )
     except ProviderUnavailableError as error:
         print(f"[paused] {error}")

@@ -33,6 +33,13 @@ flow; the successful response's memo is journaled with its decision ID. Memos ar
 decision summaries, not access to hidden provider reasoning. Human and random-baseline controllers
 retain their existing input interfaces.
 
+When rewriting notes, each agent receives its own accepted action and negotiation memos
+since its previous notes update, in order, alongside visible events, chat, and existing
+notes. Other players' memos are never included. Pending memos survive pauses and forks
+and are cleared when that player's notes update completes. Setup memos are included in
+the first notes update. Later action and negotiation prompts still use only the rewritten
+notes as memory of earlier turns.
+
 ## Project layout
 
 | Area | Path | Responsibility |

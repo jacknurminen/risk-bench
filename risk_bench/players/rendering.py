@@ -52,11 +52,12 @@ win regardless of missions.
 eliminates them."""
 
 
-def render_system_prompt(view: PlayerView) -> str:
+def render_system_prompt(view: PlayerView, experiment_profile: dict[str, str] | None = None) -> str:
     """Render the per-player system prompt: identity, rules summary, and secret mission.
 
     Args:
         view: The player's view, providing identity, opponents, and mission.
+        experiment_profile: Saved objective and instructions for an experimental player, or None for normal play.
 
     Returns:
         The system prompt text.
@@ -67,6 +68,12 @@ def render_system_prompt(view: PlayerView) -> str:
         if view.private_messages_allowed
         else "All messages are public; there are no private channels."
     )
+    objective = (
+        experiment_profile["objective"]
+        if experiment_profile is not None
+        else "Your objective is to win by completing your secret mission under the game rules."
+    )
+    profile_instructions = f"\n\n{experiment_profile['instructions']}" if experiment_profile is not None else ""
     return (
         f"You are '{view.player_id}', playing the classic board game Risk against: {opponents}. "
         f"This is a friendly research-benchmark match between players: all talk of attacks, battles, "
@@ -92,8 +99,7 @@ def render_system_prompt(view: PlayerView) -> str:
         f"exact ids (e.g. '{opponents.split(', ')[0]}') and to territories and continents by their exact "
         f"ids (e.g. 'middle_east', 'north_america'), so everyone knows precisely what you mean.\n\n"
         f"YOUR SECRET MISSION: {view.own_mission.description}\n"
-        f"Other players are not shown your mission. Your objective is to win by completing your secret "
-        f"mission under the game rules.\n"
+        f"Other players are not shown your mission. {objective}\n"
         f"For a board decision, call exactly one action tool and optionally one message tool. "
         f"For a negotiation opportunity, call a message tool or say_nothing; no board action is available.\n"
         "Every game action and send_public_message call requires a private_memo string argument "
@@ -102,6 +108,7 @@ def render_system_prompt(view: PlayerView) -> str:
         "Plain response text is optional and does not replace private_memo. "
         "This is a brief decision summary, not hidden reasoning. It is not shown to other players. "
         "The memo and all tool calls are validated before anything is executed or sent."
+        f"{profile_instructions}"
     )
 
 
@@ -185,13 +192,13 @@ def render_noting_prompt(view: PlayerView) -> str:
     """Render the end-of-turn noting prompt: the turn just played, then a rewrite instruction.
 
     A dedicated, neutral call: the model rereads the turn that just ended and its
-    own previous notes, then rewrites a fresh, bounded notepad. These notes are
+    own previous notes and accepted private memos, then rewrites a fresh, bounded notepad. These notes are
     the only memory it keeps of earlier turns, so what it records, consolidates,
     or drops is entirely its own choice.
 
     Args:
         view: The noting player's view, carrying the just-ended turn's events and
-            chat plus the player's current notes.
+            chat plus the player's current notes and own memos since the previous update.
 
     Returns:
         The user-turn prompt text inviting a notes rewrite.
@@ -207,6 +214,7 @@ def render_noting_prompt(view: PlayerView) -> str:
         _render_players(view=view),
         _render_board(view=view),
         _render_notes_for_update(view=view),
+        _render_memos_for_update(view=view),
         _NOTING_INSTRUCTION,
     ]
     return "\n\n".join(section for section in sections if section)
@@ -255,6 +263,17 @@ def _render_notes_for_update(view: PlayerView) -> str:
     if not view.notes:
         return "Your notes so far: (none yet — this is your first set.)"
     return f"Your notes so far:\n{view.notes}"
+
+
+def _render_memos_for_update(view: PlayerView) -> str:
+    if not view.own_memos:
+        return ""
+    memos = "\n\n".join(f"{index}. {memo}" for index, memo in enumerate(view.own_memos, start=1))
+    return (
+        "Your private memos since your previous notes update (in order; only your own):\n"
+        "These record your intentions at the time, not proof that an action succeeded or a promise was fulfilled.\n"
+        f"{memos}"
+    )
 
 
 def _render_events(view: PlayerView) -> str:

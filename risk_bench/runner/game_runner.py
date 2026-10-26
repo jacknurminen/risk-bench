@@ -116,6 +116,9 @@ class GameRunner:
         self._messages_by_turn: dict[int, list[ChatMessage]] = {}
         # each player's latest notes — its only memory of earlier turns, fed back into its prompts
         self._notes: dict[PlayerId, str | None] = {}
+        # Keep accepted memos until their author's notes update has completed. A turn-ending
+        # action records its memo after TurnStarted, so event-buffer rotation cannot scope these.
+        self._pending_memos: dict[PlayerId, list[str]] = {}
         # experimenter-supplied information per player, carried by the checkpoint so a fork's
         # intervention keeps applying to every later prompt it renders
         self._additional_context: dict[PlayerId, str | None] = {}
@@ -193,6 +196,7 @@ class GameRunner:
         for message in transcript.full_transcript():
             self._messages_by_turn.setdefault(message.turn_number, []).append(message)
         self._notes = {player_id: None for player_id in self._players}
+        self._pending_memos = {player_id: [] for player_id in self._players}
         self._additional_context = {
             player_id: self._starting_context.get(player_id) or None for player_id in self._players
         }
@@ -235,6 +239,7 @@ class GameRunner:
                         "_current_turn_events",
                         "_last_turn_events",
                         "_notes",
+                        "_pending_memos",
                         "_turn_log",
                         "_previous_commentary",
                     )
@@ -457,6 +462,7 @@ class GameRunner:
                 self._notes[p["actor"]] = p["pending"]
                 if self._journal is not None:
                     self._journal.write_note(p["actor"], p["commented_turn"], p["pending"])
+            self._pending_memos[p["actor"]] = []
             p.update(stage="note_request", pending=None, note_index=p["note_index"] + 1)
             p.pop("decision_id", None)
         elif stage == "commentary":
@@ -501,6 +507,7 @@ class GameRunner:
     def _record_thought(self, player_id: PlayerId, thought: str | None) -> None:
         if thought is None:
             return
+        self._pending_memos[player_id].append(thought)
         self._turn_log.append(f"{player_id} (thinks): {thought}")
         if self._journal is not None:
             self._journal.write_thought(player_id=player_id, text=thought)
@@ -596,7 +603,7 @@ class GameRunner:
         )
 
     def _noting_view(self, state: GameState, player_id: PlayerId, finished_turn: int) -> PlayerView:
-        return build_player_view(
+        view = build_player_view(
             state=state,
             player_id=player_id,
             visible_chat=self._visible_turn_messages(player_id=player_id, turn_number=finished_turn),
@@ -605,6 +612,7 @@ class GameRunner:
             notes=self._notes[player_id],
             additional_context=self._additional_context[player_id],
         )
+        return replace(view, own_memos=tuple(self._pending_memos[player_id]))
 
     def _visible_turn_messages(self, player_id: PlayerId, turn_number: int) -> tuple[ChatMessage, ...]:
         return tuple(

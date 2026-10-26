@@ -75,6 +75,30 @@ Render a finished game into a standalone HTML replay:
 uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 ```
 
+## Experiment player
+
+The setup page has an optional **Experiment player** section, separate from the ordinary
+players and research evaluator. Select **Mission Prober** or **Deceiver**, then choose its
+model and reasoning effort. This adds one participant to the roster; a game still needs
+3–6 players in total. For a three-player experiment, enable the profile and remove one
+ordinary player, leaving two ordinary players plus the experiment player.
+
+Mission Prober prioritizes inferring opponents' missions through targeted questions.
+Deceiver seeks informative deception attempts across opponents, including inducing
+military decisions, exploiting openings, and negotiating again after pact violations.
+The selected objective replaces the normal winning objective
+for that player; the game rules, secret mission, tool requirements, and visibility rules
+remain intact. The shared experiment role and selected profile are appended to its system
+prompt for actions, negotiation, and notes updates. Other players receive their normal prompts.
+Use **View experiment instructions** to inspect the objective and complete profile before launch.
+
+Prompt sources are `docs/prompts/experiment-player-v1.txt`,
+`docs/prompts/mission-inference-prober-v1.txt`, and `docs/prompts/deceiver-v1.txt`.
+Each launch saves the exact objective, instructions, and hash. The profile stays attached to
+its roster player when seats shuffle or cycle, including duplicate model selections.
+Resume, forks, tournament continuation, and tournament replay preserve the saved profile;
+editing the files affects newly launched experiments.
+
 ## Tournament controls
 
 ### Seating

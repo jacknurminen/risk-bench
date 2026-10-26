@@ -60,6 +60,7 @@ class LLMPlayer:
         self._retry_conversation = None
         self._retry_index = 0
         self.additional_instructions = ""
+        self.experiment_profile: dict[str, str] | None = None
 
     def decide_action(self, request: DecisionRequest) -> Decision:
         """Ask the model to choose an action via tool calling, optionally with table talk.
@@ -77,7 +78,7 @@ class LLMPlayer:
             The model's validated decision; otherwise raise a resumable pause.
         """
         conversation = self._retry_conversation or [
-            Message(role="system", content=render_system_prompt(view=request.view)),
+            Message(role="system", content=self._system_prompt(view=request.view)),
             Message(role="user", content=render_decision_prompt(request=request)),
         ]
         if self._retry_conversation:
@@ -85,7 +86,7 @@ class LLMPlayer:
             # Keep the correction exchange, provider signatures and retry budget intact;
             # refresh the system requirements and game context in their original roles.
             conversation = [
-                replace(conversation[0], content=render_system_prompt(view=request.view)),
+                replace(conversation[0], content=self._system_prompt(view=request.view)),
                 replace(conversation[1], content=render_decision_prompt(request=request)),
                 *conversation[2:],
             ]
@@ -158,13 +159,13 @@ class LLMPlayer:
             The negotiation turn; silence requires an explicit pass tool call.
         """
         conversation = self._retry_conversation or [
-            Message(role="system", content=render_system_prompt(view=view)),
+            Message(role="system", content=self._system_prompt(view=view)),
             Message(role="user", content=render_negotiation_prompt(view=view)),
         ]
         if self._retry_conversation:
             # Context edits and a newly restored view apply even to a pending retry.
             conversation = [
-                replace(conversation[0], content=render_system_prompt(view=view)),
+                replace(conversation[0], content=self._system_prompt(view=view)),
                 replace(conversation[1], content=render_negotiation_prompt(view=view)),
                 *conversation[2:],
             ]
@@ -216,13 +217,13 @@ class LLMPlayer:
         notepad. Failure or an empty reply pauses the pending noting operation.
 
         Args:
-            view: The noting player's view of the just-ended turn and its current notes.
+            view: The noting player's view of the just-ended turn, current notes, and own pending memos.
 
         Returns:
             The rewritten notes; a failed response raises a resumable pause.
         """
         conversation = [
-            Message(role="system", content=render_system_prompt(view=view)),
+            Message(role="system", content=self._system_prompt(view=view)),
             Message(role="user", content=render_noting_prompt(view=view)),
         ]
         response = self._respond(conversation=conversation, tools=[])
@@ -230,6 +231,9 @@ class LLMPlayer:
         if not notes or response.tool_calls:
             raise InvalidResponseError(f"{self.player_id} returned no usable private notes. Game paused.")
         return notes
+
+    def _system_prompt(self, view: PlayerView) -> str:
+        return render_system_prompt(view=view, experiment_profile=self.experiment_profile)
 
     def _respond(self, conversation: list[Message], tools: list[Tool]) -> Response:
         if self.additional_instructions:

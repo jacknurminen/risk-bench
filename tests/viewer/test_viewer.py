@@ -50,6 +50,7 @@ def test_view_model_snapshots_track_the_board_and_outcome(tmp_path: Path):
     assert model["result"]["winner"] in PLAYER_NAMES
     assert [player["name"] for player in model["players"]] == PLAYER_NAMES
     assert all(player["mission"] for player in model["players"])
+    assert all(player["experiment_profile"] is None for player in model["players"])
     assert model["thoughts"] == []  # random players never think out loud
     json.dumps(model)  # must be embeddable in the HTML
 

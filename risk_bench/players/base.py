@@ -61,6 +61,8 @@ class PlayerView:
     recent_events: tuple[GameEvent, ...]
     round_number: int = 0
     previous_round_number: int = 0
+    # Supplied only for notes updates: this player's accepted memos since its last update.
+    own_memos: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,8 +96,8 @@ class Decision:
 class NegotiationTurn:
     """A player's contribution to one negotiation pass: messages plus private rationale.
 
-    Like ``Decision.thought``, the thought is observational only — journaled
-    for analysis, invisible to other players.
+    Like ``Decision.thought``, the thought is journaled for analysis and supplied
+    to its author's next notes update, never to other players.
     """
 
     messages: tuple[ChatMessage, ...]
@@ -146,7 +148,7 @@ class Player(Protocol):
 
         Args:
             view: The player's view of the just-ended turn, carrying that turn's
-                events and chat and the player's current notes.
+                events and chat, the player's current notes, and their own pending memos.
 
         Returns:
             The rewritten notes, or None to leave the existing notes unchanged.

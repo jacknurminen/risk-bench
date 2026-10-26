@@ -58,6 +58,16 @@ def llm_player(agent: StubAgent) -> LLMPlayer:
     return LLMPlayer(player_id=ALICE, agent=agent, max_invalid_retries=2)
 
 
+def test_notes_update_sends_own_memos_to_the_model():
+    agent = StubAgent(responses=[Response(text="Preserve the truce while expanding east.")])
+    view = replace(attack_request().view, own_memos=("The truce buys time for my eastern campaign.",))
+
+    notes = llm_player(agent=agent).update_notes(view=view)
+
+    assert notes == "Preserve the truce while expanding east."
+    assert view.own_memos[0] in (agent.conversations[0][1].content or "")
+
+
 def test_a_valid_tool_call_becomes_the_action():
     agent = StubAgent(responses=[VALID_ATTACK_RESPONSE])
     player = llm_player(agent=agent)
