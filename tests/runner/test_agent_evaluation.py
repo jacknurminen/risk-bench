@@ -8,6 +8,7 @@ import pytest
 
 from risk_bench.agents.base import Response, ToolCall
 from risk_bench.agents.tracing import TraceWriter, usage_by_caller
+from risk_bench.config import Settings
 from risk_bench.runner import codebook_v4 as cb
 from risk_bench.runner import evaluation_agent_sdk
 from risk_bench.runner.evaluation_agent import AGENT_METHOD, AgentEvaluator, JudgeRun, ToolUseLoop
@@ -16,6 +17,7 @@ from risk_bench.runner.evaluation_store import EvaluationWriter, evaluation_path
 from risk_bench.runner.evaluation_v4 import merge_ledger
 from risk_bench.runner.evaluation_versions import version_for
 from risk_bench.runner.journal import prefix_hash, read_journal
+from risk_bench.runner.live_evaluation import run_live_evaluation
 from risk_bench.runner.trace_index import build_trace_index, trace_fingerprint
 from risk_bench.viewer.evaluation import build_evaluation_view_model
 from tests.runner.test_thesis_evaluation import thesis_ledger
@@ -494,6 +496,14 @@ def test_sdk_tool_handler_returns_validation_errors_as_tool_errors():
     assert refused["is_error"] and "not a delivered message" in refused["content"][0]["text"]
     assert not accepted["is_error"]
     assert sdk_tool.annotations.maxResultSizeChars > 40_000
+
+
+def test_live_round_evaluation_refuses_an_agent_judge(tmp_path):
+    journal = tmp_path / "game" / "game.jsonl"
+    write_journal(journal)
+    with pytest.raises(ValueError, match="whole games only"):
+        run_live_evaluation(journal, ["agent:anthropic:claude-opus-5-5"], Settings(_env_file=None), follow=False)
+    assert not evaluation_path_for_journal(journal).exists()
 
 
 def test_sdk_failure_before_any_result_is_a_failed_member(monkeypatch):
