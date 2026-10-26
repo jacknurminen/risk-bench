@@ -81,16 +81,16 @@ function renderPlayerOutput() {
   const includesSetup = GAME.steps.some(step => step.turn === 0);
   el("outputNote").textContent = 'Entire recorded game · ' + turnCount + ' recorded turn' + (turnCount === 1 ? '' : 's') +
     (includesSetup ? ', including setup as one turn' : '') + '. Per-turn averages use this same period for every player, including silent turns and turns after elimination. ' +
-    'Messages include public and private deliveries. Internal reasoning counts recorded thought entries, not hidden provider reasoning. Lengths count whitespace-separated words; notes and tool calls are excluded.';
+    'Messages include public and private deliveries. Decision summaries count self-reported entries stored in the thought layer, not hidden provider reasoning. Lengths count whitespace-separated words; notes and tool calls are excluded.';
   el("outputCharts").innerHTML = [
     outputBarChart(rows, "messagesPerTurn", "Average messages per turn", "msg / turn", 2),
     outputBarChart(rows, "wordsPerMessage", "Average message length", "words / msg", 1),
-    outputBarChart(rows, "thoughts", "Internal reasoning entries", "entries"),
-    outputBarChart(rows, "wordsPerThought", "Average reasoning length", "words / entry", 1),
+    outputBarChart(rows, "thoughts", "Decision summaries", "entries"),
+    outputBarChart(rows, "wordsPerThought", "Average summary length", "words / entry", 1),
   ].join("");
   el("outputTable").innerHTML = '<thead><tr><th scope="col">Player</th><th scope="col">Messages</th>' +
     '<th scope="col">Public</th><th scope="col">Private</th><th scope="col">Message words</th>' +
-    '<th scope="col">Reasoning entries</th><th scope="col">Reasoning / turn</th><th scope="col">Reasoning words</th>' +
+    '<th scope="col">Decision summaries</th><th scope="col">Summaries / turn</th><th scope="col">Summary words</th>' +
     '</tr></thead><tbody>' + rows.map(row => '<tr><th scope="row" style="color:' + colorOf(row.name) + '">' +
       escapeHtml(row.name) + '</th>' + [row.messages, row.publicMessages, row.privateMessages, row.messageWords,
         row.thoughts, row.thoughtsPerTurn, row.thoughtWords].map(value => '<td>' + outputNumber(value, 2) + '</td>').join("") +

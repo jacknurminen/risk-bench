@@ -1,10 +1,13 @@
+import json
 from unittest.mock import MagicMock
 
 import anthropic
+import httpx
 import pytest
 
-from risk_bench.agents.anthropic import _parse_response, _to_anthropic_message, _with_usage
-from risk_bench.agents.base import Message, Response
+from risk_bench.agents.anthropic import AnthropicAgent, _parse_response, _to_anthropic_message, _with_usage
+from risk_bench.agents.base import Message, ReasoningEffort, Response
+from risk_bench.agents.tracing import TraceWriter, TracingAgent
 from risk_bench.runner.checkpoint import decode, encode
 
 
@@ -77,10 +80,78 @@ def test_unusable_anthropic_response_keeps_diagnostics_in_trace(monkeypatch, tmp
         "response_id": "msg-123",
         "model": "claude-opus-5-5",
         "stop_sequence": None,
+        "stop_details": None,
         "max_tokens": 8192,
         "reasoning_effort": "low",
         "content": [block.model_dump(mode="json", exclude_none=True) for block in blocks],
     }
+
+
+@pytest.mark.parametrize(
+    "stop_details",
+    [
+        None,
+        {"type": "refusal", "category": None, "explanation": None},
+        {"type": "refusal", "category": "reasoning_extraction", "explanation": "Test refusal explanation."},
+    ],
+)
+def test_streamed_refusal_details_survive_sdk_accumulation_and_trace(monkeypatch, tmp_path, stop_details):
+    events = [
+        {
+            "type": "message_start",
+            "message": {
+                "id": "msg-refusal",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-opus-5-5",
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {"input_tokens": 200, "output_tokens": 0},
+            },
+        },
+        {
+            "type": "message_delta",
+            "delta": {
+                "stop_reason": "refusal",
+                "stop_sequence": None,
+                "stop_details": stop_details,
+            },
+            "usage": {"output_tokens": 0},
+        },
+        {"type": "message_stop"},
+    ]
+    stream_body = "".join(f"event: {event['type']}\ndata: {json.dumps(event)}\n\n" for event in events)
+    client = anthropic.Anthropic(
+        api_key="unused",
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    status_code=200,
+                    headers={"content-type": "text/event-stream", "request-id": "req-refusal"},
+                    text=stream_body,
+                )
+            )
+        ),
+    )
+    monkeypatch.setattr(anthropic, "Anthropic", lambda **kwargs: client)
+    writer = TraceWriter(path=tmp_path / "trace.jsonl", append=False)
+    agent = TracingAgent(
+        agent=AnthropicAgent(
+            model="claude-opus-5-5", api_key="unused", max_tokens=8192, reasoning_effort=ReasoningEffort.MEDIUM
+        ),
+        model="claude-opus-5-5",
+        caller="alice",
+        writer=writer,
+    )
+    response = agent.respond(messages=[Message(role="user", content="Choose an action")], tools=[])
+    writer.close()
+    client.close()
+    recorded = json.loads(writer.path.read_text())["response"]
+    assert response.stop_reason == "refusal"
+    assert response.output_tokens == 0
+    assert recorded["provider_metadata"]["stop_details"] == stop_details
+    assert recorded["provider_metadata"]["request_id"] == "req-refusal"
 
 
 def test_usage_normalizes_cache_traffic_into_total_input():

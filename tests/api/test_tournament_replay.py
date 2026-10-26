@@ -189,7 +189,7 @@ def test_failed_preparation_keeps_current_attempt_and_original_files(server, tmp
 
 def test_saved_replay_settings_apply_after_queue_resume_without_restoring_credentials(tmp_path, monkeypatch):
     settings = Settings(
-        max_agent_tokens=111, agent_reasoning_effort=ReasoningEffort.LOW, anthropic_api_key="current-test-key"
+        max_agent_tokens=111, agent_reasoning_effort=ReasoningEffort.LOW, anthropic_aalto_api_key="current-test-key"
     )
     monkeypatch.setattr(config, "load_settings", lambda: settings)
     (tmp_path / "replay-settings.json").write_text(
@@ -199,7 +199,7 @@ def test_saved_replay_settings_apply_after_queue_resume_without_restoring_creden
                 "agent_reasoning_effort": "high",
                 "allow_private_messages": True,
                 "max_negotiation_rounds": 7,
-                "anthropic_api_key": "must-not-restore",
+                "anthropic_aalto_api_key": "must-not-restore",
             }
         )
     )
@@ -209,4 +209,4 @@ def test_saved_replay_settings_apply_after_queue_resume_without_restoring_creden
     assert restored.max_agent_tokens == 999
     assert restored.agent_reasoning_effort is ReasoningEffort.HIGH
     assert restored.allow_private_messages and restored.max_negotiation_rounds == 7
-    assert restored.anthropic_api_key == "current-test-key"
+    assert restored.anthropic_aalto_api_key == "current-test-key"

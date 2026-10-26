@@ -103,10 +103,11 @@ def render_system_prompt(view: PlayerView, experiment_profile: dict[str, str] | 
         f"For a board decision, call exactly one action tool and optionally one message tool. "
         f"For a negotiation opportunity, call a message tool or say_nothing; no board action is available.\n"
         "Every game action and send_public_message call requires a private_memo string argument "
-        "INSIDE its arguments: 1–1200 characters briefly stating what you intend and why. "
+        "INSIDE its arguments: a short decision summary of 1–1200 characters stating the intended game outcome "
+        "and relevant board facts. Use one or two brief sentences. "
         "say_nothing and send_private_message need no memo. To stay silent, call say_nothing({}). "
         "Plain response text is optional and does not replace private_memo. "
-        "This is a brief decision summary, not hidden reasoning. It is not shown to other players. "
+        "This summary is not shown to other players. "
         "The memo and all tool calls are validated before anything is executed or sent."
         f"{profile_instructions}"
     )
@@ -205,8 +206,7 @@ def render_noting_prompt(view: PlayerView) -> str:
     """
     sections = [
         f"Round {view.previous_round_number} · Turn {view.turn_number - 1} just ended. "
-        "Update the private notes you keep for your "
-        "future self before the next turn proceeds.",
+        "Update your game memory for the next turn. This memory is not shared with other players.",
         "Current board: " + _render_timing(view),
         _render_events(view=view),
         _render_chat(view=view),
@@ -234,13 +234,14 @@ def _render_timing(view: PlayerView) -> str:
 _NOTES_WORD_BUDGET: Final[int] = 200
 
 _NOTING_INSTRUCTION: Final[str] = (
-    "These notes are your only memory of earlier turns: on your next turn the live board and the "
-    "fixed map are always shown again, so you never need to record who owns what or how many armies "
-    "sit where — only what the board cannot tell you later (intentions, promises, threats, alliances, "
-    "who did what to whom, and your own plans). Rewrite your notes from scratch: keep what still "
-    "matters, drop what has gone stale, and fold in anything you learned this turn. Keep them concise "
-    f"(aim for under about {_NOTES_WORD_BUDGET} words). Reply with the notes themselves as plain text "
-    "and nothing else."
+    "This game memory is your only record of earlier turns. The live board and fixed map are shown again "
+    "on each turn. Record only game facts needed later: relevant past actions and messages, agreements "
+    "and their deadlines, mission hypotheses with confidence and supporting observations, and intended "
+    "next actions. Distinguish observations, opponents' claims, hypotheses, and your own intended actions. "
+    "Decision summaries record intended outcomes; use recorded events to establish what actually happened. "
+    "Rewrite your game memory from scratch: keep relevant entries, update changed facts, and drop stale ones. "
+    f"Use concise statements (aim for under about {_NOTES_WORD_BUDGET} words). "
+    "Reply with the game memory itself as plain text and nothing else."
 )
 
 
@@ -256,13 +257,16 @@ def _render_additional_context(view: PlayerView) -> str:
 def _render_notes(view: PlayerView) -> str:
     if not view.notes:
         return ""
-    return f"Your private notes (your memory of earlier turns; only you can see them):\n{view.notes}"
+    return (
+        "Your game memory (earlier facts, agreements, hypotheses, and intended actions; only you can see it):\n"
+        f"{view.notes}"
+    )
 
 
 def _render_notes_for_update(view: PlayerView) -> str:
     if not view.notes:
-        return "Your notes so far: (none yet — this is your first set.)"
-    return f"Your notes so far:\n{view.notes}"
+        return "Your game memory so far: (none yet — this is your first update.)"
+    return f"Your game memory so far:\n{view.notes}"
 
 
 def _render_memos_for_update(view: PlayerView) -> str:
@@ -270,8 +274,8 @@ def _render_memos_for_update(view: PlayerView) -> str:
         return ""
     memos = "\n\n".join(f"{index}. {memo}" for index, memo in enumerate(view.own_memos, start=1))
     return (
-        "Your private memos since your previous notes update (in order; only your own):\n"
-        "These record your intentions at the time, not proof that an action succeeded or a promise was fulfilled.\n"
+        "Your decision summaries since your previous memory update (in order; only your own):\n"
+        "These record intended game outcomes, not proof that an action succeeded or a promise was fulfilled.\n"
         f"{memos}"
     )
 

@@ -1,7 +1,34 @@
+from unittest.mock import MagicMock
+
+import pytest
+from google import genai
 from google.genai import types
 
+from risk_bench import specs
 from risk_bench.agents.base import Message, Response
 from risk_bench.agents.google import _parse_response, _to_content, _with_usage
+from risk_bench.config import Settings
+
+
+@pytest.mark.parametrize("effort", ["low", "medium", "high"])
+def test_argon_passes_selected_reasoning_effort_to_google(monkeypatch: pytest.MonkeyPatch, effort: str) -> None:
+    client = MagicMock()
+    client.models.generate_content.return_value = gemini_function_call_response(thought_signature=b"argon-signature")
+    monkeypatch.setattr(genai, "Client", MagicMock(return_value=client))
+    agent = specs.build_agent(
+        spec=f"google:gemini-4-argon:{effort}",
+        settings=Settings(google_api_key="unused"),
+        max_tokens=32_768,
+    )
+
+    response = agent.respond(messages=[Message(role="user", content="Choose an action")], tools=[])
+
+    sent = client.models.generate_content.call_args.kwargs
+    assert sent["model"] == "gemini-4-argon"
+    assert sent["config"].thinking_config.thinking_level.value.lower() == effort
+    assert sent["config"].max_output_tokens == 32_768
+    assert response.tool_calls[0].name == "attack"
+    assert response.tool_calls[0].provider_data == b"argon-signature"
 
 
 def gemini_function_call_response(thought_signature: bytes | None) -> types.GenerateContentResponse:

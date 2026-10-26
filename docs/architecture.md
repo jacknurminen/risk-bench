@@ -30,7 +30,10 @@ LLM game actions and public-message tools require a `private_memo` string argume
 and cannot replace the argument. The memo and every tool call are validated before
 any action is executed or message is delivered. Invalid responses enter the same bounded retry
 flow; the successful response's memo is journaled with its decision ID. Memos are recorded
-decision summaries, not access to hidden provider reasoning. Human and random-baseline controllers
+decision summaries stating the intended game outcome and relevant board facts in one or two brief sentences,
+not access to hidden provider reasoning. Persistent game memory contains relevant past actions and messages,
+agreements and deadlines, mission hypotheses with supporting observations, and intended next actions.
+Human and random-baseline controllers
 retain their existing input interfaces.
 
 When rewriting notes, each agent receives its own accepted action and negotiation memos

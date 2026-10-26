@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import pytest
 
 from risk_bench import specs
@@ -41,7 +43,7 @@ def test_effort_suffix_is_stripped_when_resolving_the_model():
 
 
 def test_build_agent_uses_the_spec_effort_and_otherwise_the_default():
-    settings = Settings(anthropic_api_key="unused", agent_reasoning_effort=ReasoningEffort.LOW)
+    settings = Settings(anthropic_aalto_api_key="unused", agent_reasoning_effort=ReasoningEffort.LOW)
 
     chosen = specs.build_agent(
         spec="anthropic:claude-opus-5:high", settings=settings, max_tokens=settings.max_agent_tokens
@@ -64,3 +66,43 @@ def test_player_names_use_resolved_model_ids_with_duplicate_suffixes():
         "claude-haiku-4-5#2": "anthropic:claude-haiku-4-5",
         "random": "random",
     }
+
+
+@pytest.mark.parametrize(
+    ("environment", "dotenv", "expected"),
+    [
+        ({"ANTHROPIC_AALTO_API_KEY": "research-key"}, "", "research-key"),
+        (
+            {"ANTHROPIC_AALTO_API_KEY": "research-key", "ANTHROPIC_API_KEY": "legacy-key"},
+            "",
+            "research-key",
+        ),
+        ({"ANTHROPIC_API_KEY": "legacy-key"}, "ANTHROPIC_AALTO_API_KEY=research-key\n", "research-key"),
+        ({}, "ANTHROPIC_AALTO_API_KEY=research-key\nANTHROPIC_API_KEY=legacy-key\n", "research-key"),
+    ],
+)
+def test_anthropic_client_uses_research_credentials(monkeypatch, tmp_path, environment, dotenv, expected):
+    for name in ("ANTHROPIC_AALTO_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    env_file = tmp_path / ".env"
+    env_file.write_text(dotenv, encoding="utf-8")
+    client_constructor = Mock()
+    monkeypatch.setattr("risk_bench.agents.anthropic.anthropic.Anthropic", client_constructor)
+
+    settings = Settings(_env_file=env_file)
+    specs.build_agent(spec="anthropic:claude-opus-5-5", settings=settings, max_tokens=settings.max_agent_tokens)
+
+    client_constructor.assert_called_once_with(api_key=expected)
+
+
+@pytest.mark.parametrize("research_key", [None, ""])
+@pytest.mark.parametrize("legacy_key", [None, "legacy-key"])
+def test_missing_research_credentials_never_use_the_legacy_key(monkeypatch, research_key, legacy_key):
+    settings = Settings(_env_file=None, anthropic_aalto_api_key=research_key, anthropic_api_key=legacy_key)
+    client_constructor = Mock()
+    monkeypatch.setattr("risk_bench.agents.anthropic.anthropic.Anthropic", client_constructor)
+    with pytest.raises(ValueError, match="set ANTHROPIC_AALTO_API_KEY in the environment or .env"):
+        specs.build_agent(spec="anthropic:claude-opus-5-5", settings=settings, max_tokens=settings.max_agent_tokens)
+    client_constructor.assert_not_called()

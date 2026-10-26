@@ -336,6 +336,8 @@ def test_only_action_and_public_message_signatures_require_a_private_memo(phase)
         memo = tool.parameters["properties"]["private_memo"]
         assert memo["type"] == "string"
         assert (memo["minLength"], memo["maxLength"]) == (1, 1200)
+        assert "intended game outcome and relevant board facts" in memo["description"]
+        assert "one or two brief sentences" in memo["description"]
     silence = next(tool for tool in tools if tool.name == "say_nothing")
     assert silence.parameters["required"] == []
     private_message = next(tool for tool in tools if tool.name == "send_private_message")

@@ -86,7 +86,14 @@ def test_a_valid_tool_call_becomes_the_action():
 def test_provider_refusal_pauses_immediately_without_consuming_validation_retries(operation, payload, capsys):
     from risk_bench.runner import checkpoint
 
-    refusal = replace(payload, stop_reason="refusal", provider_metadata={"request_id": "req-refusal"})
+    refusal = replace(
+        payload,
+        stop_reason="refusal",
+        provider_metadata={
+            "request_id": "req-refusal",
+            "stop_details": {"category": "reasoning_extraction", "explanation": "Test refusal explanation."},
+        },
+    )
     success = {
         "decision": VALID_ATTACK_RESPONSE,
         "negotiation": Response(text=None, tool_calls=(tool_call("say_nothing"),)),
@@ -106,6 +113,8 @@ def test_provider_refusal_pauses_immediately_without_consuming_validation_retrie
         run(player)
     assert "stop_reason=refusal" in str(error.value)
     assert "request_id=req-refusal" in str(error.value)
+    assert "category=reasoning_extraction" in str(error.value)
+    assert "explanation=Test refusal explanation." in str(error.value)
     assert "automatic retries stopped" in str(error.value)
     assert len(agent.conversations) == 1
     assert player.invalid_action_count == 0
@@ -457,7 +466,7 @@ def test_missing_or_oversized_memo_rejects_entire_response_before_delivery(memo,
     player = llm_player(agent)
     result = player.compose_messages(attack_request().view) if negotiation else player.decide_action(attack_request())
     assert (result.messages == ()) if negotiation else (result.chat_message is None)
-    assert any("private memo" in (m.content or "") for m in agent.conversations[1])
+    assert any("intended game outcome and relevant board facts" in (m.content or "") for m in agent.conversations[1])
     assert result.thought == valid.text
 
 

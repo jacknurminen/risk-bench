@@ -19,13 +19,19 @@ Generate keys in the [Claude Console](https://platform.claude.com/settings/keys)
 In `.env`, uncomment and set the keys for the providers you use:
 
 ```dotenv
-ANTHROPIC_API_KEY=your-anthropic-api-key
+ANTHROPIC_AALTO_API_KEY=your-anthropic-research-api-key
 OPENAI_API_KEY=your-openai-api-key
 GOOGLE_API_KEY=your-google-api-key
 ```
 
 Only selected providers need keys. Settings load from `.env` or environment variables;
 `.env` is excluded from Git. Random players require no keys.
+
+All Anthropic players, commentators, and evaluators require `ANTHROPIC_AALTO_API_KEY`.
+The legacy `ANTHROPIC_API_KEY` is not used for requests. If the research key is
+unset or empty, creating an Anthropic agent fails with a configuration error.
+After adding the key to `~/.zshrc`, run `source ~/.zshrc` in the terminal that
+launches the server. Restart an existing server to apply the updated environment.
 
 Start the web app:
 
@@ -41,6 +47,24 @@ The browser is enough to play. These commands are for running agent-only games, 
 evaluations, and replay exports directly from the terminal, after completing the setup above.
 
 Players are given inline as specs — `random` or `provider:model` (providers `anthropic`/`openai`/`google`), e.g. `anthropic:claude-opus-5-5`. Any model id the provider accepts works; the registry in `risk_bench/agents/models.py` is what the setup form offers and what usage reports can price, not a whitelist. There is no separate registration step.
+
+Gemini 4 Argon is available under Google in both player and evaluator pickers, with
+`low`, `medium`, and `high` reasoning effort (CLI example: `google:gemini-4-argon:medium`).
+Its registered introductory rates are $2 input, $0.10 cached input, and $10 output per
+million tokens, including thinking tokens. These rates apply through November 30, 2026;
+Google lists $4/$0.20/$20 from December 1. The registry stores fixed rates and does not
+switch automatically. For Argon, Google recommends an output budget of at least 32,768
+tokens; set `MAX_AGENT_TOKENS=32768` in `.env` for gameplay. The evaluator default
+of 64,000 already exceeds that recommendation. These settings apply to all models in that role.
+See Google's [Argon guide](https://ai.google.dev/gemini-api/docs/latest-model)
+and [pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-4-argon).
+
+Whole-game evaluators have a 64,000-token output budget per call, including provider
+reasoning tokens. Override it with `MAX_EVALUATOR_TOKENS` in `.env`. Opus 5.5 supports
+up to 128,000 output tokens on the regular Messages API, so an Opus-only panel can use
+`MAX_EVALUATOR_TOKENS=128000`. Choose a budget supported by every model in a mixed panel.
+New evaluation workers load the setting when they start; changing it does not alter a
+request already running. See [Opus 5.5 limits](https://platform.claude.com/docs/en/models/opus-5-5/overview).
 
 Run a quick game between random players to check the engine end-to-end:
 

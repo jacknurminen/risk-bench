@@ -108,13 +108,13 @@ def test_decision_prompt_includes_private_notes_when_present():
     prompt = render_decision_prompt(request=with_notes)
 
     assert "bob betrayed me on turn 3" in prompt
-    assert "private notes" in prompt
+    assert "Your game memory" in prompt
 
 
 def test_decision_prompt_omits_the_notes_section_when_there_are_none():
     prompt = render_decision_prompt(request=attack_request())  # the helper builds a view with notes=None
 
-    assert "private notes" not in prompt
+    assert "Your game memory" not in prompt
 
 
 def test_noting_prompt_shows_the_turn_and_asks_for_a_bounded_rewrite():
@@ -123,8 +123,12 @@ def test_noting_prompt_shows_the_turn_and_asks_for_a_bounded_rewrite():
     prompt = render_noting_prompt(view=view)
 
     assert "old memo" in prompt  # the current notes are shown for revision
-    assert "Rewrite your notes" in prompt
+    assert "Rewrite your game memory" in prompt
     assert "under about" in prompt  # the soft size budget is suggested, not enforced
+    assert "agreements and their deadlines" in prompt
+    assert "mission hypotheses with confidence and supporting observations" in prompt
+    assert "intended next actions" in prompt
+    assert "use recorded events to establish what actually happened" in prompt
 
 
 def test_own_memos_are_rendered_in_order_only_for_notes_updates():
@@ -139,4 +143,4 @@ def test_own_memos_are_rendered_in_order_only_for_notes_updates():
     for memo in memos:
         assert memo not in render_decision_prompt(request=replace(request, view=view))
         assert memo not in render_negotiation_prompt(view=view)
-    assert "Your private memos" not in render_noting_prompt(view=request.view)
+    assert "Your decision summaries" not in render_noting_prompt(view=request.view)

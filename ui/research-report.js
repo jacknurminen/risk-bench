@@ -147,9 +147,9 @@ function tournamentOutputHtml(output) {
     ['messages_per_game', 'Messages per game', 'msg / game', 2],
     ['messages_per_turn', 'Messages per turn', 'msg / turn', 2],
     ['words_per_message', 'Average message length', 'words / msg', 1],
-    ['thoughts_per_game', 'Reasoning entries per game', 'entries / game', 2],
-    ['thoughts_per_turn', 'Reasoning entries per turn', 'entries / turn', 2],
-    ['words_per_thought', 'Average reasoning length', 'words / entry', 1],
+    ['thoughts_per_game', 'Decision summaries per game', 'entries / game', 2],
+    ['thoughts_per_turn', 'Decision summaries per turn', 'entries / turn', 2],
+    ['words_per_thought', 'Average summary length', 'words / entry', 1],
   ].map(([key, title, unit, decimals]) => {
     const max = Math.max(1, ...rows.map(row => row[key] ?? 0));
     return '<figure class="researchOutputChart"><figcaption>' + title + '</figcaption>' + rows.map((row, i) => {
@@ -164,7 +164,7 @@ function tournamentOutputHtml(output) {
   return '<section class="researchCohort" aria-label="Player output volume"><header><h3>Player output volume</h3>' +
     '<p>' + number(output.game_count) + ' recorded game(s) · ' + number(output.unfinished_games) +
     ' unfinished · includes games without evaluations</p></header>' +
-    '<p class="researchReportNote">Public and private messages sent, and recorded internal reasoning entries. ' +
+    '<p class="researchReportNote">Public and private messages sent, and self-reported decision summaries stored in the thought layer. ' +
     'Lengths count whitespace-separated words; notes, tool calls and hidden provider reasoning are excluded. ' +
     'Per-game averages include silent games. Per-turn averages divide pooled counts by recorded game turns' +
     (output.includes_setup ? ', including setup once per game' : '') +
@@ -173,7 +173,7 @@ function tournamentOutputHtml(output) {
     '<div class="researchOutputCharts">' + charts + '</div>' +
     '<details class="researchRecordDetails"><summary>Output totals and denominators</summary>' +
     researchTable(['Player', 'Games', 'Recorded turns', 'Messages', 'Public', 'Private', 'Message words',
-      'Reasoning entries', 'Reasoning words'], rows.map(row => [researchEscape(row.name),
+      'Decision summaries', 'Summary words'], rows.map(row => [researchEscape(row.name),
         ...['games', 'recorded_turns', 'messages', 'public_messages', 'private_messages', 'message_words',
           'thoughts', 'thought_words'].map(key => number(row[key]))])) + '</details></section>';
 }

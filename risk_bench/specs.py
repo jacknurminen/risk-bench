@@ -1,7 +1,7 @@
 """Player model-spec resolution, shared by the CLI and the web API.
 
-A spec is 'human' (web games), 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5-5'), optionally suffixed with
-':<effort>' (low / mid- via 'medium' / high) to set that player's reasoning effort, e.g.
+A spec is 'human' (web games), 'random' or 'provider:model' (e.g. 'anthropic:claude-opus-5-5'), optionally
+suffixed with ':<effort>' (low / mid- via 'medium' / high) to set that player's reasoning effort, e.g.
 'anthropic:claude-opus-5-5:low'. Without the suffix the global default effort applies. Any model id
 the provider accepts may be named, not only the ones listed in ``agents.models.MODELS`` — the
 registry is what the setup form offers and what usage reports can price, not a whitelist.
@@ -233,11 +233,12 @@ def _split_effort(spec: str) -> tuple[str, ReasoningEffort | None]:
 
 def _require_api_key(provider: str, settings: Settings) -> str:
     keys_by_provider = {
-        "anthropic": settings.anthropic_api_key,
+        "anthropic": settings.anthropic_aalto_api_key,
         "openai": settings.openai_api_key,
         "google": settings.google_api_key,
     }
     api_key = keys_by_provider.get(provider)
-    if api_key is None:
-        raise ValueError(f"No API key configured for '{provider}'; set {provider.upper()}_API_KEY.")
+    if not api_key:
+        key_name = "ANTHROPIC_AALTO_API_KEY" if provider == "anthropic" else f"{provider.upper()}_API_KEY"
+        raise ValueError(f"No API key configured for '{provider}'; set {key_name} in the environment or .env.")
     return api_key

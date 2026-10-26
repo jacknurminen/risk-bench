@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     # provider API keys
+    anthropic_aalto_api_key: str | None = None
+    # Accept existing .env files, but do not use this legacy key for requests.
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
     google_api_key: str | None = None
@@ -31,7 +33,7 @@ class Settings(BaseSettings):
     # a reasoning model to think AND still emit its tool call (4096 proved too tight for GPT)
     max_agent_tokens: int = 8192
     # Whole-game adjudication emits linked research units, requiring more output than gameplay calls.
-    max_evaluator_tokens: int = 32000
+    max_evaluator_tokens: int = 64000
     agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
     # how many commentator-panel members may call their providers at once per commentary point

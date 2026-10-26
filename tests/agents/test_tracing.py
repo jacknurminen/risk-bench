@@ -209,6 +209,7 @@ def test_haiku_55_aggregates_costs_after_pricing_each_request(tmp_path):
         ("claude-opus-5-5", (4.0, 5.0, 0.20, 20.0)),
         ("gpt-6-sol", (2.0, 2.5, 0.20, 10.0)),
         ("gpt-6-luna", (0.10, 0.125, 0.01, 0.50)),
+        ("gemini-4-argon", (2.0, 2.0, 0.10, 10.0)),
     ],
 )
 def test_new_models_use_current_input_cache_and_output_rates(model, rates):

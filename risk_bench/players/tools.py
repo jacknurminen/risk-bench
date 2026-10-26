@@ -182,7 +182,8 @@ def _with_private_memo(tool: Tool) -> Tool:
         "properties": {
             "private_memo": {
                 "type": "string", "minLength": 1, "maxLength": 1200,
-                "description": "Required private decision summary: what you intend and why, in 1–1200 characters. "
+                "description": "Required short decision summary: the intended game outcome and relevant board facts, "
+                "in one or two brief sentences (1–1200 characters). "
                 "Never delivered to other players.",
             },
             **tool.parameters["properties"],

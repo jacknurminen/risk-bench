@@ -121,6 +121,10 @@ def test_the_model_catalog_offers_every_model_with_its_prices(tmp_path: Path):
     anthropic_models = catalog["models_by_provider"]["anthropic"]
     # the setup form offers a provider's first entry by default, so the flagship must lead
     assert anthropic_models[0]["id"] == "claude-fable-5-1"
+    argon = catalog["models_by_provider"]["google"][0]
+    assert argon["id"] == "gemini-4-argon"
+    assert (argon["input_usd_per_million"], argon["output_usd_per_million"]) == (2.00, 10.00)
+    assert catalog["efforts"] == ["low", "medium", "high"]
     assert {model["id"] for model in anthropic_models} >= {"claude-opus-5-5", "claude-haiku-4-5"}
     ids = {model["id"] for models in catalog["models_by_provider"].values() for model in models}
     assert {"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "claude-fable-5"} <= ids

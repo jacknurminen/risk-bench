@@ -35,7 +35,9 @@ class AnthropicAgent:
 
         # Streamed rather than created in one shot: with a large output budget (the evaluator's
         # whole-game pass) the SDK refuses non-streaming requests that may run past 10 minutes.
-        # We still only consume the accumulated final message, so behaviour is otherwise identical.
+        # Older SDKs omit stop_details when accumulating message_delta into the final message,
+        # so preserve it from the stream as well as checking the final response.
+        stop_details = None
         with self._client.messages.stream(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -44,8 +46,14 @@ class AnthropicAgent:
             tools=[_to_anthropic_tool(tool=tool) for tool in tools] if tools else anthropic.omit,
             output_config={"effort": self._reasoning_effort.value} if self._supports_effort else anthropic.omit,
         ) as stream:
+            for event in stream:
+                if isinstance(event, anthropic.types.RawMessageDeltaEvent):
+                    delta = event.delta.model_dump(mode="json")
+                    if delta.get("stop_details") is not None:
+                        stop_details = delta["stop_details"]
             response = stream.get_final_message()
             request_id = stream.request_id
+        stop_details = response.model_dump(mode="json").get("stop_details") or stop_details
         parsed = _parse_response(content_blocks=response.content)
         parsed = dataclasses.replace(
             parsed,
@@ -56,6 +64,7 @@ class AnthropicAgent:
                 "response_id": response.id,
                 "model": response.model,
                 "stop_sequence": response.stop_sequence,
+                "stop_details": stop_details,
                 "max_tokens": self._max_tokens,
                 "reasoning_effort": self._reasoning_effort.value if self._supports_effort else None,
                 "content": [block.model_dump(mode="json", exclude_none=True) for block in response.content],

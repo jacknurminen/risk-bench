@@ -97,7 +97,7 @@ el("commToggle").onclick = () => {
   renderFilters(); renderEvalBar(); renderSynthesis(); renderTimeline();
 };
 const KINDS = {
-  thought: ["private reasoning", "var(--deceptive)"], message: ["delivered message", "var(--blue)"],
+  thought: ["decision summary", "var(--deceptive)"], message: ["delivered message", "var(--blue)"],
   action: ["applied action", "#8a7b57"], event: ["engine event", "#9aa3ae"], note: ["private note", "#b07d2e"],
 };
 function renderTimeline() {

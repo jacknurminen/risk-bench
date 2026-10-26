@@ -283,7 +283,14 @@ def _response_diagnostics(response: Response) -> str:
         details.append(f"stop_reason={response.stop_reason}")
     if response.output_tokens is not None:
         details.append(f"output_tokens={response.output_tokens}")
-    request_id = (response.provider_metadata or {}).get("request_id")
+    metadata = response.provider_metadata or {}
+    stop_details = metadata.get("stop_details")
+    if isinstance(stop_details, dict):
+        if stop_details.get("category"):
+            details.append(f"category={stop_details['category']}")
+        if stop_details.get("explanation"):
+            details.append(f"explanation={stop_details['explanation']}")
+    request_id = metadata.get("request_id")
     if request_id:
         details.append(f"request_id={request_id}")
     return f" ({', '.join(details)})" if details else ""
@@ -308,7 +315,8 @@ def _response_memo(response: Response) -> str | None:
         if not isinstance(text, str) or not text.strip() or len(text) > 1200:
             raise InvalidToolCallError(
                 f"{call.name} requires a private_memo string argument of 1–1200 characters: "
-                "a short private memo describing your intent and reason. Put it INSIDE the tool arguments. "
+                "a short decision summary stating the intended game outcome and relevant board facts. "
+                "Use one or two brief sentences. Put it INSIDE the tool arguments. "
                 "Keep your chosen tool and its other required arguments. "
                 "Plain response text does not satisfy this field. Nothing in this response was executed or sent."
             )

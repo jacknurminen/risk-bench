@@ -4,7 +4,8 @@
 selectable from the CLI, the setup form and the evaluation panel, and to be priced in every usage
 report. Prices are USD per million tokens, checked 2026-09-08; Opus 5.5 and GPT-6 Sol/Luna
 updated 2026-09-23, Sonnet 5.5 updated 2026-09-29; Haiku 5.5, Fable 5.1,
-GPT-6.1 Sol and restored previous versions checked 2026-10-08 against the providers' pricing pages:
+GPT-6.1 Sol and restored previous versions checked 2026-10-08; Gemini 4 Argon checked
+2026-10-20 against the providers' pricing pages:
 https://platform.claude.com/docs/en/about-claude/pricing
 https://ai.google.dev/gemini-api/docs/pricing
 https://developers.openai.com/api/docs/pricing
@@ -97,7 +98,13 @@ MODELS: Final[tuple[BenchmarkModel, ...]] = (
     _model(model_id="claude-opus-5", provider=Provider.ANTHROPIC, input_usd=5.00, output_usd=25.00),
     _model(model_id="claude-sonnet-5", provider=Provider.ANTHROPIC, input_usd=2.00, output_usd=10.00),
     _model(model_id="claude-haiku-4-5", provider=Provider.ANTHROPIC, input_usd=1.00, output_usd=5.00),
-    # google; the pro rate is for prompts up to 200k tokens ($4.00 / $18.00 above that), and the
+    # google; Argon introductory rates apply through 2026-11-30, then double to $4 / $20
+    # ($0.20 cached input). Only implicit caching is supported, with a 95% input discount.
+    _model(
+        model_id="gemini-4-argon", provider=Provider.GOOGLE,
+        input_usd=2.00, output_usd=10.00, cache_read_multiplier=0.05,
+    ),
+    # The pro rate is for prompts up to 200k tokens ($4.00 / $18.00 above that), and the
     # 3.8 flash rate is introductory through 2026-12-31, doubling to $1.50 / $7.50 on 2027-01-01
     _model(model_id="gemini-3.1-pro-preview", provider=Provider.GOOGLE, input_usd=2.00, output_usd=12.00),
     _model(model_id="gemini-3.8-flash", provider=Provider.GOOGLE, input_usd=0.75, output_usd=3.75),
