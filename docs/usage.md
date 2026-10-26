@@ -210,8 +210,10 @@ runs with no complete assessment fail.
 ### Agent judge
 
 Prefix an evaluator spec with `agent:` to use the agent judge instead, for example
-`--evaluator agent:anthropic:claude-opus-5-5:high` (efforts: low, medium, high, xhigh, max). It
-evaluates whole games only; live round-by-round panels reject it. Rather than answering in one call,
+`--evaluator agent:anthropic:claude-opus-5-5:high` (efforts: low, medium, high, xhigh, max). In the
+web app, tick **run as agent** next to an Anthropic evaluator on the setup page, the game's evaluation
+panel or the tournament rerun panel. It evaluates whole games only; the toggle is disabled for Live
+and Replay rounds, and live round-by-round panels reject it. Rather than answering in one call,
 the agent pages through the observed trace with read-only tools, screens every message, and writes
 each commitment, history event, deception and candidate through tools that validate the codebook
 model and every citation straight away. It runs `check`, and `submit` is refused while a message is

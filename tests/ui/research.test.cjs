@@ -617,7 +617,9 @@ test('rerun method control keeps a single panel and changes its action', () => {
   const run = reader({finished:true, evaluate:true});
   run(`let inputs=[{value:'live_rounds'},{value:'whole_game'}];
     el('evalConfig').querySelectorAll=()=>inputs;
-    el('evalRows').children=[{model:'keep me'}]; bindEvaluationConfig();
+    const toggle={querySelector:()=>agentInput,hidden:false}; const agentInput={checked:true,disabled:false};
+    el('evalRows').children=[{model:'keep me',querySelector:selector=>selector==='.evA'?toggle:{value:'anthropic'}}];
+    bindEvaluationConfig();
     inputs[1].onchange();`);
   assert.equal(run('chosenEvaluationMethod()'), 'whole_game');
   assert.equal(run('el("evalRun").textContent'), 'Run whole-game analysis');
@@ -627,6 +629,27 @@ test('rerun method control keeps a single panel and changes its action', () => {
   run('inputs[0].onchange()');
   assert.equal(run('el("evalRun").textContent'), 'Replay rounds');
   assert.equal(run('el("evalRows").children[0].model'), 'keep me');
+  assert.equal(run('agentInput.disabled'), true);
   run('GAME.result=null; inputs[1].onchange()');
   assert.equal(run('el("evalRun").disabled'), true);
+  assert.equal(run('agentInput.disabled'), false);
+});
+
+test('the agent toggle shows for Anthropic members and prefixes whole-game specs only', () => {
+  const run = reader({finished:true, evaluate:true});
+  run(`function fakeRow(provider, checked) {
+      const input={checked,disabled:false}; const toggle={hidden:false,title:'',querySelector:()=>input};
+      const values={'.evP':provider,'.evM':'model-x','.evE':'high'};
+      return {toggle,input,querySelector:selector=>selector==='.evA'?toggle:selector==='.evA input'?input:{value:values[selector]}};
+    }
+    const anthropicRow=fakeRow('anthropic',true); const openaiRow=fakeRow('openai',true);
+    evaluationDraftMethod='whole_game'; syncEvalAgentToggle(anthropicRow); syncEvalAgentToggle(openaiRow);`);
+  assert.equal(run('anthropicRow.toggle.hidden'), false);
+  assert.equal(run('openaiRow.toggle.hidden'), true);
+  assert.equal(run('evalRowSpec(anthropicRow,"whole_game")'), 'agent:anthropic:model-x:high');
+  assert.equal(run('evalRowSpec(openaiRow,"whole_game")'), 'openai:model-x:high');
+  assert.equal(run('evalRowSpec(anthropicRow,"live_rounds")'), 'anthropic:model-x:high');
+  run(`evaluationDraftMethod='live_rounds'; syncEvalAgentToggle(anthropicRow);`);
+  assert.equal(run('anthropicRow.input.disabled'), true);
+  assert.match(run('anthropicRow.toggle.title'), /whole games only/);
 });

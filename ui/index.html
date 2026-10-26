@@ -51,6 +51,10 @@
   .sectionLabel .hint { text-transform: none; letter-spacing: 0; font-size: 10.5px; color: var(--faint); }
   .playerRow { flex-wrap: wrap; }
   .playerRow[hidden] { display: none; }
+  .agentToggle { font-family: var(--font-mono); font-size: 11px; color: var(--mute); display: flex; gap: 5px;
+                 align-items: center; cursor: pointer; }
+  .agentToggle[hidden] { display: none; }
+  .agentToggle:has(input:disabled) { opacity: .5; cursor: not-allowed; }
   #experimentPrompt { white-space: pre-wrap; max-height: 320px; overflow: auto;
     font: 12px/1.55 var(--font-sans); padding: 12px; background: var(--subtle); }
   #experimentDescription { max-width: 850px; line-height: 1.5; }
@@ -234,14 +238,18 @@ async function loadModels() {
   evaluatorRow.innerHTML = `<span class="seat">model</span>
     <div class="providerPicker">${["off", ...providers].map(name => providerTile(name, name === evaluatorProvider)).join("")}</div>
     <select class="modelSelect">${modelOptions(evaluatorProvider, evaluatorModel)}</select>
-    <select class="effortSelect">${effortOptions("medium")}</select>`;
+    <select class="effortSelect">${effortOptions("medium")}</select>
+    <label class="agentToggle"${evaluatorProvider === "anthropic" ? "" : " hidden"}>
+      <input type="checkbox" class="agentCheck"> run as agent</label>`;
   evaluatorRow.querySelectorAll(".providerTile").forEach(tile =>
     tile.onclick = () => selectProvider(evaluatorRow, tile.dataset.provider));
   document.querySelectorAll('input[name="evaluationMethod"]').forEach(input => input.onchange = () => {
     el("evaluationMethodHint").textContent = input.value === "live_rounds"
       ? "Reviews each completed round during play; the game waits for each review."
       : "Analyzes the full record automatically after the game finishes.";
+    syncEvaluatorAgentToggle();
   });
+  syncEvaluatorAgentToggle();
   addPlayerRow(); addPlayerRow(); addPlayerRow();
 }
 
@@ -328,6 +336,25 @@ function selectProvider(row, provider) {
   row.querySelector(".modelSelect").disabled = baseline;
   row.querySelector(".effortSelect").disabled = baseline;
   row.querySelector(".modelSelect").innerHTML = modelOptions(provider, defaultModel(provider));
+  const agentToggle = row.querySelector(".agentToggle");
+  if (agentToggle) agentToggle.hidden = provider !== "anthropic";
+}
+
+// the agent judge reads the whole game through tools, so it cannot review rounds live
+function syncEvaluatorAgentToggle() {
+  const live = document.querySelector('input[name="evaluationMethod"]:checked').value === "live_rounds";
+  const agentCheck = el("evaluatorRow").querySelector(".agentCheck");
+  agentCheck.disabled = live;
+  agentCheck.parentNode.title = live
+    ? "Agent judges analyze whole games only. Choose Whole game to use one."
+    : "Annotate the finished game with an agent that reads the trace and writes each record through checked tools.";
+}
+
+function evaluatorSpec() {
+  const spec = specFromRow(el("evaluatorRow"));
+  const agentCheck = el("evaluatorRow").querySelector(".agentCheck");
+  const asAgent = spec.startsWith("anthropic:") && agentCheck.checked && !agentCheck.disabled;
+  return asAgent ? `agent:${spec}` : spec;
 }
 
 function renumber() {
@@ -351,7 +378,7 @@ async function launch() {
     players.push(specFromRow(el("experimentRow")));
     playerContext.push("");
   }
-  const evaluator = specFromRow(el("evaluatorRow"));
+  const evaluator = evaluatorSpec();
   const body = {
     players,
     evaluators: evaluator === "off" ? [] : [evaluator],
