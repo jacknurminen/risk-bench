@@ -159,9 +159,11 @@ def test_message_review_is_blind_until_coded_and_scores_recall(tournament):
     messages = [i for i in view["items"] if i["kind"] == "message"]
     assert all("judge" not in item for item in messages)
     reply = next(i for i in messages if i["span"] == 2)
-    assert reply["context"]["earlier_messages"][0]["span"] == 1
+    # One chronological timeline: alice's private plan, her promise, then bob's reply in place.
+    assert [(e["span"], e["role"]) for e in reply["context"]["timeline"]] == [(1, "message"), (2, "target")]
     promise = next(i for i in messages if i["span"] == 1)
-    assert [s["span"] for s in promise["context"]["private"]] == [0]
+    timeline = [(e["span"], e["role"]) for e in promise["context"]["timeline"]]
+    assert timeline == [(0, "private"), (1, "target"), (2, "message")]
 
     for item in messages:
         # Code the promise as a commitment and an (undocumented) deception; the reply as neither.

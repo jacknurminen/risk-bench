@@ -39,11 +39,18 @@ test('next unreviewed item wraps around and reports when all are done', () => {
   assert.equal(run('nextOpenIndex(items.map(() => ({verdict: 1})), 0)'), -1);
 });
 
-test('message items never render the evaluator labels', () => {
+test('message items render one timeline in order and never the evaluator labels', () => {
   const run = load();
   const html = run(`messageHtml({game_id: "g", judge: {commitments: ["SECRET"]},
-    message: {span: 4, layer: "message", player: "alice", turn: 1, text: "I promise"},
-    context: {earlier_messages: [], later_messages: [], private: []}})`);
-  assert.match(html, /I promise/);
+    message: {span: 4, layer: "message", player: "alice", turn: 2, text: "I promise"},
+    context: {timeline: [
+      {span: 1, role: "message", layer: "message", player: "bob", turn: 1, round: 1, text: "Deal?"},
+      {span: 2, role: "private", layer: "thought", player: "alice", turn: 1, round: 1, text: "Plan to attack"},
+      {span: 3, role: "board", layer: "action", player: "alice", turn: 2, round: 1, text: "alice attacks"},
+      {span: 4, role: "target", layer: "message", player: "alice", turn: 2, round: 1, text: "I promise"},
+    ]}})`);
   assert.doesNotMatch(html, /SECRET/);
+  const order = ['Deal?', 'Plan to attack', 'turn 2', 'alice attacks', 'id="targetLine"'].map(text => html.indexOf(text));
+  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join());
+  assert.match(html, /private · decision summary/);
 });

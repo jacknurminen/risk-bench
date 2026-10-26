@@ -110,19 +110,37 @@ function findingHtml(item) {
   return html;
 }
 
+const ROLE_LABELS = {
+  target: "message to code",
+  message: "message",
+  board: "board",
+};
+
+function roleLabel(entry) {
+  if (entry.role !== "private") return ROLE_LABELS[entry.role];
+  return entry.layer === "note" ? "private · game memory" : "private · decision summary";
+}
+
+// One chronological timeline: the coded message in place, with the conversation around it and the
+// speaker's private records and board activity interleaved where they happened.
 function messageHtml(item) {
-  const line = (span, kind) => `<div class="msg ${kind}"><span class="where">${escapeHtml(spanLabel(span))}</span>${escapeHtml(span.text)}</div>`;
-  const context = item.context;
+  const speaker = escapeHtml(item.message.player);
   let html = `<div class="kicker">message · ${escapeHtml(item.game_id)} · blind: the evaluator's labels are hidden</div>`;
-  html += `<h2>Message from ${escapeHtml(item.message.player)}</h2><div class="thread">`;
-  html += context.earlier_messages.map(span => line(span, "context")).join("");
-  html += line(item.message, "target");
-  html += context.later_messages.map(span => line(span, "context")).join("");
-  html += `</div><div class="kicker">${escapeHtml(item.message.player)}'s private records (decision summaries and game memory)</div><div class="thread">`;
-  html += context.private.length ? context.private.map(span => line(span, "private")).join("") : `<p class="mute">None recorded before this message.</p>`;
-  html += `</div><div class="kicker">${escapeHtml(item.message.player)}'s actions and events since the previous turn</div><div class="thread">`;
-  const board = context.board || [];
-  html += board.length ? board.map(span => line(span, "board")).join("") : `<p class="mute">No board activity in this window.</p>`;
+  html += `<h2>Message from ${speaker}</h2>`;
+  html += `<div class="msg target">${escapeHtml(item.message.text)}</div>`;
+  html += `<p class="legend"><span class="key target"></span>message to code <span class="key message"></span>other messages
+    <span class="key private"></span>${speaker}'s private records <span class="key board"></span>${speaker}'s moves and outcomes</p>`;
+  html += `<div class="kicker">timeline, oldest first</div><div class="thread">`;
+  let turn = null;
+  for (const entry of item.context.timeline) {
+    if (entry.turn !== turn) {
+      turn = entry.turn;
+      html += `<div class="turnMark">turn ${entry.turn}${entry.round != null ? ` · round ${entry.round}` : ""}</div>`;
+    }
+    const who = entry.player && entry.role !== "board" ? ` · ${escapeHtml(entry.player)}` : "";
+    html += `<div class="msg ${entry.role}"${entry.role === "target" ? ' id="targetLine"' : ""}>`
+      + `<span class="where">${escapeHtml(roleLabel(entry))}${who} · span ${entry.span}</span>${escapeHtml(entry.text)}</div>`;
+  }
   return html + "</div>";
 }
 
@@ -247,6 +265,8 @@ function startReview(tournamentId) {
     el("verdictStatus").textContent = item.verdict ? `saved ${new Date(item.verdict.reviewed_at).toLocaleString()}` : "";
     el("verdictError").textContent = "";
     window.scrollTo({ top: 0 });
+    // Wide screens keep the questions beside the timeline, so bring the coded message into view.
+    if (item.kind === "message" && window.innerWidth >= 1180) el("targetLine")?.scrollIntoView({ block: "center" });
   }
 
   async function renderReport() {

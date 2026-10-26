@@ -437,8 +437,15 @@ def _span_view(span: TraceSpan) -> dict:
 
 
 def _message_context(spans: tuple[TraceSpan, ...], target: TraceSpan) -> dict:
+    """One chronological timeline around a message, each line tagged with why it is shown.
+
+    Roles: ``target`` (the message to code), ``message`` (surrounding conversation),
+    ``private`` (the speaker's decision summaries and game memory) and ``board`` (the speaker's
+    actions and the outcomes naming them).
+    """
     earlier = [s for s in spans if s.layer == "message" and s.span < target.span][-CONTEXT_MESSAGES:]
     later = [s for s in spans if s.layer == "message" and s.span > target.span][:2]
+    start = earlier[0].span if earlier else target.span
     # Deception needs the speaker's own prior or same-decision private records.
     private = [
         s
@@ -458,12 +465,11 @@ def _message_context(spans: tuple[TraceSpan, ...], target: TraceSpan) -> dict:
     if last_note is not None:
         private_spans[last_note.span] = last_note
     # Board facts a deceptive claim could contradict: the speaker's actions and the outcomes naming
-    # them, from the start of the previous turn up to the message. Single dice rolls are left out.
+    # them, within the conversation window up to the message. Single dice rolls are left out.
     board = [
         s
-        for s in spans[: target.span]
-        if s.turn >= target.turn - 1
-        and (
+        for s in spans[start : target.span]
+        if (
             (s.layer == "action" and s.player == target.player)
             or (
                 s.layer == "event"
@@ -473,12 +479,11 @@ def _message_context(spans: tuple[TraceSpan, ...], target: TraceSpan) -> dict:
             )
         )
     ][-CONTEXT_BOARD:]
-    return {
-        "earlier_messages": [_span_view(s) for s in earlier],
-        "later_messages": [_span_view(s) for s in later],
-        "private": [_span_view(private_spans[key]) for key in sorted(private_spans)],
-        "board": [_span_view(s) for s in board],
-    }
+    roles = {s.span: "board" for s in board}
+    roles.update({s: "private" for s in private_spans})
+    roles.update({s.span: "message" for s in (*earlier, *later)})
+    roles[target.span] = "target"
+    return {"timeline": [{**_span_view(spans[number]), "role": roles[number]} for number in sorted(roles)]}
 
 
 def review_view(tournament_directory: Path, sample_id: str) -> dict:
