@@ -16,7 +16,8 @@ from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
 from risk_bench.players import rendering, tools
 from risk_bench.players.human import mailbox_for
-from risk_bench.players.llm import ProviderUnavailableError
+from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
+from risk_bench.players.profiles import ExperimentPlayer, load_profile
 from risk_bench.players.rendering import render_board_text
 from risk_bench.runner.checkpoint import restore_engine
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
@@ -50,6 +51,7 @@ def run_new_game(
     additional_context: list[str],
     human_controls: bool = False,
     seat_order: list[int] | None = None,
+    experiment_player: ExperimentPlayer | None = None,
 ) -> tuple[GameRecord, Path]:
     """Play a fully journaled game between the given player specs.
 
@@ -66,6 +68,7 @@ def run_new_game(
             with ``models``; pass an empty list to give none.
         human_controls: True only for web workers with an API serving the human mailbox.
         seat_order: Exact order of 1-based positions in models; None uses seeded shuffling.
+        experiment_player: Optional profile assigned to a roster position before seating, with saved prompt text.
 
     Returns:
         The finished game's record and its journal path.
@@ -79,6 +82,13 @@ def run_new_game(
     if additional_context and len(additional_context) != len(models):
         raise ValueError("Additional context must be empty or hold one entry per player.")
     named = specs.named_specs(specs=models)
+    experiment_name = None
+    experiment_profile = None
+    if experiment_player is not None:
+        if experiment_player.player > len(models) or models[experiment_player.player - 1] in {"random", "human"}:
+            raise ValueError("The experiment player must select a model-backed player in the roster.")
+        experiment_name = list(named)[experiment_player.player - 1]
+        experiment_profile = experiment_player.snapshot or load_profile(profile_id=experiment_player.profile)
     # named_specs keeps the caller's order, so the context lines pair with the names before seating
     starting_context = {name: text for name, text in zip(named, additional_context) if text}
     if seat_order is None:
@@ -100,6 +110,17 @@ def run_new_game(
         )
         for name, spec in player_specs.items()
     }
+    configuration = persisted_configuration(settings)
+    if experiment_player is not None and experiment_name is not None and experiment_profile is not None:
+        experiment_controller = players[experiment_name]
+        if not isinstance(experiment_controller, LLMPlayer):
+            raise ValueError("Experimental profiles require an LLM player.")
+        experiment_controller.experiment_profile = experiment_profile.model_dump()
+        configuration["experiment_player"] = {
+            "player_id": experiment_name,
+            "roster_position": experiment_player.player,
+            **experiment_profile.model_dump(),
+        }
     turn_limit = max_turns if max_turns is not None else settings.max_turns
     journal = JournalWriter(path=journal_path, append=False)
     journal.write_header(
@@ -111,7 +132,7 @@ def run_new_game(
             allow_private_messages=settings.allow_private_messages,
             max_negotiation_rounds=settings.max_negotiation_rounds,
             commentators=commentators,
-            configuration=persisted_configuration(settings),
+            configuration=configuration,
         )
     )
     runner = GameRunner(

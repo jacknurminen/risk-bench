@@ -38,6 +38,7 @@ from risk_bench.api.schemas import (
 )
 from risk_bench.config import REPLAY_SETTING_FIELDS, load_settings
 from risk_bench.game.engine import IllegalActionError
+from risk_bench.players.profiles import ExperimentProfile, load_profile, profile_catalog
 from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.evaluation_config import configure_evaluation, configured_panel
 from risk_bench.runner.evaluation_store import (
@@ -407,6 +408,10 @@ def create_app(games_directory: Path) -> FastAPI:
             if record.get("seq") == sequence_number:
                 return record
         raise HTTPException(status_code=404, detail="No such trace record.")
+
+    @app.get("/api/experiment-profiles")
+    def experiment_profiles() -> list[ExperimentProfile]:
+        return profile_catalog()
 
     @app.get("/api/models")
     def model_catalog() -> ModelCatalogResponse:
@@ -836,6 +841,12 @@ def _summarize_journal(
 
 def _launch_game(games_directory: Path, manager: GameProcessManager, request: NewGameRequest) -> NewGameResponse:
     _validate_launch_request(request=request)
+    if request.experiment_player is not None:
+        # Freeze once before queuing. Continuation and replay reuse this snapshot even if files change.
+        selection = request.experiment_player
+        request = request.model_copy(update={
+            "experiment_player": selection.model_copy(update={"snapshot": load_profile(profile_id=selection.profile)}),
+        })
     orders = list(permutations(range(1, len(request.players) + 1))) if request.seating_mode == "cycle" else []
     request = request.model_copy(update={
         "seating_orders": [list(orders[index % len(orders)]) for index in range(request.games)] if orders else None,
@@ -908,6 +919,7 @@ def _launch_prepared_game(
         journal_path=game_directory / "game.jsonl",
         log_path=game_directory / "worker.log",
         seat_order=request.seating_orders[0] if request.seating_orders is not None else None,
+        experiment_player=request.experiment_player,
     )
 
 

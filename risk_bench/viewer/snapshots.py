@@ -39,6 +39,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     if not records or records[0].get("type") != "header":
         raise ValueError(f"{journal_path} is not a game journal (missing header line).")
     header = records[0]
+    experiment_player = header.get("configuration", {}).get("experiment_player") or {}
     trace_path = trace_path_for_journal(journal_path=journal_path)
 
     player_names: list[PlayerId] = list(header["player_specs"])
@@ -176,7 +177,19 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
         "configuration_changes": configuration_changes,
         "seed": int(header["seed"]),
         "max_turns": int(header["max_turns"]),
-        "players": [{"name": name, "mission": state.players[name].mission.description} for name in player_names],
+        "players": [
+            {
+                "name": name,
+                "mission": state.players[name].mission.description,
+                "experiment_profile": {
+                    "id": experiment_player["id"],
+                    "label": experiment_player["label"],
+                }
+                if experiment_player.get("player_id") == name
+                else None,
+            }
+            for name in player_names
+        ],
         "human_players": human_players,
         "continents": [
             {

@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, StrictInt, model_validator
 
+from risk_bench.players.profiles import ExperimentPlayer
+
 
 class GameSummary(BaseModel):
     """One journal's listing entry: identity, players, progress, and API spend so far.
@@ -71,9 +73,14 @@ class NewGameRequest(BaseModel):
     # an optional per-player line aligned with ``players``
     common_context: str = ""
     player_context: list[str] = Field(default_factory=list)
+    experiment_player: ExperimentPlayer | None = None
 
     @model_validator(mode="after")
     def validate_seating_orders(self):
+        if self.experiment_player is not None:
+            position = self.experiment_player.player
+            if position > len(self.players) or self.players[position - 1] in {"random", "human"}:
+                raise ValueError("The experiment player must select a model-backed player in the roster.")
         if self.seating_orders is not None:
             if len(self.seating_orders) != self.games:
                 raise ValueError("Provide exactly one seating order per game.")

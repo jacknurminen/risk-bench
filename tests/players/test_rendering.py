@@ -125,3 +125,18 @@ def test_noting_prompt_shows_the_turn_and_asks_for_a_bounded_rewrite():
     assert "old memo" in prompt  # the current notes are shown for revision
     assert "Rewrite your notes" in prompt
     assert "under about" in prompt  # the soft size budget is suggested, not enforced
+
+
+def test_own_memos_are_rendered_in_order_only_for_notes_updates():
+    request = attack_request()
+    memos = ("Offer peace to buy time.", "Protect the border while preparing to expand.")
+    view = replace(request.view, own_memos=memos)
+
+    prompt = render_noting_prompt(view=view)
+
+    assert prompt.index(memos[0]) < prompt.index(memos[1])
+    assert "not proof that an action succeeded" in prompt
+    for memo in memos:
+        assert memo not in render_decision_prompt(request=replace(request, view=view))
+        assert memo not in render_negotiation_prompt(view=view)
+    assert "Your private memos" not in render_noting_prompt(view=request.view)

@@ -137,6 +137,27 @@ def test_every_committed_cursor_preserves_requests_and_continuation(completed):
     assert saw_pending_round and saw_batch
 
 
+@pytest.mark.parametrize("stage", ["decision_thought", "note_request", "note_apply"])
+def test_pending_memos_survive_resume_without_repeating_consumed_memos(completed, stage):
+    path, expected, original = completed
+    transition = next(
+        entry for entry in raw_journal(path)[1:]
+        if entry["stage"] == stage
+        and entry["checkpoint"]["progress"]["commented_turn"] > 0
+    )
+    restored = restore_game(path, f"{transition['id']}:after")
+    group = players()
+
+    assert runner(group).resume(restored) == expected
+
+    for name, player in group.items():
+        notes = [view for kind, view in player.requests if kind == "note"]
+        expected_notes = [view for kind, view in original[name].requests if kind == "note"]
+        assert notes
+        assert notes == expected_notes[-len(notes):]
+        assert any(view.own_memos for view in notes)
+
+
 def test_forks_isolate_history_rng_and_preserve_ancestry(completed, tmp_path):
     path, _, _ = completed
     transition = next(t for t in raw_journal(path)[1:] if t["stage"] == "negotiation_request")

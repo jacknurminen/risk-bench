@@ -50,6 +50,10 @@
                   color: var(--mute-2); margin: 18px 0 9px; }
   .sectionLabel .hint { text-transform: none; letter-spacing: 0; font-size: 10.5px; color: var(--faint); }
   .playerRow { flex-wrap: wrap; }
+  .playerRow[hidden] { display: none; }
+  #experimentPrompt { white-space: pre-wrap; max-height: 320px; overflow: auto;
+    font: 12px/1.55 var(--font-sans); padding: 12px; background: var(--subtle); }
+  #experimentDescription { max-width: 850px; line-height: 1.5; }
   .contextToggle.on { border-color: var(--ink); color: var(--ink); }
   .rowContext { flex-basis: 100%; margin: 2px 0 4px 60px; }
   .rowContext[hidden] { display: none; }
@@ -128,6 +132,18 @@
         alongside the board and the chat. Use a player's 📝 button to add something only that player knows.</span></div>
     <textarea class="context" id="commonContext" rows="2"
       placeholder="e.g. a rule of thumb, or background about the table — the same for everyone"></textarea>
+    <div class="sectionLabel">Experiment player
+      <span class="hint">— optional additional player with its own objective. Counts toward the 3–6 player limit.</span></div>
+    <div class="row">
+      <label for="experimentProfile">Profile</label>
+      <select id="experimentProfile"><option value="">Off — normal game</option></select>
+    </div>
+    <p class="hint" id="experimentDescription"></p>
+    <div class="playerRow" id="experimentRow" hidden></div>
+    <details id="experimentPreview" hidden>
+      <summary>View experiment instructions</summary>
+      <pre id="experimentPrompt"></pre>
+    </details>
     <div class="sectionLabel">Research evaluation
       <span class="hint">— choose a method and evaluator. Choose Off to skip evaluation.</span></div>
     <fieldset class="evaluationMethodToggle">
@@ -193,12 +209,24 @@ const DEFAULT_EFFORT = "low";
 let modelsByProvider = {};
 let providers = [];
 let efforts = [];
+let experimentProfiles = [];
 
 async function loadModels() {
   const catalog = await (await fetch("/api/models")).json();
   modelsByProvider = catalog.models_by_provider;
   providers = Object.keys(modelsByProvider);
   efforts = catalog.efforts;
+  experimentProfiles = await (await fetch("/api/experiment-profiles")).json();
+  el("experimentProfile").innerHTML = '<option value="">Off — normal game</option>'
+    + experimentProfiles.map(profile => `<option value="${profile.id}">${profile.label}</option>`).join("");
+  el("experimentProfile").onchange = selectExperimentProfile;
+  const experimentRow = el("experimentRow");
+  experimentRow.innerHTML = `<span class="seat">model</span>
+    <div class="providerPicker">${providers.map(name => providerTile(name, name === providers[0])).join("")}</div>
+    <select class="modelSelect" aria-label="Experiment model">${modelOptions(providers[0], defaultModel(providers[0]))}</select>
+    <select class="effortSelect" aria-label="Experiment reasoning">${effortOptions("medium")}</select>`;
+  experimentRow.querySelectorAll(".providerTile").forEach(tile =>
+    tile.onclick = () => selectProvider(experimentRow, tile.dataset.provider));
   const evaluatorProvider = (modelsByProvider.openai || []).some(model => model.id === "gpt-6-luna")
     ? "openai" : providers[0];
   const evaluatorModel = evaluatorProvider === "openai" ? "gpt-6-luna" : defaultModel(evaluatorProvider);
@@ -241,7 +269,7 @@ function effortOptions(selected) {
 
 function addPlayerRow() {
   const rows = el("playerRows");
-  if (rows.children.length >= 6) return;
+  if (rows.children.length >= (el("experimentProfile").value ? 5 : 6)) return;
   const provider = providers[0];
   const row = document.createElement("div");
   row.className = "playerRow";
@@ -256,8 +284,28 @@ function addPlayerRow() {
   row.querySelectorAll(".providerTile").forEach(tile =>
     tile.onclick = () => selectProvider(row, tile.dataset.provider));
   row.querySelector(".contextToggle").onclick = () => toggleRowContext(row);
-  row.querySelector(".remove").onclick = () => { if (rows.children.length > 3) { row.remove(); renumber(); } };
+  row.querySelector(".remove").onclick = () => {
+    if (rows.children.length > (el("experimentProfile").value ? 2 : 3)) { row.remove(); renumber(); }
+  };
   rows.appendChild(row);
+}
+
+function selectExperimentProfile() {
+  const select = el("experimentProfile");
+  if (select.value && el("playerRows").children.length >= 6) {
+    select.value = "";
+    el("launchError").textContent = "Remove a normal player before adding an experiment player; the limit is six.";
+    return;
+  }
+  const profile = experimentProfiles.find(profile => profile.id === select.value);
+  el("experimentRow").hidden = !profile;
+  el("experimentPreview").hidden = !profile;
+  el("experimentDescription").textContent = profile
+    ? `${profile.objective} The profile replaces the winning objective for this player only; game rules still apply.`
+    : "";
+  el("experimentPrompt").textContent = profile ? `${profile.objective}\n\n${profile.instructions}` : "";
+  if (!profile && el("playerRows").children.length < 3) addPlayerRow();
+  el("launchError").textContent = "";
 }
 
 // the per-seat box stays collapsed until asked for, so three seats still read as three rows;
@@ -298,6 +346,11 @@ async function launch() {
   const players = [...document.querySelectorAll("#playerRows .playerRow")].map(specFromRow);
   const playerContext = [...document.querySelectorAll("#playerRows .playerRow")]
     .map(row => row.querySelector(".rowContext textarea").value.trim());
+  const experimentProfile = el("experimentProfile").value;
+  if (experimentProfile) {
+    players.push(specFromRow(el("experimentRow")));
+    playerContext.push("");
+  }
   const evaluator = specFromRow(el("evaluatorRow"));
   const body = {
     players,
@@ -311,6 +364,7 @@ async function launch() {
     common_context: el("commonContext").value.trim(),
     // one entry per seat, in the same order as `players`; all empty means nobody is told anything extra
     player_context: playerContext.some(Boolean) ? playerContext : [],
+    experiment_player: experimentProfile ? {player: players.length, profile: experimentProfile} : null,
   };
   el("launch").disabled = true;
   el("launch").textContent = "starting…";

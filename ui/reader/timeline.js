@@ -1,4 +1,8 @@
 /* ================= LEFT RAIL ================= */
+function sidebarPlayerName(name) {
+  return !/#\d+$/.test(name) && GAME.players.some(player => player.name.startsWith(name + '#'))
+    ? name + '#1' : name;
+}
 function playerResult(name) {
   const last = steps[steps.length - 1];
   const seat = seatOf[name];
@@ -14,10 +18,13 @@ function renderRail() {
       <div class="top">
         <span class="badge" style="background:${COLORS[seat]}">${initialsOf(p.name)}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:7px">
-            <span class="ptag" style="color:${COLORS[seat]}">${tagOf(p.name)}</span>
-            <span class="presult" style="color:${rc};background:color-mix(in srgb, ${rc} 13%, #fff)">${rl}</span>
+          <div class="playerHeading">
+            <span class="ptag" style="color:${COLORS[seat]}">${escapeHtml(sidebarPlayerName(p.name))}</span>
             ${hasNotes ? `<button class="iconbtn" onclick="openNotes('${p.name}')" title="all private notes" style="margin-left:auto;font-size:12px">📝</button>` : ""}
+          </div>
+          <div class="playerLabels">
+            <span class="presult" style="color:${rc};background:color-mix(in srgb, ${rc} 13%, #fff)">${rl}</span>
+            ${p.experiment_profile ? `<span class="experimentBadge" title="Experimental player · visible only in the UI">${escapeHtml(p.experiment_profile.label)}</span>` : ""}
           </div>
           <div class="pstats" id="prstats-${seat}"></div>
         </div>

@@ -89,6 +89,7 @@ PLAYER_FIELDS = (
     "_retry_conversation",
     "_retry_index",
     "additional_instructions",
+    "experiment_profile",
     "_max_invalid_retries",
 )
 

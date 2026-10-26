@@ -19,6 +19,7 @@ from risk_bench.players.rendering import (
     render_system_prompt,
 )
 from risk_bench.players.view import build_player_view
+from risk_bench.runner.checkpoint import decode
 from risk_bench.runner.game_runner import GameRunner
 from risk_bench.runner.journal import RestoredGame, restore_game, restored_context
 
@@ -78,7 +79,10 @@ def preview_next_prompts(journal_path: Path, additional_context: dict[str, str])
                 player=name,
                 request_kind=kind,
                 is_next_request=exact is not None,
-                system_prompt=render_system_prompt(view=views[name]),
+                system_prompt=render_system_prompt(
+                    view=views[name],
+                    experiment_profile=decode(restored.checkpoint["players"][name].get("experiment_profile")),
+                ),
                 before=_render(view=views[name], kind=kind, legal_actions=legal_actions, text=stored.get(name)),
                 after=_render(
                     view=views[name],
