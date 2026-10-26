@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/assets/theme.css">
 <link rel="stylesheet" href="/assets/reader/reader.css">
 <link rel="stylesheet" href="/assets/research-report.css">
+<link rel="stylesheet" href="/assets/review-shared.css">
 </head>
 <body>
 <header class="masthead">
@@ -178,6 +179,7 @@
   </aside>
   {% endif %}
 </div>
+<aside class="reviewSide" id="reviewSide" hidden aria-label="Annotation review"></aside>
 
 <div id="panelRoot"></div>
 <div id="statsModal" onclick="if(event.target===this)closeStats()">
@@ -281,6 +283,8 @@ window.BOOT = {
 <script src="/assets/reader/fork.js"></script>
 <script src="/assets/reader/main.js"></script>
 <script src="/assets/reader/layout.js"></script>
+<script src="/assets/review.js"></script>
+<script src="/assets/reader/review-panel.js"></script>
 {% if human_url %}<script src="/assets/reader/human-draft.js"></script>
 <script src="/assets/reader/human.js"></script>{% endif %}
 </body>

@@ -748,3 +748,32 @@ body.readerSplit .subbar { gap: 6px 12px; }
 
 .evaluationModeActions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
 .evalConfig .evalRow{flex-wrap:wrap}.evalConfig .evalRow select{min-width:0;max-width:100%}
+
+/* Annotation review panel: fixed on the right; the page and side drawers make room for it. */
+.reviewSide[hidden] { display: none !important; }
+body.reviewing { --review-width: 360px; }
+body.reviewing .shell, body.reviewing .masthead .inner { max-width: none; margin-left: 0; margin-right: var(--review-width); }
+.reviewSide { position: fixed; top: var(--reader-header-height, 64px); right: 0; bottom: 0; width: var(--review-width, 360px);
+  padding: 12px 14px 16px 6px; overflow-y: auto; overscroll-behavior: contain; z-index: 30; }
+body.reviewing .drawer { right: var(--review-width); max-width: calc(94vw - var(--review-width)); }
+body.reviewing .drawer.rawDrawer.withUnit { right: calc(var(--review-width) + min(720px, 45vw)); }
+body.reviewing .overlay { right: var(--review-width); }
+.reviewCard { padding: 14px 16px; font-size: 13px; }
+.reviewHead { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.reviewHead .kicker { flex: 1; }
+.reviewHead a { font: 11px var(--font-mono); color: var(--mute); }
+.reviewNav { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; }
+.reviewNav .btn { padding: 4px 9px; }
+.reviewProgress { font-size: 10.5px; color: var(--mute); margin: 6px 0 10px; }
+.reviewWhat { font-size: 12.5px; line-height: 1.5; color: var(--body); margin: 0 0 8px; }
+.reviewSide .reviewFinding { margin: 8px 0; }
+.reviewSide .reviewFinding > summary { font: 11px var(--font-mono); color: var(--mute); cursor: pointer; }
+.reviewSide dl.fields { grid-template-columns: 1fr; }
+.reviewSide .verdict { border-top: 1px solid var(--line-2); margin-top: 12px; padding-top: 4px; }
+.reviewActions { display: flex; gap: 8px; flex-wrap: wrap; }
+.reviewMessage { font-size: 12px; color: var(--mute); min-height: 1em; margin: 8px 0 0; }
+.traceline.reviewTarget { background: #fffbea; outline: 2px solid var(--gold); }
+#commToggle.locked { opacity: .45; cursor: not-allowed; }
+@media (max-width: 1100px) {
+  body.reviewing { --review-width: 320px; }
+}

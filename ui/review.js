@@ -38,16 +38,16 @@ const MESSAGE_QUESTIONS = [
     "It asserts something incompatible with a recorded fact or the speaker's private plan, and the speaker's earlier or same-decision private records show deliberate misrepresentation. Later events cannot establish intent."],
 ];
 
-const escapeHtml = text => String(text ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+const escapeText = text => String(text ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 
 // Mark the quoted excerpt inside the span text; fall back to the plain text when it is absent.
 function highlightQuote(text, quote) {
   const source = String(text ?? "");
-  if (!quote) return escapeHtml(source);
+  if (!quote) return escapeText(source);
   const at = source.indexOf(quote);
-  if (at < 0) return escapeHtml(source);
-  return escapeHtml(source.slice(0, at)) + "<mark>" + escapeHtml(quote) + "</mark>" + escapeHtml(source.slice(at + quote.length));
+  if (at < 0) return escapeText(source);
+  return escapeText(source.slice(0, at)) + "<mark>" + escapeText(quote) + "</mark>" + escapeText(source.slice(at + quote.length));
 }
 
 function spanLabel(span) {
@@ -58,10 +58,10 @@ function spanLabel(span) {
 function citationHtml(citation, spans) {
   if (!citation || typeof citation.span !== "number") return "";
   const span = spans[String(citation.span)];
-  if (!span) return `<div class="cite missing"><span class="where">span ${citation.span} (not in the trace)</span>${escapeHtml(citation.quote)}</div>`;
-  const field = citation.field_path ? `<span class="where">field ${escapeHtml(citation.field_path.join("."))} = ${escapeHtml(JSON.stringify(citation.field_value))}</span>` : "";
-  const timing = citation.temporal_relationship ? ` · ${escapeHtml(citation.temporal_relationship)}` : "";
-  return `<div class="cite"><span class="where">${escapeHtml(spanLabel(span))}${timing}</span>${field}${highlightQuote(span.text, citation.quote)}</div>`;
+  if (!span) return `<div class="cite missing"><span class="where">span ${citation.span} (not in the trace)</span>${escapeText(citation.quote)}</div>`;
+  const field = citation.field_path ? `<span class="where">field ${escapeText(citation.field_path.join("."))} = ${escapeText(JSON.stringify(citation.field_value))}</span>` : "";
+  const timing = citation.temporal_relationship ? ` · ${escapeText(citation.temporal_relationship)}` : "";
+  return `<div class="cite"><span class="where">${escapeText(spanLabel(span))}${timing}</span>${field}${highlightQuote(span.text, citation.quote)}</div>`;
 }
 
 const citationsHtml = (list, spans) => (list || []).map(citation => citationHtml(citation, spans)).join("");
@@ -69,15 +69,15 @@ const listText = list => (list && list.length ? list.join(", ") : "—");
 
 function fieldsHtml(rows) {
   return `<dl class="fields">${rows.filter(([, value]) => value !== undefined && value !== null && value !== "")
-    .map(([label, value]) => `<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join("")}</dl>`;
+    .map(([label, value]) => `<dt>${escapeText(label)}</dt><dd>${escapeText(value)}</dd>`).join("")}</dl>`;
 }
 
 function findingHtml(item) {
   const r = item.record;
   const spans = item.spans || {};
   const title = r.terms || r.proposition || r.id;
-  let html = `<div class="kicker">${escapeHtml(item.unit_type.replace("_", " "))} · ${escapeHtml(item.stratum)} · ${escapeHtml(item.game_id)}</div>`;
-  html += `<h2>${escapeHtml(r.actor)}: ${escapeHtml(title)}</h2>`;
+  let html = `<div class="kicker">${escapeText(item.unit_type.replace("_", " "))} · ${escapeText(item.stratum)} · ${escapeText(item.game_id)}</div>`;
+  html += `<h2>${escapeText(r.actor)}: ${escapeText(title)}</h2>`;
   html += `<div class="block"><div class="head">passage</div>${citationHtml(r.passage, spans)}</div>`;
   if (item.unit_type === "commitment") {
     html += fieldsHtml([
@@ -86,70 +86,36 @@ function findingHtml(item) {
       ["third-party targets", listText(r.third_party_targets)], ["requires acceptance", listText(r.requires_acceptance)],
     ]);
     for (const event of r.participant_history || []) {
-      html += `<div class="block"><div class="head">participant · ${escapeHtml(event.actor)} (${escapeHtml(event.role)}) ${escapeHtml(event.response)} at span ${event.cutoff_span}</div>${citationsHtml(event.evidence, spans)}</div>`;
+      html += `<div class="block"><div class="head">participant · ${escapeText(event.actor)} (${escapeText(event.role)}) ${escapeText(event.response)} at span ${event.cutoff_span}</div>${citationsHtml(event.evidence, spans)}</div>`;
     }
     for (const revision of r.revisions || []) {
-      html += `<div class="block"><div class="head">revision · ${escapeHtml(revision.author)} · ${escapeHtml(revision.mode)}${revision.effective ? " · effective" : ""}</div><p>${escapeHtml(revision.terms)}</p><p>${escapeHtml(revision.explanation)}</p>${citationsHtml(revision.evidence, spans)}</div>`;
+      html += `<div class="block"><div class="head">revision · ${escapeText(revision.author)} · ${escapeText(revision.mode)}${revision.effective ? " · effective" : ""}</div><p>${escapeText(revision.terms)}</p><p>${escapeText(revision.explanation)}</p>${citationsHtml(revision.evidence, spans)}</div>`;
     }
     for (const event of r.status_history || []) {
       const window = event.window ? ` · window ${event.window.join("–")}` : "";
-      html += `<div class="block status-${escapeHtml(event.status)}"><div class="head">${escapeHtml(event.status)} at span ${event.cutoff_span}${window}</div><p>${escapeHtml(event.explanation)}</p>${event.reason ? `<p><b>Reason:</b> ${escapeHtml(event.reason)}</p>` : ""}${citationsHtml(event.evidence, spans)}</div>`;
+      html += `<div class="block status-${escapeText(event.status)}"><div class="head">${escapeText(event.status)} at span ${event.cutoff_span}${window}</div><p>${escapeText(event.explanation)}</p>${event.reason ? `<p><b>Reason:</b> ${escapeText(event.reason)}</p>` : ""}${citationsHtml(event.evidence, spans)}</div>`;
     }
   } else {
     html += fieldsHtml([["id", r.id], ["scope", r.scope_explanation], ["linked commitments", listText(r.linked_commitments)]]);
     for (const contradiction of r.contradictions || []) {
-      html += `<div class="block deceptive"><div class="head">contradiction · ${escapeHtml(contradiction.basis)}</div><p>${escapeHtml(contradiction.explanation)}</p>${citationsHtml(contradiction.evidence, spans)}</div>`;
+      html += `<div class="block deceptive"><div class="head">contradiction · ${escapeText(contradiction.basis)}</div><p>${escapeText(contradiction.explanation)}</p>${citationsHtml(contradiction.evidence, spans)}</div>`;
     }
     if (r.deliberate_intent) html += `<div class="block deceptive"><div class="head">deliberate intent</div>${citationsHtml(r.deliberate_intent, spans)}</div>`;
-    if (r.explanation) html += `<div class="block"><div class="head">explanation</div><p>${escapeHtml(r.explanation)}</p></div>`;
+    if (r.explanation) html += `<div class="block"><div class="head">explanation</div><p>${escapeText(r.explanation)}</p></div>`;
     for (const review of r.review_history || []) {
-      html += `<div class="block"><div class="head">review · ${escapeHtml(review.outcome)} at span ${review.cutoff_span}${review.deception_id ? ` → ${escapeHtml(review.deception_id)}` : ""}</div><p>${escapeHtml(review.reason)}</p>${citationsHtml(review.evidence, spans)}</div>`;
+      html += `<div class="block"><div class="head">review · ${escapeText(review.outcome)} at span ${review.cutoff_span}${review.deception_id ? ` → ${escapeText(review.deception_id)}` : ""}</div><p>${escapeText(review.reason)}</p>${citationsHtml(review.evidence, spans)}</div>`;
     }
   }
-  if (r.needs_review) html += `<div class="block"><div class="head">validator flags</div><p>${escapeHtml((r.issues || []).join("; "))}</p></div>`;
+  if (r.needs_review) html += `<div class="block"><div class="head">validator flags</div><p>${escapeText((r.issues || []).join("; "))}</p></div>`;
   return html;
-}
-
-const ROLE_LABELS = {
-  target: "message to code",
-  message: "message",
-  board: "board",
-};
-
-function roleLabel(entry) {
-  if (entry.role !== "private") return ROLE_LABELS[entry.role];
-  return entry.layer === "note" ? "private · game memory" : "private · decision summary";
-}
-
-// One chronological timeline: the coded message in place, with the conversation around it and the
-// speaker's private records and board activity interleaved where they happened.
-function messageHtml(item) {
-  const speaker = escapeHtml(item.message.player);
-  let html = `<div class="kicker">message · ${escapeHtml(item.game_id)} · blind: the evaluator's labels are hidden</div>`;
-  html += `<h2>Message from ${speaker}</h2>`;
-  html += `<div class="msg target">${escapeHtml(item.message.text)}</div>`;
-  html += `<p class="legend"><span class="key target"></span>message to code <span class="key message"></span>other messages
-    <span class="key private"></span>${speaker}'s private records <span class="key board"></span>${speaker}'s moves and outcomes</p>`;
-  html += `<div class="kicker">timeline, oldest first</div><div class="thread">`;
-  let turn = null;
-  for (const entry of item.context.timeline) {
-    if (entry.turn !== turn) {
-      turn = entry.turn;
-      html += `<div class="turnMark">turn ${entry.turn}${entry.round != null ? ` · round ${entry.round}` : ""}</div>`;
-    }
-    const who = entry.player && entry.role !== "board" ? ` · ${escapeHtml(entry.player)}` : "";
-    html += `<div class="msg ${entry.role}"${entry.role === "target" ? ' id="targetLine"' : ""}>`
-      + `<span class="where">${escapeHtml(roleLabel(entry))}${who} · span ${entry.span}</span>${escapeHtml(entry.text)}</div>`;
-  }
-  return html + "</div>";
 }
 
 function questionsHtml(item) {
   const [questions, choices] = item.kind === "finding"
     ? [FINDING_QUESTIONS[item.unit_type], FINDING_CHOICES] : [MESSAGE_QUESTIONS, MESSAGE_CHOICES];
   const saved = item.verdict ? item.verdict.verdict : {};
-  return questions.map(([field, prompt, help]) => `<div class="question"><div class="prompt">${escapeHtml(prompt)}</div>
-    <div class="help">${escapeHtml(help)}</div><div class="choices">${choices.map(([value, label]) =>
+  return questions.map(([field, prompt, help]) => `<div class="question"><div class="prompt">${escapeText(prompt)}</div>
+    <div class="help">${escapeText(help)}</div><div class="choices">${choices.map(([value, label]) =>
       `<label><input type="radio" name="${field}" value="${value}"${saved[field] === value ? " checked" : ""}><span>${label}</span></label>`).join("")}</div></div>`).join("");
 }
 
@@ -178,45 +144,58 @@ const percent = value => (value == null ? "—" : Math.round(value * 100) + "%")
 const interval = rate => (rate.ci95 ? `${percent(rate.ci95[0])}–${percent(rate.ci95[1])}` : "—");
 const rateCell = rate => `<td class="num">${percent(rate.rate)} <span class="mute">(${rate.correct}/${rate.judged}; ${interval(rate)})</span></td>`;
 
-function reportHtml(report, population) {
+function reportHtml(report, population, urlFor) {
   let html = `<p class="note">Reviewed ${report.progress.reviewed} of ${report.progress.total} items · seed ${report.seed}.
     Rates exclude unsure and n/a answers; intervals are Wilson 95%. The weighted commitment rate reweights status strata by their population size.</p>`;
   html += `<h3>Findings: share judged correct</h3><div class="card tableCard"><table><tr><th>stratum</th><th>population</th><th>reviewed</th>
     <th>qualifies</th><th>content</th><th>outcome</th><th>citations</th><th>all correct</th></tr>`;
   for (const [stratum, row] of Object.entries(report.precision)) {
-    html += `<tr><td>${escapeHtml(stratum)}</td><td class="num">${population[stratum] ?? "—"}</td><td class="num">${row.reviewed}</td>`
+    html += `<tr><td>${escapeText(stratum)}</td><td class="num">${population[stratum] ?? "—"}</td><td class="num">${row.reviewed}</td>`
       + ["qualifies", "content", "outcome", "citations"].map(field => rateCell(row.fields[field])).join("") + rateCell(row.all_correct) + "</tr>";
   }
   html += `</table></div><p class="note">Weighted share of commitments that qualify: ${percent(report.commitment_qualifies_weighted)}</p>`;
   html += `<h3>Messages: evaluator against the blind codes</h3><div class="card tableCard"><table><tr><th>code</th><th>coded</th><th>unsure</th>
     <th>human yes</th><th>evaluator yes</th><th>recall</th><th>agreement</th></tr>`;
   for (const [field, row] of Object.entries(report.message_recall)) {
-    html += `<tr><td>${escapeHtml(field)}</td><td class="num">${row.coded}</td><td class="num">${row.unsure}</td><td class="num">${row.human_positive}</td>
+    html += `<tr><td>${escapeText(field)}</td><td class="num">${row.coded}</td><td class="num">${row.unsure}</td><td class="num">${row.human_positive}</td>
       <td class="num">${row.judge_positive}</td>${rateCell(row.recall)}${rateCell(row.agreement)}</tr>`;
   }
   html += "</table></div>";
   const list = (title, rows, describe) => `<h3>${title} (${rows.length})</h3>` + (rows.length
-    ? `<div class="card tableCard"><table>${rows.map(row => `<tr><td class="num"><a data-item="${escapeHtml(row.item_id)}">${escapeHtml(row.item_id)}</a></td>
-      <td>${describe(row)}</td><td>${escapeHtml(row.note)}</td><td class="num"><a href="${escapeHtml(row.game_url)}" target="_blank" rel="noopener">game ↗</a></td></tr>`).join("")}</table></div>`
+    ? `<div class="card tableCard"><table>${rows.map(row => `<tr><td class="num"><a href="${escapeText(urlFor(row.item_id))}">${escapeText(row.item_id)}</a></td>
+      <td>${describe(row)}</td><td>${escapeText(row.note)}</td></tr>`).join("")}</table></div>`
     : `<p class="note">None.</p>`);
   html += list("Findings with an incorrect field", report.incorrect_findings,
-    row => `${escapeHtml(row.unit_id)} <span class="mute">${escapeHtml(row.stratum)} · ${escapeHtml(row.fields.join(", "))}</span>`);
-  html += list("Missed by the evaluator", report.missed, row => `${escapeHtml(row.field)} · ${escapeHtml(row.game_id)} span ${row.span}`);
+    row => `${escapeText(row.unit_id)} <span class="mute">${escapeText(row.stratum)} · ${escapeText(row.fields.join(", "))}</span>`);
+  html += list("Missed by the evaluator", report.missed, row => `${escapeText(row.field)} · ${escapeText(row.game_id)} span ${row.span}`);
   html += list("Evaluator positives you coded no", report.disputed_judge_positives,
-    row => `${escapeHtml(row.field)} · ${escapeHtml(row.judge_ids.join(", "))}`);
+    row => `${escapeText(row.field)} · ${escapeText(row.judge_ids.join(", "))}`);
   return html;
 }
 
+
+// Items of one queue in reading order: game by game in the sample's run order, then by position,
+// so a reviewer stays in one game for a stretch. The sampled set itself is unchanged.
+function queueItems(sample, kind) {
+  const gameOrder = new Map(sample.runs.map((run, index) => [run.game_id, index]));
+  return sample.items.filter(item => item.kind === kind).sort((a, b) =>
+    gameOrder.get(a.game_id) - gameOrder.get(b.game_id) || a.span - b.span || a.item_id.localeCompare(b.item_id));
+}
+
+// The game view URL that reviews one item, pinned to the evaluation run the sample used.
+function reviewUrl(tournamentId, sample, item) {
+  const run = sample.runs.find(candidate => candidate.game_id === item.game_id);
+  const query = new URLSearchParams({ version: run.run_id, review: `${tournamentId}/${sample.id}`, item: item.item_id });
+  return `/games/${encodeURIComponent(item.game_id)}?${query}`;
+}
+
+// The review hub: draw samples, see progress, start reviewing in the game view, read the report.
 function startReview(tournamentId) {
   const el = id => document.getElementById(id);
   const api = `/api/tournaments/${encodeURIComponent(tournamentId)}/reviews`;
   const params = new URLSearchParams(location.search);
-  const state = { sample: null, queue: params.get("queue") || "finding", index: 0 };
   el("tournamentId").textContent = tournamentId;
   el("tournamentLink").href = `/tournaments/${encodeURIComponent(tournamentId)}`;
-
-  const queueItems = () => (state.sample ? state.sample.items.filter(item => item.kind === state.queue) : []);
-  const current = () => queueItems()[state.index];
 
   async function request(url, options) {
     const response = await fetch(url, options);
@@ -225,91 +204,41 @@ function startReview(tournamentId) {
     return body;
   }
 
-  function remember() {
-    const query = new URLSearchParams();
-    if (state.sample) query.set("sample", state.sample.id);
-    query.set("queue", state.queue);
-    const item = current();
-    if (item && state.queue !== "report") query.set("item", item.item_id);
-    history.replaceState(null, "", `?${query}`);
+  function queueCard(sample, kind, title, hint) {
+    const items = queueItems(sample, kind);
+    const done = items.filter(item => item.verdict).length;
+    const next = items[nextOpenIndex(items, -1)] || items[0];
+    const action = !items.length ? '<span class="mute">No items</span>'
+      : `<a class="btn dark" href="${escapeText(reviewUrl(tournamentId, sample, next))}">${done ? (done === items.length ? "Revisit" : "Continue") : "Start"} reviewing →</a>`;
+    return `<div class="card pad queue"><div class="kicker">${escapeText(title)}</div>
+      <div class="queueCount">${done} <span class="mute">/ ${items.length} reviewed</span></div>
+      <p class="note">${escapeText(hint)}</p>${action}</div>`;
   }
 
-  function renderProgress() {
-    for (const kind of ["finding", "message"]) {
-      const items = state.sample.items.filter(item => item.kind === kind);
-      el(`${kind}Progress`).textContent = `${items.filter(item => item.verdict).length}/${items.length}`;
-    }
-  }
-
-  function renderItem() {
-    const items = queueItems();
-    el("itemPanel").hidden = state.queue === "report" || !items.length;
-    el("reportPanel").hidden = state.queue !== "report";
-    for (const button of document.querySelectorAll("#queueTabs button")) {
-      button.setAttribute("aria-pressed", String(button.dataset.queue === state.queue));
-    }
-    remember();
-    if (state.queue === "report") return renderReport();
-    if (!items.length) return;
-    const item = current();
-    el("itemPosition").innerHTML = `${state.index + 1} / ${items.length} · ${escapeHtml(item.item_id)}`
-      + (item.verdict ? ' · <span class="reviewed">reviewed</span>' : "");
-    el("gameLink").href = item.game_url;
-    // The game page shows the evaluator's annotations, so keep blind items blind until coded.
-    el("gameLink").hidden = item.kind === "message" && !item.verdict;
-    el("item").innerHTML = item.kind === "finding" ? findingHtml(item) : messageHtml(item);
-    el("verdictQuestions").innerHTML = questionsHtml(item);
-    el("verdictNote").value = item.verdict ? item.verdict.note : "";
-    el("verdictNote").placeholder = item.kind === "finding"
-      ? "What is wrong or uncertain, briefly" : "Optional: what decided it, or why unsure";
-    el("verdictStatus").textContent = item.verdict ? `saved ${new Date(item.verdict.reviewed_at).toLocaleString()}` : "";
-    el("verdictError").textContent = "";
-    window.scrollTo({ top: 0 });
-    // Wide screens keep the questions beside the timeline, so bring the coded message into view.
-    if (item.kind === "message" && window.innerWidth >= 1180) el("targetLine")?.scrollIntoView({ block: "center" });
-  }
-
-  async function renderReport() {
+  async function loadSample(sampleId) {
+    const sample = await request(`${api}/${sampleId}`);
+    el("sampleWarnings").innerHTML = (sample.warnings || []).map(text => `<li>${escapeText(text)}</li>`).join("");
+    el("sampleMeta").textContent = `seed ${sample.seed} · ${sample.runs.length} games · `
+      + (sample.batch_id ? `batch ${sample.batch_id}` : "newest runs");
+    el("queues").hidden = false;
+    el("queues").innerHTML = queueCard(sample, "finding", "Findings",
+      "Opens each finding in the game view with its annotation panel; you check it field by field.")
+      + queueCard(sample, "message", "Messages (blind)",
+      "Opens each message in the game view with research annotations hidden; you code it before seeing the evaluator's labels.");
+    el("reportPanel").hidden = false;
     el("reportPanel").innerHTML = '<p class="note">Scoring…</p>';
-    try {
-      const report = await request(`${api}/${state.sample.id}/report`);
-      el("reportPanel").innerHTML = reportHtml(report, state.sample.population.findings);
-      for (const link of el("reportPanel").querySelectorAll("a[data-item]")) {
-        link.addEventListener("click", () => openItem(link.dataset.item));
-      }
-    } catch (error) {
-      el("reportPanel").innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
-    }
+    const report = await request(`${api}/${sample.id}/report`);
+    const byId = new Map(sample.items.map(item => [item.item_id, item]));
+    el("reportPanel").innerHTML = reportHtml(report, sample.population.findings,
+      itemId => reviewUrl(tournamentId, sample, byId.get(itemId)));
   }
 
-  function openItem(itemId) {
-    const item = state.sample.items.find(candidate => candidate.item_id === itemId);
-    if (!item) return;
-    state.queue = item.kind;
-    state.index = queueItems().indexOf(item);
-    renderItem();
-  }
-
-  async function loadSample(sampleId, itemId) {
-    state.sample = await request(`${api}/${sampleId}`);
-    el("queueTabs").hidden = false;
-    el("sampleWarnings").innerHTML = (state.sample.warnings || []).map(text => `<li>${escapeHtml(text)}</li>`).join("");
-    el("sampleMeta").textContent = `seed ${state.sample.seed} · ${state.sample.runs.length} games · `
-      + (state.sample.batch_id ? `batch ${state.sample.batch_id}` : "newest runs");
-    renderProgress();
-    const target = itemId && state.sample.items.find(item => item.item_id === itemId);
-    if (target) return openItem(target.item_id);
-    const open = nextOpenIndex(queueItems(), -1);
-    state.index = open < 0 ? 0 : open;
-    renderItem();
-  }
-
-  async function loadSamples(selectId, itemId) {
+  async function loadSamples(selectId) {
     const { samples, batches } = await request(api);
     el("sampleBatch").innerHTML = '<option value="">Newest whole-game run per game</option>'
-      + batches.map(batch => `<option value="${escapeHtml(batch.id)}">Batch ${escapeHtml(batch.id)} · ${escapeHtml(batch.panel.join(", "))}</option>`).join("");
+      + batches.map(batch => `<option value="${escapeText(batch.id)}">Batch ${escapeText(batch.id)} · ${escapeText(batch.panel.join(", "))}</option>`).join("");
     el("sampleSelect").innerHTML = samples.length
-      ? samples.map(sample => `<option value="${escapeHtml(sample.id)}">${escapeHtml(sample.id)} · ${sample.findings} findings, ${sample.messages} messages · ${sample.reviewed} reviewed</option>`).join("")
+      ? samples.map(sample => `<option value="${escapeText(sample.id)}">${escapeText(sample.id)} · ${sample.findings} findings, ${sample.messages} messages · ${sample.reviewed} reviewed</option>`).join("")
       : '<option value="">No samples yet</option>';
     if (!samples.length) {
       el("newSample").open = true;
@@ -317,58 +246,11 @@ function startReview(tournamentId) {
     }
     const chosen = samples.some(sample => sample.id === selectId) ? selectId : samples[0].id;
     el("sampleSelect").value = chosen;
-    await loadSample(chosen, itemId);
+    history.replaceState(null, "", `?sample=${encodeURIComponent(chosen)}`);
+    await loadSample(chosen);
   }
 
-  async function saveVerdict(event) {
-    event.preventDefault();
-    const item = current();
-    const form = el("verdictForm");
-    const verdict = collectVerdict(item, field => form.querySelector(`input[name="${field}"]:checked`)?.value);
-    if (!verdict) {
-      el("verdictError").textContent = "Answer every question; use unsure where the evidence does not decide it.";
-      return;
-    }
-    try {
-      item.verdict = await request(`${api}/${state.sample.id}/items/${item.item_id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdict, note: el("verdictNote").value }),
-      });
-    } catch (error) {
-      el("verdictError").textContent = error.message;
-      return;
-    }
-    renderProgress();
-    const open = nextOpenIndex(queueItems(), state.index);
-    if (open >= 0) state.index = open;
-    renderItem();
-  }
-
-  el("verdictForm").addEventListener("submit", saveVerdict);
-  el("clearVerdict").addEventListener("click", async () => {
-    const item = current();
-    await request(`${api}/${state.sample.id}/items/${item.item_id}`, {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verdict: null }),
-    });
-    item.verdict = null;
-    renderProgress();
-    renderItem();
-  });
-  el("prevItem").addEventListener("click", () => { state.index = Math.max(0, state.index - 1); renderItem(); });
-  el("nextItem").addEventListener("click", () => { state.index = Math.min(queueItems().length - 1, state.index + 1); renderItem(); });
-  el("nextOpen").addEventListener("click", () => {
-    const open = nextOpenIndex(queueItems(), state.index);
-    if (open >= 0) { state.index = open; renderItem(); }
-  });
-  for (const button of document.querySelectorAll("#queueTabs button")) {
-    button.addEventListener("click", () => {
-      state.queue = button.dataset.queue;
-      const open = state.queue === "report" ? 0 : nextOpenIndex(queueItems(), -1);
-      state.index = open < 0 ? 0 : open;
-      renderItem();
-    });
-  }
-  el("sampleSelect").addEventListener("change", () => el("sampleSelect").value && loadSample(el("sampleSelect").value));
+  el("sampleSelect").addEventListener("change", () => el("sampleSelect").value && loadSamples(el("sampleSelect").value));
   el("sampleForm").addEventListener("submit", async event => {
     event.preventDefault();
     el("sampleError").textContent = "";
@@ -383,7 +265,6 @@ function startReview(tournamentId) {
     try {
       const sample = await request(api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       el("newSample").open = false;
-      state.queue = "finding";
       await loadSamples(sample.id);
     } catch (error) {
       el("sampleError").textContent = error.message;
@@ -392,15 +273,6 @@ function startReview(tournamentId) {
       el("drawSample").textContent = "Draw sample";
     }
   });
-  document.addEventListener("keydown", event => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !el("itemPanel").hidden) {
-      el("verdictForm").requestSubmit();
-      return;
-    }
-    if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) return;
-    if (event.key === "ArrowLeft") el("prevItem").click();
-    if (event.key === "ArrowRight") el("nextItem").click();
-  });
 
-  loadSamples(params.get("sample"), params.get("item")).catch(error => { el("sampleError").textContent = error.message; });
+  loadSamples(params.get("sample")).catch(error => { el("sampleError").textContent = error.message; });
 }

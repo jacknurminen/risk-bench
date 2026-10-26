@@ -128,6 +128,7 @@ function summarizeMemberV3(m) {
 }
 function openEvalResearch(index, kind, status = "", code = "", basis = "") {
   closeStats();
+  if (reviewBlind) { toast("Research annotations stay hidden while you code messages blind."); return; }
   researchVisibilityChosen = true;
   Object.assign(state.filters, {actor:"", kind, status, code, basis, validOnly:true, showCommentary:true});
   state.filters.annotators = new Set([index]);

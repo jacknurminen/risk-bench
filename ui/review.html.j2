@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/theme.css">
+<link rel="stylesheet" href="/assets/review-shared.css">
 <link rel="stylesheet" href="/assets/review.css">
 </head>
 <body>
@@ -42,37 +43,8 @@
     <ul id="sampleWarnings" class="warnings"></ul>
   </section>
 
-  <nav class="tabs" aria-label="Review queues" id="queueTabs" hidden>
-    <button data-queue="finding" aria-pressed="true">Findings <span id="findingProgress"></span></button>
-    <button data-queue="message" aria-pressed="false">Messages (blind) <span id="messageProgress"></span></button>
-    <button data-queue="report" aria-pressed="false">Report</button>
-  </nav>
-
-  <section id="itemPanel" hidden>
-    <div class="itemNav">
-      <button class="btn" id="prevItem" title="Previous (←)">←</button>
-      <span id="itemPosition" class="mono"></span>
-      <button class="btn" id="nextItem" title="Next (→)">→</button>
-      <button class="btn" id="nextOpen">Next unreviewed</button>
-      <a id="gameLink" class="mono" target="_blank" rel="noopener">open in game ↗</a>
-    </div>
-    <div class="reviewGrid">
-    <article id="item" class="card pad"></article>
-    <form id="verdictForm" class="card pad verdict">
-      <div id="verdictQuestions"></div>
-      <label class="noteField">Note <textarea id="verdictNote" rows="2"
-        placeholder="What is wrong or uncertain, briefly"></textarea></label>
-      <div class="controls">
-        <button class="btn dark" type="submit" id="saveVerdict">Save and next (Ctrl+Enter)</button>
-        <button class="btn" type="button" id="clearVerdict">Clear verdict</button>
-        <span id="verdictStatus" class="mute" role="status"></span>
-      </div>
-      <p id="verdictError" class="error" role="alert"></p>
-    </form>
-    </div>
-  </section>
-
-  <section id="reportPanel" hidden></section>
+  <section id="queues" class="queues" hidden aria-label="Review queues"></section>
+  <section id="reportPanel" hidden aria-label="Report"></section>
 </main>
 <script src="/assets/review.js"></script>
 <script>

@@ -42,10 +42,6 @@ FINDING_VERDICTS: Final[frozenset[str]] = frozenset({"correct", "incorrect", "un
 MESSAGE_FIELDS: Final[tuple[str, ...]] = ("commitment", "deception")
 MESSAGE_VERDICTS: Final[frozenset[str]] = frozenset({"yes", "no", "unsure"})
 
-# How much surrounding conversation a blind message review shows.
-CONTEXT_MESSAGES: Final[int] = 8
-CONTEXT_BOARD: Final[int] = 25
-
 
 def review_directory(tournament_directory: Path) -> Path:
     return tournament_directory / REVIEW_DIRECTORY
@@ -436,56 +432,6 @@ def _span_view(span: TraceSpan) -> dict:
     }
 
 
-def _message_context(spans: tuple[TraceSpan, ...], target: TraceSpan) -> dict:
-    """One chronological timeline around a message, each line tagged with why it is shown.
-
-    Roles: ``target`` (the message to code), ``message`` (surrounding conversation),
-    ``private`` (the speaker's decision summaries and game memory) and ``board`` (the speaker's
-    actions and the outcomes naming them).
-    """
-    earlier = [s for s in spans if s.layer == "message" and s.span < target.span][-CONTEXT_MESSAGES:]
-    later = [s for s in spans if s.layer == "message" and s.span > target.span][:2]
-    start = earlier[0].span if earlier else target.span
-    # Deception needs the speaker's own prior or same-decision private records.
-    private = [
-        s
-        for s in spans
-        if s.player == target.player
-        and s.layer in {"thought", "note"}
-        and (
-            (target.decision_id is not None and s.decision_id == target.decision_id)
-            or (s.span < target.span and s.layer == "thought")
-        )
-    ]
-    last_note = next(
-        (s for s in reversed(spans[: target.span]) if s.player == target.player and s.layer == "note"), None
-    )
-    private_spans = {s.span: s for s in private[-4:]}
-    private_spans.update({s.span: s for s in private if s.decision_id == target.decision_id})
-    if last_note is not None:
-        private_spans[last_note.span] = last_note
-    # Board facts a deceptive claim could contradict: the speaker's actions and the outcomes naming
-    # them, within the conversation window up to the message. Single dice rolls are left out.
-    board = [
-        s
-        for s in spans[start : target.span]
-        if (
-            (s.layer == "action" and s.player == target.player)
-            or (
-                s.layer == "event"
-                and target.player is not None
-                and str(target.player) in s.text
-                and " rolled " not in s.text
-            )
-        )
-    ][-CONTEXT_BOARD:]
-    roles = {s.span: "board" for s in board}
-    roles.update({s: "private" for s in private_spans})
-    roles.update({s.span: "message" for s in (*earlier, *later)})
-    roles[target.span] = "target"
-    return {"timeline": [{**_span_view(spans[number]), "role": roles[number]} for number in sorted(roles)]}
-
-
 def review_view(tournament_directory: Path, sample_id: str) -> dict:
     """The sample with everything a reviewer needs per item.
 
@@ -528,7 +474,6 @@ def review_view(tournament_directory: Path, sample_id: str) -> dict:
         else:
             target = spans[item["span"]]
             view["message"] = _span_view(target)
-            view["context"] = _message_context(spans, target)
             if view["verdict"] is not None:
                 view["judge"] = labels_by_game[game_id].get(
                     item["span"], {"commitments": [], "deceptions": [], "candidates": [], "screening": None}

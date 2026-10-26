@@ -4,7 +4,7 @@ const {readFileSync} = require('node:fs');
 const vm = require('node:vm');
 
 function load() {
-  const context = vm.createContext({});
+  const context = vm.createContext({URLSearchParams});
   vm.runInContext(readFileSync('ui/review.js', 'utf8'), context);
   return code => vm.runInContext(code, context);
 }
@@ -39,18 +39,15 @@ test('next unreviewed item wraps around and reports when all are done', () => {
   assert.equal(run('nextOpenIndex(items.map(() => ({verdict: 1})), 0)'), -1);
 });
 
-test('message items render one timeline in order and never the evaluator labels', () => {
+test('queues run game by game in trace order and link into the pinned game view', () => {
   const run = load();
-  const html = run(`messageHtml({game_id: "g", judge: {commitments: ["SECRET"]},
-    message: {span: 4, layer: "message", player: "alice", turn: 2, text: "I promise"},
-    context: {timeline: [
-      {span: 1, role: "message", layer: "message", player: "bob", turn: 1, round: 1, text: "Deal?"},
-      {span: 2, role: "private", layer: "thought", player: "alice", turn: 1, round: 1, text: "Plan to attack"},
-      {span: 3, role: "board", layer: "action", player: "alice", turn: 2, round: 1, text: "alice attacks"},
-      {span: 4, role: "target", layer: "message", player: "alice", turn: 2, round: 1, text: "I promise"},
-    ]}})`);
-  assert.doesNotMatch(html, /SECRET/);
-  const order = ['Deal?', 'Plan to attack', 'turn 2', 'alice attacks', 'id="targetLine"'].map(text => html.indexOf(text));
-  assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join());
-  assert.match(html, /private · decision summary/);
+  run(`globalThis.sample = {id: "s1", runs: [{game_id: "g2", run_id: "r2"}, {game_id: "g1", run_id: "r1"}], items: [
+    {item_id: "m1", kind: "message", game_id: "g1", span: 5}, {item_id: "m2", kind: "message", game_id: "g2", span: 9},
+    {item_id: "m3", kind: "message", game_id: "g2", span: 3}, {item_id: "f1", kind: "finding", game_id: "g1", span: 1}]}`);
+  assert.deepEqual(JSON.parse(run('JSON.stringify(queueItems(sample, "message").map(i => i.item_id))')), ['m3', 'm2', 'm1']);
+  assert.equal(run('reviewUrl("t1", sample, sample.items[0])'), '/games/g1?version=r1&review=t1%2Fs1&item=m1');
+});
+
+test('the shared review script does not redeclare the reader escape helper', () => {
+  assert.doesNotMatch(readFileSync('ui/review.js', 'utf8'), /\bescapeHtml\b/);
 });
