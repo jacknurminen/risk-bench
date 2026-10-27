@@ -107,7 +107,8 @@ model and reasoning effort. This adds one participant to the roster; a game stil
 3–6 players in total. For a three-player experiment, enable the profile and remove one
 ordinary player, leaving two ordinary players plus the experiment player.
 
-Mission Prober prioritizes inferring opponents' missions through targeted questions.
+Mission Prober prioritizes inferring opponents' missions through targeted questions, then uses
+confident guesses to induce other players' military decisions, gated by its confidence.
 Deceiver seeks informative deception attempts across opponents, including inducing
 military decisions, exploiting openings, and negotiating again after pact violations.
 The selected objective replaces the normal winning objective

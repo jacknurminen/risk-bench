@@ -13,7 +13,8 @@ _PROFILES: dict[ProfileId, tuple[str, str, str]] = {
         "Mission Prober",
         "mission-inference-prober-v1.txt",
         "Your primary objective is to infer every opponent's mission from public evidence and targeted diplomacy, "
-        "and preserve a clear record of how each guess changes.",
+        "use your confident inferences to induce other players into consequential military decisions that benefit "
+        "you, and preserve a clear record of each guess, its confidence, and what each attempt achieved.",
     ),
     "deceiver": (
         "Deceiver",
