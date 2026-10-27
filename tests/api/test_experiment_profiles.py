@@ -15,7 +15,7 @@ def test_catalog_exposes_only_the_two_enabled_profiles(server):
     response = client.get("/api/experiment-profiles")
     assert response.status_code == 200
     profiles = response.json()
-    assert [profile["id"] for profile in profiles] == ["mission_prober", "deceiver"]
+    assert [profile["id"] for profile in profiles] == ["mission_prober", "deceiver", "gaslighter"]
     for profile in profiles:
         assert "EXPERIMENT PLAYER" in profile["instructions"]
         assert len(profile["sha256"]) == 64
@@ -39,7 +39,7 @@ def test_invalid_experiment_selection_never_starts_a_worker(server, selection):
     assert not manager._context.started
 
 
-@pytest.mark.parametrize("profile_id", ["mission_prober", "deceiver"])
+@pytest.mark.parametrize("profile_id", ["mission_prober", "deceiver", "gaslighter"])
 def test_tournament_continue_and_replay_keep_the_frozen_profile(server, tmp_path, monkeypatch, profile_id):
     client, manager = server
     monkeypatch.setattr(api_app.specs, "build_agent", lambda **kwargs: None)

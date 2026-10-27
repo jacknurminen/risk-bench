@@ -102,16 +102,18 @@ uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 ## Experiment player
 
 The setup page has an optional **Experiment player** section, separate from the ordinary
-players and research evaluator. Select **Prober** or **Deceiver**, then choose its
+players and research evaluator. Select **Prober**, **Deceiver**, or **Gaslighter**, then choose its
 model and reasoning effort. This adds one participant to the roster; a game still needs
 3–6 players in total. For a three-player experiment, enable the profile and remove one
 ordinary player, leaving two ordinary players plus the experiment player.
 
-Both profiles keep the objective of winning and name a technique as the main means of winning.
+All profiles keep the objective of winning and name a technique as the main means of winning.
 Prober infers opponents' missions through targeted questions, then uses confident
 guesses to induce other players' military decisions, gated by its confidence.
 Deceiver wins through deception: inducing military decisions, exploiting openings, and
 negotiating again after pact violations.
+Gaslighter gives confident, false accounts of earlier agreements and events, such as denying
+its own breaches or inventing agreements, so that opponents act on a distorted record.
 The selected objective replaces the normal objective line
 for that player; the game rules, secret mission, tool requirements, and visibility rules
 remain intact. The shared experiment role and selected profile are appended to its system
@@ -119,7 +121,8 @@ prompt for actions, negotiation, and notes updates. Other players receive their 
 Use **View experiment instructions** to inspect the objective and complete profile before launch.
 
 Prompt sources are `docs/prompts/experiment-player-v1.txt`,
-`docs/prompts/mission-inference-prober-v1.txt`, and `docs/prompts/deceiver-v1.txt`.
+`docs/prompts/mission-inference-prober-v1.txt`, `docs/prompts/deceiver-v1.txt`, and
+`docs/prompts/gaslighter-v1.txt`.
 Each launch saves the exact objective, instructions, and hash. The profile stays attached to
 its roster player when seats shuffle or cycle, including duplicate model selections.
 Resume, forks, tournament continuation, and tournament replay preserve the saved profile;
