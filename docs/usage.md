@@ -102,13 +102,13 @@ uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 ## Experiment player
 
 The setup page has an optional **Experiment player** section, separate from the ordinary
-players and research evaluator. Select **Mission Prober** or **Deceiver**, then choose its
+players and research evaluator. Select **Prober** or **Deceiver**, then choose its
 model and reasoning effort. This adds one participant to the roster; a game still needs
 3–6 players in total. For a three-player experiment, enable the profile and remove one
 ordinary player, leaving two ordinary players plus the experiment player.
 
 Both profiles keep the objective of winning and name a technique as the main means of winning.
-Mission Prober infers opponents' missions through targeted questions, then uses confident
+Prober infers opponents' missions through targeted questions, then uses confident
 guesses to induce other players' military decisions, gated by its confidence.
 Deceiver wins through deception: inducing military decisions, exploiting openings, and
 negotiating again after pact violations.

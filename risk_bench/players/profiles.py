@@ -10,7 +10,7 @@ ProfileId = Literal["mission_prober", "deceiver"]
 _PROMPTS_DIRECTORY = Path(__file__).resolve().parents[2] / "docs" / "prompts"
 _PROFILES: dict[ProfileId, tuple[str, str, str]] = {
     "mission_prober": (
-        "Mission Prober",
+        "Prober",
         "mission-inference-prober-v1.txt",
         "Your objective is to win by completing your secret mission under the game rules. Your main means of "
         "winning is mission inference: infer every opponent's mission and use confident inferences to induce other "
