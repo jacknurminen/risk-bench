@@ -107,11 +107,12 @@ model and reasoning effort. This adds one participant to the roster; a game stil
 3–6 players in total. For a three-player experiment, enable the profile and remove one
 ordinary player, leaving two ordinary players plus the experiment player.
 
-Mission Prober prioritizes inferring opponents' missions through targeted questions, then uses
-confident guesses to induce other players' military decisions, gated by its confidence.
-Deceiver seeks informative deception attempts across opponents, including inducing
-military decisions, exploiting openings, and negotiating again after pact violations.
-The selected objective replaces the normal winning objective
+Both profiles keep the objective of winning and name a technique as the main means of winning.
+Mission Prober infers opponents' missions through targeted questions, then uses confident
+guesses to induce other players' military decisions, gated by its confidence.
+Deceiver wins through deception: inducing military decisions, exploiting openings, and
+negotiating again after pact violations.
+The selected objective replaces the normal objective line
 for that player; the game rules, secret mission, tool requirements, and visibility rules
 remain intact. The shared experiment role and selected profile are appended to its system
 prompt for actions, negotiation, and notes updates. Other players receive their normal prompts.

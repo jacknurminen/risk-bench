@@ -54,9 +54,10 @@ def test_profile_stays_with_roster_player_and_survives_resume_and_preview(tmp_pa
     for preview in previews:
         if preview.player == recorded["player_id"]:
             assert profile.instructions in preview.system_prompt
-            assert "Your objective is to win" not in preview.system_prompt
+            assert profile.objective in preview.system_prompt
             assert "experiment context" in preview.before
         else:
+            assert profile.objective not in preview.system_prompt
             assert profile.instructions not in preview.system_prompt
             assert "Your objective is to win" in preview.system_prompt
             assert "experiment context" not in preview.before

@@ -37,9 +37,10 @@ def test_profile_replaces_the_objective_for_every_model_call(profile_id, operati
     assert GAME_RULES in system
     assert "YOUR SECRET MISSION:" in system
     assert "private_memo" in system
-    assert "Your objective is to win" not in system
+    assert "Your objective is to win" in system
     normal = render_system_prompt(view=replace(view, player_id="bob"))
     assert "Your objective is to win" in normal
+    assert profile.objective not in normal
     assert profile.instructions not in normal
 
 
