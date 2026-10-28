@@ -19,7 +19,6 @@ from risk_bench.players.human import mailbox_for
 from risk_bench.players.llm import LLMPlayer, ProviderUnavailableError
 from risk_bench.players.profiles import ExperimentPlayer, load_profile
 from risk_bench.players.rendering import render_board_text
-from risk_bench.runner import gaslighting_evaluation
 from risk_bench.runner.checkpoint import restore_engine
 from risk_bench.runner.evaluation import EvaluatedGame, Evaluator
 from risk_bench.runner.evaluation_config import configured_panel
@@ -38,6 +37,8 @@ from risk_bench.runner.journal import (
     read_journal,
     restore_game,
 )
+from risk_bench.runner.judges import core as judge_core
+from risk_bench.runner.judges import registry as judge_registry
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index, trace_fingerprint
 
 
@@ -369,8 +370,10 @@ def _run_whole_game_evaluation(journal_path: Path, evaluator_specs: list[str], s
     return writer.path
 
 
-def run_gaslighting_evaluation(journal_path: Path, evaluator_spec: str, settings: Settings) -> Path:
-    """Run the single-call gaslighting judge over a stored Gaslighter game and write its sidecar.
+def run_experiment_judge(journal_path: Path, evaluator_spec: str, settings: Settings) -> Path:
+    """Run the experiment player's single-call judge over a stored game and write its sidecar.
+
+    The judge is chosen by the experiment player's profile: Prober, Deceiver or Gaslighter.
 
     Args:
         journal_path: The game journal; it may be a paused game's prefix.
@@ -378,16 +381,18 @@ def run_gaslighting_evaluation(journal_path: Path, evaluator_spec: str, settings
         settings: Provides API keys and the evaluator token limit.
 
     Returns:
-        The path to the written ``.gaslighting.json`` sidecar.
+        The path to the written sidecar, such as ``game.gaslighting.json``.
 
     Raises:
-        ValueError: If the game has no Gaslighter player, no checkpoint, or the judge returns no valid assessment.
+        ValueError: If the game has no judged experiment player, no checkpoint, or the judge returns
+            no valid assessment.
     """
     records = read_journal(path=journal_path)
     header = records[0]
     experiment = header.get("configuration", {}).get("experiment_player") or {}
-    if experiment.get("id") != gaslighting_evaluation.GASLIGHTER_PROFILE_ID:
-        raise ValueError("This game has no Gaslighter experiment player.")
+    judge = judge_registry.judge_for_profile(profile_id=experiment.get("id"))
+    if judge is None:
+        raise ValueError("This game has no Prober, Deceiver or Gaslighter experiment player.")
     saved = next((record["checkpoint"] for record in reversed(records) if record["type"] == "checkpoint"), None)
     if saved is None:
         raise ValueError("No committed v3 checkpoint is available to evaluate.")
@@ -399,30 +404,29 @@ def run_gaslighting_evaluation(journal_path: Path, evaluator_spec: str, settings
         + f"\nObservation cutoff: span {len(spans) - 1}; "
         + ("game finished." if finished else "game still open.")
     )
-    trace = TraceWriter(
-        path=gaslighting_evaluation.gaslighting_trace_path_for_journal(journal_path=journal_path), append=False
+    context = judge_core.JudgeContext(
+        experiment_player=experiment["player_id"],
+        players=list(state.players),
+        spans=spans,
+        player_models=header.get("player_specs", {}),
     )
+    trace_path = judge_core.trace_path_for_journal(journal_path=journal_path, definition=judge)
+    trace = TraceWriter(path=trace_path, append=False)
     trace.set_context(turn=state.turn_number, kind="evaluation")
     try:
         agent = specs.build_agent(spec=evaluator_spec, settings=settings, max_tokens=settings.max_evaluator_tokens)
         traced_agent = TracingAgent(
-            agent=agent, model=specs.resolve_model(spec=evaluator_spec), caller="gaslighting", writer=trace
+            agent=agent, model=specs.resolve_model(spec=evaluator_spec), caller=judge.name, writer=trace
         )
-        result = gaslighting_evaluation.assess_gaslighting(
-            agent=traced_agent,
-            gaslighter=experiment["player_id"],
-            players=list(state.players),
-            spans=spans,
-            game_overview=overview,
-        )
+        outcome = judge_core.assess(definition=judge, agent=traced_agent, context=context, game_overview=overview)
     finally:
         trace.close()
-    return gaslighting_evaluation.write_gaslighting_sidecar(
+    return judge_core.write_sidecar(
         journal_path=journal_path,
+        definition=judge,
         evaluator_spec=evaluator_spec,
-        result=result,
-        player_models=header.get("player_specs", {}),
-        gaslighter=experiment["player_id"],
+        outcome=outcome,
+        experiment_player=experiment["player_id"],
         finished=finished,
     )
 

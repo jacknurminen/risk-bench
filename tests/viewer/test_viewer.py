@@ -383,7 +383,7 @@ def test_reader_rendering_polls_the_given_url(tmp_path: Path):
         verifications_url="/api/games/some-game/verifications",
         trace_url="/api/games/some-game/trace",
         analysis_url="/api/games/some-game/analysis",
-        gaslighting_url="",
+        experiment_judge_url="",
     )
 
     assert "live: true" in html

@@ -178,18 +178,18 @@ def evaluate(
 
 
 @app.command()
-def evaluate_gaslighting(
-    journal: Annotated[Path, typer.Argument(help="Journal (.jsonl) of a game with a Gaslighter player.")],
+def evaluate_experiment(
+    journal: Annotated[Path, typer.Argument(help="Journal (.jsonl) of a game with a Prober, Deceiver or Gaslighter.")],
     evaluator: Annotated[str, typer.Option(help="Judge model spec (provider:model:effort).")],
 ) -> None:
-    """Code the Gaslighter's false claims and how each target took them, writing a .gaslighting.json sidecar."""
+    """Run the experiment player's single-call judge, writing a sidecar such as game.gaslighting.json."""
     settings = load_settings()
     try:
-        path = launch.run_gaslighting_evaluation(journal_path=journal, evaluator_spec=evaluator, settings=settings)
+        path = launch.run_experiment_judge(journal_path=journal, evaluator_spec=evaluator, settings=settings)
     except ValueError as error:
         raise typer.BadParameter(str(error)) from None
-    _print_gaslighting_summary(path=path)
-    console.print(f"Gaslighting assessment written to {path}")
+    _print_experiment_judge_summary(path=path)
+    console.print(f"Judge result written to {path}")
 
 
 @app.command()
@@ -204,15 +204,15 @@ def serve(
     uvicorn.run(web_app, host=host, port=port, log_level="warning")
 
 
-def _print_gaslighting_summary(path: Path) -> None:
+def _print_experiment_judge_summary(path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    table = Table(title=f"Gaslighting by target ({len(payload['claims'])} claims)")
-    columns = ("player", "claims_received", "accepted", "disputed_complied", "disputed", "ignored", "notes_adopted")
-    for column in columns:
-        table.add_column(column)
-    for row in payload["by_target"]:
-        table.add_row(*(str(row[column]) for column in columns))
-    console.print(table)
+    for summary_table in payload["tables"]:
+        table = Table(title=summary_table["title"])
+        for _, label in summary_table["columns"]:
+            table.add_column(label)
+        for row in summary_table["rows"]:
+            table.add_row(*(str(row.get(key, "")) for key, _ in summary_table["columns"]))
+        console.print(table)
     if payload["citation_issues"]:
         console.print(f"[bold yellow]{len(payload['citation_issues'])} citation issues[/bold yellow] in the sidecar.")
 

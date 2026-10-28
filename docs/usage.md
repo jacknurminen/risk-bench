@@ -128,17 +128,22 @@ its roster player when seats shuffle or cycle, including duplicate model selecti
 Resume, forks, tournament continuation, and tournament replay preserve the saved profile;
 editing the files affects newly launched experiments.
 
-Games with a Gaslighter can also be coded by a single-call gaslighting judge, separate from the
-whole-game evaluator. For each false or distorted account of a past event, it records whether each
-target accepted it, disputed it but complied, disputed it, or ignored it, and whether the target's own
-notes adopted it. The codebook is `docs/codebook-gaslighting-v1.md`; results go to
-`game.gaslighting.json`, with earlier runs archived beside it. In the web app, a paused or finished
-Gaslighter game shows a **Gaslighting judge** card below the timeline: choose the judge model, run
-it, then read the per-target counts and the coded claims, whose span numbers open the raw trace.
-The judge's API calls appear under **gaslighting judge** in the API calls sheet. From the terminal:
+Each experiment profile also has a single-call judge, separate from the whole-game evaluator. It
+reads the whole trace in one call and codes the profile's technique against its own codebook:
+
+| Profile | Codebook | What it codes | Sidecar |
+| --- | --- | --- | --- |
+| Prober | `docs/codebook-probing-v1.md` | Each opponent's final mission guess, whether it was correct and from which turn; each leverage attempt, whether the listener complied, and whether the Prober gained | `game.probing.json` |
+| Deceiver | `docs/codebook-deception-v1.md` | Each insincere assurance, whether the target relied on it, whether it was breached for a gain, and whether the target agreed again afterwards | `game.deception.json` |
+| Gaslighter | `docs/codebook-gaslighting-v1.md` | Each false or distorted account of a past event, whether each target accepted it, disputed it but complied, disputed it or ignored it, and whether its notes adopted it | `game.gaslighting.json` |
+
+Results are summarized in tables per opponent model, and earlier runs are archived beside the
+sidecar. In the web app, a paused or finished experiment game shows a judge card below the timeline:
+choose the model, run it, then read the tables and the coded items, whose span numbers open the raw
+trace. The judge's API calls appear under **experiment judge** in the API calls sheet. From the terminal:
 
 ```bash
-uv run python -m risk_bench.main evaluate-gaslighting data/v3/games/<game-folder>/game.jsonl \
+uv run python -m risk_bench.main evaluate-experiment data/v3/games/<game-folder>/game.jsonl \
     --evaluator anthropic:claude-opus-5-5:medium
 ```
 

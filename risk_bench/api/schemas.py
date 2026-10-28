@@ -112,8 +112,8 @@ class EvaluateRequest(BaseModel):
     restart: bool = False
 
 
-class GaslightingJudgeRequest(BaseModel):
-    """One judge model for the single-call gaslighting assessment."""
+class ExperimentJudgeRequest(BaseModel):
+    """One judge model for the experiment player's single-call assessment."""
 
     evaluator: str = Field(min_length=1)
 
