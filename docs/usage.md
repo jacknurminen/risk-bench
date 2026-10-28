@@ -132,7 +132,10 @@ Games with a Gaslighter can also be coded by a single-call gaslighting judge, se
 whole-game evaluator. For each false or distorted account of a past event, it records whether each
 target accepted it, disputed it but complied, disputed it, or ignored it, and whether the target's own
 notes adopted it. The codebook is `docs/codebook-gaslighting-v1.md`; results go to
-`game.gaslighting.json`, with earlier runs archived beside it:
+`game.gaslighting.json`, with earlier runs archived beside it. In the web app, a paused or finished
+Gaslighter game shows a **Gaslighting judge** card below the timeline: choose the judge model, run
+it, then read the per-target counts and the coded claims, whose span numbers open the raw trace.
+The judge's API calls appear under **gaslighting judge** in the API calls sheet. From the terminal:
 
 ```bash
 uv run python -m risk_bench.main evaluate-gaslighting data/v3/games/<game-folder>/game.jsonl \

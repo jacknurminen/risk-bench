@@ -169,6 +169,7 @@
       <section class="card evalBar" id="evalBar" hidden></section>
       <section class="card ctaCard" id="evalCta" hidden></section>
       <section class="card" id="synthSection" style="padding:16px 18px;margin-bottom:14px" hidden></section>
+      <section class="card gaslightingCard" id="gaslightingCard" hidden></section>
     </div>
     </section>
   </main>
@@ -220,7 +221,7 @@
     <div id="evalSheet" hidden></div>
     <div id="callsSheet" hidden>
       <div style="display:flex;gap:12px;align-items:center;margin:10px 0">
-        <label class="mono" style="font-size:11px;color:var(--mute)">source <select id="callSource" style="font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:#fff"><option value="game">game</option><option value="evaluation">evaluator panel</option></select></label>
+        <label class="mono" style="font-size:11px;color:var(--mute)">source <select id="callSource" style="font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:#fff"><option value="game">game</option><option value="evaluation">evaluator panel</option>{% if gaslighting_url %}<option value="gaslighting">gaslighting judge</option>{% endif %}</select></label>
         <label class="mono" style="font-size:11px;color:var(--mute)">caller <select id="callerFilter" style="font-family:var(--font-mono);font-size:11px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:#fff"></select></label>
         <span id="callsStatus" class="mono" style="font-size:11px;color:var(--mute-2)"></span>
       </div>
@@ -264,6 +265,7 @@ window.BOOT = {
     verifications: {{ verifications_url_json }},
     trace: {{ trace_url_json }},
     analysis: {{ analysis_url_json }},
+    gaslighting: {{ gaslighting_url_json }},
     human: {{ human_url_json }},
   },
 };
@@ -273,6 +275,7 @@ window.BOOT = {
 <script src="/assets/reader/timeline.js"></script>
 <script src="/assets/reader/drawer.js"></script>
 <script src="/assets/reader/evaluate.js"></script>
+<script src="/assets/reader/gaslighting.js"></script>
 <script src="/assets/reader/shell.js"></script>
 <script src="/assets/reader/stats.js"></script>
 <script src="/assets/reader/evalstats.js"></script>

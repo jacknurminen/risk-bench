@@ -22,6 +22,7 @@ from risk_bench.config import load_settings, settings_for_new_game
 from risk_bench.players.human import mailbox_for
 from risk_bench.players.llm import ProviderUnavailableError
 from risk_bench.players.profiles import ExperimentPlayer
+from risk_bench.runner import gaslighting_evaluation
 from risk_bench.runner.tournament_evaluation import interrupt_batch, list_batches, run_batch
 
 
@@ -50,6 +51,7 @@ class GameProcessManager:
         # kept with its panel specs so progress reporting knows how many calls to expect.
         self._evaluations: dict[str, tuple[BaseProcess, list[str], bool]] = {}
         self._evaluation_batches: dict[Path, tuple[BaseProcess, dict]] = {}
+        self._gaslighting_judges: dict[str, BaseProcess] = {}
 
     @_locked
     def evaluate_tournament(self, path: Path) -> None:
@@ -145,6 +147,41 @@ class GameProcessManager:
         process = self._context.Process(target=_run_evaluation_in_worker, args=arguments, daemon=True)
         process.start()
         self._evaluations[game_id] = (process, list(evaluator_specs), live)
+
+    @_locked
+    def judge_gaslighting(self, game_id: str, journal_path: Path, evaluator_spec: str) -> None:
+        """Run the single-call gaslighting judge over a stored game in its own worker process.
+
+        It is tracked apart from the panel evaluation, so the two can run side by side.
+
+        Args:
+            game_id: The game's identity within the manager.
+            journal_path: The stored journal of a game with a Gaslighter player.
+            evaluator_spec: The judge's model spec.
+        """
+        arguments = (str(journal_path), evaluator_spec)
+        process = self._context.Process(target=_run_gaslighting_judge_in_worker, args=arguments, daemon=True)
+        process.start()
+        self._gaslighting_judges[game_id] = process
+
+    @_locked
+    def is_judging_gaslighting(self, game_id: str) -> bool:
+        """Tell whether a gaslighting judge worker for the game is currently alive.
+
+        Args:
+            game_id: The game to check.
+
+        Returns:
+            True while the judge runs; an exited worker is reaped on the way.
+        """
+        process = self._gaslighting_judges.get(game_id)
+        if process is None:
+            return False
+        if process.is_alive():
+            return True
+        process.join(timeout=0)
+        del self._gaslighting_judges[game_id]
+        return False
 
     @_locked
     def is_running(self, game_id: str) -> bool:
@@ -258,6 +295,11 @@ class GameProcessManager:
             self.pause_game(game_id=game_id)
         for game_id in list(self._evaluations):
             self.pause_evaluation(game_id=game_id)
+        for process in self._gaslighting_judges.values():
+            if process.is_alive():
+                process.kill()
+                process.join(timeout=5)
+        self._gaslighting_judges.clear()
         for path, (process, _) in list(self._evaluation_batches.items()):
             if process.is_alive():
                 process.terminate()
@@ -391,6 +433,18 @@ def _run_evaluation_in_worker(
         error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
     except Exception as error:
         print(f"[evaluation-aborted] {type(error).__name__}: {error}")
+        error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
+
+
+def _run_gaslighting_judge_in_worker(journal_path: str, evaluator_spec: str) -> None:
+    path = Path(journal_path)
+    _redirect_output(log_path=str(path.parent / "gaslighting.log"), append=False)
+    error_path = gaslighting_evaluation.gaslighting_error_path_for_journal(journal_path=path)
+    error_path.unlink(missing_ok=True)
+    try:
+        launch.run_gaslighting_evaluation(journal_path=path, evaluator_spec=evaluator_spec, settings=load_settings())
+    except Exception as error:
+        print(f"[gaslighting-aborted] {type(error).__name__}: {error}")
         error_path.write_text(json.dumps({"detail": str(error)}), encoding="utf-8")
 
 

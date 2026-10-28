@@ -156,6 +156,18 @@ def gaslighting_trace_path_for_journal(journal_path: Path) -> Path:
     return journal_path.with_suffix(".gaslighting.trace.jsonl")
 
 
+def gaslighting_error_path_for_journal(journal_path: Path) -> Path:
+    """Return the path where a failed web-app judge run records its error.
+
+    Args:
+        journal_path: The game's ``.jsonl`` journal.
+
+    Returns:
+        The ``.gaslighting.error.json`` path beside the journal.
+    """
+    return journal_path.with_suffix(".gaslighting.error.json")
+
+
 def write_gaslighting_sidecar(
     journal_path: Path,
     evaluator_spec: str,
