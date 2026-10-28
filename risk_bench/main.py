@@ -178,6 +178,21 @@ def evaluate(
 
 
 @app.command()
+def evaluate_gaslighting(
+    journal: Annotated[Path, typer.Argument(help="Journal (.jsonl) of a game with a Gaslighter player.")],
+    evaluator: Annotated[str, typer.Option(help="Judge model spec (provider:model:effort).")],
+) -> None:
+    """Code the Gaslighter's false claims and how each target took them, writing a .gaslighting.json sidecar."""
+    settings = load_settings()
+    try:
+        path = launch.run_gaslighting_evaluation(journal_path=journal, evaluator_spec=evaluator, settings=settings)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
+    _print_gaslighting_summary(path=path)
+    console.print(f"Gaslighting assessment written to {path}")
+
+
+@app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Interface to bind to.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to bind to.")] = 8420,
@@ -187,6 +202,19 @@ def serve(
     web_app = create_app(games_directory=settings.output_directory / "games")
     console.print(f"risk-bench running at [bold]http://{host}:{port}[/bold] — Ctrl+C to stop.")
     uvicorn.run(web_app, host=host, port=port, log_level="warning")
+
+
+def _print_gaslighting_summary(path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    table = Table(title=f"Gaslighting by target ({len(payload['claims'])} claims)")
+    columns = ("player", "claims_received", "accepted", "disputed_complied", "disputed", "ignored", "notes_adopted")
+    for column in columns:
+        table.add_column(column)
+    for row in payload["by_target"]:
+        table.add_row(*(str(row[column]) for column in columns))
+    console.print(table)
+    if payload["citation_issues"]:
+        console.print(f"[bold yellow]{len(payload['citation_issues'])} citation issues[/bold yellow] in the sidecar.")
 
 
 def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
