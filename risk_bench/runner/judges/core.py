@@ -135,7 +135,7 @@ def span_issues(
         cited: The span numbers to check.
         spans: The game's citable trace.
         layers: The allowed trace layers, or None for any layer.
-        player: The player every cited span must belong to, or None for anyone.
+        player: The player every cited span with an owner must belong to, or None for anyone.
 
     Returns:
         One readable issue per problem, empty when every citation checks out.
@@ -148,7 +148,8 @@ def span_issues(
         span = spans[span_number]
         if layers is not None and span.layer not in layers:
             issues.append(f"{label}: span {span_number} is a {span.layer}, expected {' or '.join(sorted(layers))}")
-        if player is not None and span.player != player:
+        # game events have no owner; their text names the players, so only the layer is checked
+        if player is not None and span.player is not None and span.player != player:
             issues.append(f"{label}: span {span_number} belongs to {span.player}, expected {player}")
     return issues
 

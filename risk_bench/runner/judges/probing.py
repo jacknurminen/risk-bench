@@ -142,7 +142,7 @@ def _attempt_citation_issues(assessment: ProbingAssessment, context: JudgeContex
             label=f"{label} outcome_spans",
             cited=attempt.outcome_spans,
             spans=context.spans,
-            layers={"message", "action"},
+            layers={"message", "action", "event"},
             player=attempt.listener,
         )
         issues += span_issues(
