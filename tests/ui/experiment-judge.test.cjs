@@ -26,7 +26,8 @@ const probing = {...meta, judge: 'probing', citation_issues: [], tables: [], inf
     listener:'opus', guess_correct:false, outcome:'refused', outcome_spans:[3], gain:false, gain_spans:[], note:''}]};
 const deception = {...meta, judge: 'deception', citation_issues: [], tables: [],
   attempts: [{target:'opus', promise:'Stay out of alaska', promise_spans:[0], reliance:'relied', reliance_spans:[1],
-    breached:true, breach_spans:[6], payoff:true, payoff_spans:[7], aftermath:'renewed', aftermath_spans:[8]}]};
+    breached:true, breach_spans:[6], payoff:true, payoff_spans:[7], aftermath:'renewed', aftermath_spans:[8],
+    accused:true, accused_spans:[9], retaliated:false, retaliated_spans:[]}]};
 const status = (name, assessment) => JSON.stringify({available:true, judge:{name, title:'X judge'}, running:false, error:null, assessment});
 
 test('the card offers the judge before any run', () => {
@@ -61,6 +62,8 @@ test('prober and deceiver results render their own attempts', () => {
   const deceptionHtml = run('judgeCardHtml()');
   assert.match(deceptionHtml, /deceiver gained/);
   assert.match(deceptionHtml, /agreed again<\/span><button class="chip"[^>]*openLineDrawer\(8\)/);
+  assert.match(deceptionHtml, /accused<\/span><button class="chip"[^>]*openLineDrawer\(9\)/);
+  assert.doesNotMatch(deceptionHtml, /attacked back/);
 });
 
 test('a running judge hides the controls and a running game blocks a new run', () => {

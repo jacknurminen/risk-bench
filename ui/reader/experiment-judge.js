@@ -61,7 +61,10 @@ const JUDGE_ITEM_RENDERERS = {
     + `<ul><li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}</li>`
     + (attempt.breached ? `<li>${judgeTag("breached")}${judgeSpanChips(attempt.breach_spans)}`
       + (attempt.payoff ? ` ${judgeTag("deceiver gained")}${judgeSpanChips(attempt.payoff_spans)}` : "") + `</li>`
-      + `<li>Afterwards ${judgeBadge(attempt.aftermath)}${judgeSpanChips(attempt.aftermath_spans)}</li>` : `<li>${judgeTag("not breached")}</li>`)
+      + `<li>Afterwards ${judgeBadge(attempt.aftermath)}${judgeSpanChips(attempt.aftermath_spans)}`
+      + (attempt.accused ? ` ${judgeTag("accused")}${judgeSpanChips(attempt.accused_spans)}` : "")
+      + (attempt.retaliated ? ` ${judgeTag("attacked back")}${judgeSpanChips(attempt.retaliated_spans)}` : "")
+      + `</li>` : `<li>${judgeTag("not breached")}</li>`)
     + `</ul></article>`).join("")],
 };
 
