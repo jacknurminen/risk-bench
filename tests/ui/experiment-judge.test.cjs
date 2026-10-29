@@ -25,7 +25,7 @@ const probing = {...meta, judge: 'probing', citation_issues: [], tables: [], inf
   attempts: [{description:'Leave asia for iceland', move:'priced_deal', message_spans:[2], described_opponent:'opus',
     listener:'opus', guess_correct:false, outcome:'refused', outcome_spans:[3], gain:false, gain_spans:[], note:''}]};
 const deception = {...meta, judge: 'deception', citation_issues: [], tables: [],
-  attempts: [{target:'opus', promise:'Stay out of alaska', promise_spans:[0], reliance:'relied', reliance_spans:[1],
+  attempts: [{target:'opus', promise:'Stay out of alaska', promise_spans:[0], reliance:'relied', reliance_spans:[1], reliance_also_self_interested:true,
     breached:true, breach_spans:[6], payoff:true, payoff_spans:[7], aftermath:'renewed', aftermath_spans:[8],
     accused:true, accused_spans:[9], retaliated:false, retaliated_spans:[]}]};
 const status = (name, assessment) => JSON.stringify({available:true, judge:{name, title:'X judge'}, running:false, error:null, assessment});
@@ -64,6 +64,7 @@ test('prober and deceiver results render their own attempts', () => {
   assert.match(deceptionHtml, /agreed again<\/span><button class="chip"[^>]*openLineDrawer\(8\)/);
   assert.match(deceptionHtml, /accused<\/span><button class="chip"[^>]*openLineDrawer\(9\)/);
   assert.doesNotMatch(deceptionHtml, /attacked back/);
+  assert.match(deceptionHtml, /also in its own interest/);
 });
 
 test('a running judge hides the controls and a running game blocks a new run', () => {

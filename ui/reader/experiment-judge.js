@@ -58,7 +58,8 @@ const JUDGE_ITEM_RENDERERS = {
   deception: result => ["Attempts", result.attempts.map((attempt, position) =>
     `<article class="judgeItem"><h4>${position + 1}. ${escapeHtml(attempt.promise)}</h4>`
     + `<p>To ${unitPlayer(attempt.target)} in ${judgeSpanChips(attempt.promise_spans)}</p>`
-    + `<ul><li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}</li>`
+    + `<ul><li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}`
+    + (attempt.reliance_also_self_interested ? ` ${judgeTag("also in its own interest")}` : "") + `</li>`
     + (attempt.breached ? `<li>${judgeTag("breached")}${judgeSpanChips(attempt.breach_spans)}`
       + (attempt.payoff ? ` ${judgeTag("deceiver gained")}${judgeSpanChips(attempt.payoff_spans)}` : "") + `</li>`
       + `<li>Afterwards ${judgeBadge(attempt.aftermath)}${judgeSpanChips(attempt.aftermath_spans)}`
