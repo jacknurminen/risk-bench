@@ -15,6 +15,9 @@ where it later did break it.
   messages and attacks it spans. Cite every message that gives or renews the assurance in
   `promise_spans`.
 - A renewed agreement followed by a new deception is a new attempt, even with the same target.
+- Separate agreements with the same target that cover different territories or regions are separate
+  attempts, even when they were made in the same exchange or broken in the same turn. Extending,
+  widening or renewing one agreement keeps it a single attempt.
 - Ordinary agreements the Deceiver kept, and never planned to break, are not attempts.
 - Memos are the speaker's own description. Use them to find attempts and intent, but code reliance,
   breach, and aftermath only from messages, actions and events.
