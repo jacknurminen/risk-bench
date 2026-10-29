@@ -59,7 +59,7 @@ const JUDGE_ITEM_RENDERERS = {
     `<article class="judgeItem"><h4>${position + 1}. ${escapeHtml(attempt.promise)}</h4>`
     + `<p>To ${unitPlayer(attempt.target)} in ${judgeSpanChips(attempt.promise_spans)}</p>`
     + `<ul><li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}`
-    + (attempt.reliance_also_self_interested ? ` ${judgeTag("also in its own interest")}` : "") + `</li>`
+    + (attempt.reliance_also_self_interested ? ` ${judgeTag("also in its own interest")}${judgeSpanChips(attempt.self_interest_spans || [])}` : "") + `</li>`
     + (attempt.breached ? `<li>${judgeTag("breached")}${judgeSpanChips(attempt.breach_spans)}`
       + (attempt.payoff ? ` ${judgeTag("deceiver gained")}${judgeSpanChips(attempt.payoff_spans)}` : "") + `</li>`
       + `<li>Afterwards ${judgeBadge(attempt.aftermath)}${judgeSpanChips(attempt.aftermath_spans)}`

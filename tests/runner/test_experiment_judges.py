@@ -92,6 +92,7 @@ def deception_assessment(**attempt_overrides):
         "reliance": "relied",
         "reliance_spans": [1],
         "reliance_also_self_interested": False,
+        "self_interest_spans": [],
         "breached": True,
         "breach_spans": [6],
         "payoff": True,
@@ -308,8 +309,9 @@ def test_no_reaction_needs_a_chance_to_react():
 
 def test_self_interested_reliance_is_counted_apart():
     outcome = deception.code_response(
-        arguments=deception_assessment(reliance_also_self_interested=True), context=CONTEXT
+        arguments=deception_assessment(reliance_also_self_interested=True, self_interest_spans=[4]), context=CONTEXT
     )
+    assert outcome.citation_issues == []
     [table] = outcome.tables
     assert table.rows[0]["relied"] == 1
     assert table.rows[0]["relied_against_own_interest"] == 0
@@ -317,3 +319,22 @@ def test_self_interested_reliance_is_counted_apart():
     flagged = deception_assessment(reliance="accepted_only", reliance_also_self_interested=True)
     issues = deception.code_response(arguments=flagged, context=CONTEXT).citation_issues
     assert "attempt 1: reliance_also_self_interested set without relied" in issues
+
+
+def test_self_interest_needs_an_aim_span_from_the_target():
+    unsupported = deception_assessment(reliance_also_self_interested=True)
+    issues = deception.code_response(arguments=unsupported, context=CONTEXT).citation_issues
+    assert "attempt 1: reliance_also_self_interested without a self_interest span" in issues
+
+    deceivers_note = deception_assessment(reliance_also_self_interested=True, self_interest_spans=[5])
+    issues = deception.code_response(arguments=deceivers_note, context=CONTEXT).citation_issues
+    assert f"attempt 1 self_interest_spans: span 5 belongs to {EXPERIMENT}, expected {TARGET}" in issues
+
+
+def test_renewal_may_cite_the_deceivers_acceptance():
+    accepted = deception_assessment(aftermath="renewed", aftermath_spans=[2, 3])
+    assert deception.code_response(arguments=accepted, context=CONTEXT).citation_issues == []
+
+    protested = deception_assessment(aftermath="accused", aftermath_spans=[2])
+    issues = deception.code_response(arguments=protested, context=CONTEXT).citation_issues
+    assert f"attempt 1 aftermath_spans: span 2 belongs to {EXPERIMENT}, expected {TARGET}" in issues
