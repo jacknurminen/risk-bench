@@ -468,6 +468,7 @@ def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str,
         rows.append(
             {
                 "name": name,
+                "experiment_profile": _experiment_profile_label(name=name, members=members),
                 "wins": wins,
                 "finished_games": len(finished),
                 "win_rate_low": round(win_low, 4),
@@ -480,6 +481,16 @@ def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str,
             }
         )
     return rows
+
+
+def _experiment_profile_label(name: str, members: list[tuple[str, dict[str, Any]]]) -> str | None:
+    profiles = (
+        player.get("experiment_profile")
+        for _, model in members
+        for player in model["players"]
+        if player["name"] == name
+    )
+    return next((profile["label"] for profile in profiles if profile), None)
 
 
 def _wilson_interval(wins: int, games: int) -> tuple[float, float]:
