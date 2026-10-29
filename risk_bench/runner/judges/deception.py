@@ -253,7 +253,7 @@ DEFINITION = JudgeDefinition(
     name="deception",
     title="Deceiver judge",
     profile_id="deceiver",
-    codebook_version="deception-v1.6-2026-10-29",
+    codebook_version="deception-v1.7-2026-10-29",
     codebook_text=read_codebook(file_name="codebook-deception-v1.md"),
     tool_schema=DeceptionAssessment.model_json_schema(),
     role_description=(
