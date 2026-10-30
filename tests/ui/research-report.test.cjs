@@ -73,3 +73,10 @@ test('tournament output charts include unevaluated games, denominators, and live
   assert.equal(run('tournamentOutputHtml(undefined)'), '');
   assert.equal(run('tournamentOutputHtml({players:[]})'), '');
 });
+test('tournament rows name each copy of a model and its experiment profile', () => {
+  const run = report();
+  const label = player => run(`researchTournamentPlayer(${JSON.stringify(player)}).model`);
+  assert.equal(label({name: 'gpt', model: 'gpt'}), 'gpt');
+  assert.equal(label({name: 'opus#2', model: 'opus'}), 'opus · opus#2');
+  assert.equal(label({name: 'opus#3', model: 'opus', experiment_profile: 'Deceiver'}), 'opus · opus#3 (Deceiver)');
+});

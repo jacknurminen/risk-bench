@@ -112,6 +112,12 @@ class EvaluateRequest(BaseModel):
     restart: bool = False
 
 
+class ExperimentJudgeRequest(BaseModel):
+    """One judge model for the experiment player's single-call assessment."""
+
+    evaluator: str = Field(min_length=1)
+
+
 class UnitVerificationBody(BaseModel):
     """A human review of one research unit within a selected evaluation run."""
 

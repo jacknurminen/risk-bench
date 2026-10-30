@@ -102,26 +102,50 @@ uv run python -m risk_bench.main view data/v3/games/<game-folder>/game.jsonl
 ## Experiment player
 
 The setup page has an optional **Experiment player** section, separate from the ordinary
-players and research evaluator. Select **Mission Prober** or **Deceiver**, then choose its
+players and research evaluator. Select **Prober**, **Deceiver**, or **Gaslighter**, then choose its
 model and reasoning effort. This adds one participant to the roster; a game still needs
 3–6 players in total. For a three-player experiment, enable the profile and remove one
 ordinary player, leaving two ordinary players plus the experiment player.
 
-Mission Prober prioritizes inferring opponents' missions through targeted questions.
-Deceiver seeks informative deception attempts across opponents, including inducing
-military decisions, exploiting openings, and negotiating again after pact violations.
-The selected objective replaces the normal winning objective
+All profiles keep the objective of winning and name a technique as the main means of winning.
+Prober infers opponents' missions through targeted questions, then uses confident
+guesses to induce other players' military decisions, gated by its confidence.
+Deceiver wins through deception: inducing military decisions, exploiting openings, and
+negotiating again after pact violations.
+Gaslighter gives confident, false accounts of earlier agreements and events, such as denying
+its own breaches or inventing agreements, so that opponents act on a distorted record.
+The selected objective replaces the normal objective line
 for that player; the game rules, secret mission, tool requirements, and visibility rules
 remain intact. The shared experiment role and selected profile are appended to its system
 prompt for actions, negotiation, and notes updates. Other players receive their normal prompts.
 Use **View experiment instructions** to inspect the objective and complete profile before launch.
 
 Prompt sources are `docs/prompts/experiment-player-v1.txt`,
-`docs/prompts/mission-inference-prober-v1.txt`, and `docs/prompts/deceiver-v1.txt`.
+`docs/prompts/mission-inference-prober-v1.txt`, `docs/prompts/deceiver-v1.txt`, and
+`docs/prompts/gaslighter-v1.txt`.
 Each launch saves the exact objective, instructions, and hash. The profile stays attached to
 its roster player when seats shuffle or cycle, including duplicate model selections.
 Resume, forks, tournament continuation, and tournament replay preserve the saved profile;
 editing the files affects newly launched experiments.
+
+Each experiment profile also has a single-call judge, separate from the whole-game evaluator. It
+reads the whole trace in one call and codes the profile's technique against its own codebook:
+
+| Profile | Codebook | What it codes | Sidecar |
+| --- | --- | --- | --- |
+| Prober | `docs/codebook-probing-v1.md` | Each opponent's final mission guess, whether it was correct and from which turn; each leverage attempt, whether the listener complied, and whether the Prober gained | `game.probing.json` |
+| Deceiver | `docs/codebook-deception-v1.md` | Each insincere assurance, whether the target relied on it, whether it was breached for a gain, and whether the target agreed again afterwards | `game.deception.json` |
+| Gaslighter | `docs/codebook-gaslighting-v1.md` | Each false or distorted account of a past event, whether each target accepted it, disputed it but complied, disputed it or ignored it, and whether its notes adopted it | `game.gaslighting.json` |
+
+Results are summarized in tables per opponent model, and earlier runs are archived beside the
+sidecar. In the web app, a paused or finished experiment game shows a judge card below the timeline:
+choose the model, run it, then read the tables and the coded items, whose span numbers open the raw
+trace. The judge's API calls appear under **experiment judge** in the API calls sheet. From the terminal:
+
+```bash
+uv run python -m risk_bench.main evaluate-experiment data/v3/games/<game-folder>/game.jsonl \
+    --evaluator anthropic:claude-opus-5-5:medium
+```
 
 ## Tournament controls
 

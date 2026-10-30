@@ -420,7 +420,7 @@ function renderAggregateTable(data) {
   const rows = data.table.map((row, seat) => {
     const interval = `${Math.round(row.win_rate_low * 100)}–${Math.round(row.win_rate_high * 100)}%`;
     const cost = row.cost_usd == null ? "—" : `$${row.cost_usd.toFixed(2)}`;
-    return `<tr><td style="white-space:nowrap"><span class="swatch" style="background:${COLORS[seat]};display:inline-block;margin-right:7px"></span><span style="font-weight:600">${row.name}</span></td>
+    return `<tr><td style="white-space:nowrap"><span class="swatch" style="background:${COLORS[seat]};display:inline-block;margin-right:7px"></span><span style="font-weight:600">${escapeHtml(row.name)}</span>${row.experiment_profile ? ` <small>(${escapeHtml(row.experiment_profile)})</small>` : ""}</td>
       <td class="num">${row.wins} / ${row.finished_games}</td>
       <td class="num">${row.finished_games ? interval : "—"}</td>
       <td class="num">${row.attacks}</td><td class="num">${row.conquests}</td>
