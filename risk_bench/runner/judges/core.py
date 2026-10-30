@@ -38,7 +38,7 @@ class SummaryTable:
 
     title: str
     columns: list[tuple[str, str]]
-    rows: list[dict[str, str | int | None]]
+    rows: list[dict[str, str | int | float | None]]
 
 
 @dataclass(frozen=True)
