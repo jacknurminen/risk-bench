@@ -105,6 +105,7 @@
   .tname { font: 500 7px var(--font-sans); text-anchor: middle; dominant-baseline: middle; fill: #2c3540; opacity: 1;
            paint-order: stroke; stroke: #ffffffa8; stroke-width: 1.6px; pointer-events: none; }
   #board path.flash { animation: borderFlash 1.2s ease-out; }
+  #board path.pactHighlight { stroke: #c45d12; stroke-width: 3.5; stroke-dasharray: 5 2.5; }
   @keyframes borderFlash { 0% { stroke: #c45d12; stroke-width: 4; } 55% { stroke: #c45d12; stroke-width: 2.5; } 100% { stroke: #000; stroke-width: 1.2; } }
 
   .controls { display: flex; align-items: center; gap: 6px; margin-top: 12px; flex-wrap: wrap; }

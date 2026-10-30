@@ -25,9 +25,10 @@ const probing = {...meta, judge: 'probing', citation_issues: [], tables: [], inf
   attempts: [{description:'Leave asia for iceland', move:'priced_deal', message_spans:[2], described_opponent:'opus',
     listener:'opus', guess_correct:false, outcome:'refused', outcome_spans:[3], gain:false, gain_spans:[], note:''}]};
 const deception = {...meta, judge: 'deception', citation_issues: [], tables: [],
-  attempts: [{target:'opus', promise:'Stay out of alaska', promise_spans:[0], reliance:'relied', reliance_spans:[1], reliance_also_self_interested:true, self_interest_spans:[4],
+  attempts: [{target:'opus', promise:'Stay out of alaska', promise_spans:[0], covered_territories:['alaska','north_africa'], reliance:'relied', reliance_spans:[1], reliance_also_self_interested:true, self_interest_spans:[4],
     breached:true, breach_spans:[6], payoff:true, payoff_spans:[7], aftermath:'renewed', aftermath_spans:[8],
-    accused:true, accused_spans:[9], retaliated:false, retaliated_spans:[]}]};
+    accused:true, accused_spans:[9], retaliated:false, retaliated_spans:[],
+    defence:{covered_before:5, uncovered_before:4, covered_during:1.5, uncovered_during:null, turns_during:2}}]};
 const status = (name, assessment) => JSON.stringify({available:true, judge:{name, title:'X judge'}, running:false, error:null, assessment});
 
 test('the card offers the judge before any run', () => {
@@ -65,6 +66,9 @@ test('prober and deceiver results render their own attempts', () => {
   assert.match(deceptionHtml, /accused<\/span><button class="chip"[^>]*openLineDrawer\(9\)/);
   assert.doesNotMatch(deceptionHtml, /attacked back/);
   assert.match(deceptionHtml, /also in its own interest<\/span><button class="chip"[^>]*openLineDrawer\(4\)/);
+  assert.match(deceptionHtml, /Covers <span class="tlink" data-place="alaska">Alaska<\/span>, <span class="tlink" data-place="north_africa">North Africa<\/span>/);
+  assert.match(deceptionHtml, /judgeHighlightPlaces\('alaska north_africa'\)">Show on map/);
+  assert.match(deceptionHtml, /covered 5 → 1.5, uncovered 4 → —/);
 });
 
 test('a running judge hides the controls and a running game blocks a new run', () => {
@@ -75,4 +79,14 @@ test('a running judge hides the controls and a running game blocks a new run', (
   const html = run('judgeCardHtml()');
   assert.match(html, /last run failed: no key/);
   assert.match(html, /id="judgeRun" disabled/);
+});
+
+test('show on map toggles the covered territories as one highlight', () => {
+  const run = reader();
+  run(`judge = ${status('deception', deception)}`);
+  run('globalThis.document = {getElementById: () => null}');  // no card to re-render in the test
+  run("judgeHighlightPlaces('alaska north_africa')");
+  assert.match(run('judgeCardHtml()'), /Hide on map/);
+  run("judgeHighlightPlaces('alaska north_africa')");
+  assert.match(run('judgeCardHtml()'), /Show on map/);
 });

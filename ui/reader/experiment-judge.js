@@ -29,6 +29,30 @@ function judgeBadge(code) {
   return `<span class="judgeBadge" style="border-color:${color};color:${color}">${escapeHtml(label)}</span>`;
 }
 function judgeTag(text) { return `<span class="judgeBadge">${escapeHtml(text)}</span>`; }
+// the territories a pact covered: each name flashes on click, and the button keeps them all outlined on the map
+let judgeHighlightedPlaces = "";
+function judgeCoveredHtml(places) {
+  if (!places?.length) return "";
+  const key = places.join(" ");
+  const names = places.map(place => `<span class="tlink" data-place="${escapeHtml(place)}">${escapeHtml(placeName(place))}</span>`).join(", ");
+  const shown = judgeHighlightedPlaces === key;
+  return `<li>Covers ${names} <button class="chip" onclick="judgeHighlightPlaces('${escapeHtml(key)}')">`
+    + `${shown ? "Hide on map" : "Show on map"}</button></li>`;
+}
+function judgeHighlightPlaces(key) {
+  judgeHighlightedPlaces = judgeHighlightedPlaces === key ? "" : key;
+  const lit = new Set(judgeHighlightedPlaces.split(" "));
+  if (typeof territoryShapes !== "undefined")
+    Object.entries(territoryShapes).forEach(([place, shape]) => shape.path.classList.toggle("pactHighlight", lit.has(place)));
+  renderJudgeCard();
+}
+function judgeDefenceHtml(defence) {
+  if (!defence) return "";
+  const value = number => number == null ? "—" : String(number);
+  return `<li>Armies per border territory: covered ${value(defence.covered_before)} → ${value(defence.covered_during)}, `
+    + `uncovered ${value(defence.uncovered_before)} → ${value(defence.uncovered_during)} `
+    + `<span class="statNote">(before → during, ${defence.turns_during} turn${defence.turns_during === 1 ? "" : "s"})</span></li>`;
+}
 function judgeTableHtml(table) {
   if (!table.rows.length) return `<h3>${escapeHtml(table.title)}</h3><p>Nothing was coded.</p>`;
   const cell = (key, value) => key === "player" ? unitPlayer(value) : escapeHtml(value == null ? "" : String(value));
@@ -58,7 +82,8 @@ const JUDGE_ITEM_RENDERERS = {
   deception: result => ["Attempts", result.attempts.map((attempt, position) =>
     `<article class="judgeItem"><h4>${position + 1}. ${escapeHtml(attempt.promise)}</h4>`
     + `<p>To ${unitPlayer(attempt.target)} in ${judgeSpanChips(attempt.promise_spans)}</p>`
-    + `<ul><li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}`
+    + `<ul>${judgeCoveredHtml(attempt.covered_territories)}`
+    + `<li>${judgeBadge(attempt.reliance)}${judgeSpanChips(attempt.reliance_spans)}`
     + (attempt.reliance_also_self_interested ? ` ${judgeTag("also in its own interest")}${judgeSpanChips(attempt.self_interest_spans || [])}` : "") + `</li>`
     + (attempt.breached ? `<li>${judgeTag("breached")}${judgeSpanChips(attempt.breach_spans)}`
       + (attempt.payoff ? ` ${judgeTag("deceiver gained")}${judgeSpanChips(attempt.payoff_spans)}` : "") + `</li>`
@@ -66,6 +91,7 @@ const JUDGE_ITEM_RENDERERS = {
       + (attempt.accused ? ` ${judgeTag("accused")}${judgeSpanChips(attempt.accused_spans)}` : "")
       + (attempt.retaliated ? ` ${judgeTag("attacked back")}${judgeSpanChips(attempt.retaliated_spans)}` : "")
       + `</li>` : `<li>${judgeTag("not breached")}</li>`)
+    + judgeDefenceHtml(attempt.defence)
     + `</ul></article>`).join("")],
 };
 
