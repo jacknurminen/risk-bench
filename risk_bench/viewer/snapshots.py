@@ -14,6 +14,7 @@ from risk_bench.game.serialization import action_from_json, event_from_json
 from risk_bench.game.state import GameState
 from risk_bench.game.types import Continent, PlayerId, Territory
 from risk_bench.players.rendering import describe_action, narrate_event
+from risk_bench.runner import description_store
 from risk_bench.runner.checkpoint import decode, restore_engine
 from risk_bench.runner.commentary import BEHAVIORS, axis_and_valence
 from risk_bench.runner.journal import read_journal, ruleset_for_schema_version
@@ -225,6 +226,7 @@ def build_view_model(journal_path: Path) -> dict[str, Any]:
     elif not result and pause_error:
         termination_reason = "Paused after error"
     model["research_context"] = game_context(model, header["player_specs"], termination_reason)
+    model["about"] = description_store.read_description(directory=journal_path.parent).model_dump()
     return model
 
 

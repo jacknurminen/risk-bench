@@ -86,11 +86,13 @@
 <body>
 <header class="masthead">
   <div class="inner">
-    <div class="brand"><span class="dice">⚂</span> risk-bench<small>tournament · <span id="tournamentId"></span></small></div>
+    <div class="brand"><span class="dice">⚂</span> risk-bench<small>tournament · <span id="tournamentId"></span></small>
+      <span class="mastTitle" id="tournamentTitle"></span></div>
     <div class="mastmeta"><span id="liveNote"></span><a href="/">← all games</a></div>
   </div>
 </header>
 <div class="shell">
+  <section class="card aboutCard" id="aboutCard" aria-label="Title and description" hidden></section>
   <section class="card section" style="padding:16px" aria-label="Continue tournament">
     <form id="tournamentContinueForm">
       <div class="controls"><strong>Continue tournament</strong>
@@ -183,6 +185,7 @@
 </div>
 </div>
 <script src="/assets/research-report.js"></script>
+<script src="/assets/about.js"></script>
 <script src="/assets/tournament-evaluate.js"></script>
 <script src="/assets/tournament-continue.js"></script>
 <script src="/assets/tournament-replay.js"></script>
@@ -210,6 +213,7 @@ function render(data) {
   renderTournamentContinuation(data);
   renderTournamentReplay(data);
   el("tournamentId").textContent = data.id;
+  showTournamentTitle(data.about);
   el("liveNote").textContent = data.games.length === (data.total_games ?? data.games.length) && data.games.every(game => game.finished)
     ? `${data.games.length} games, all finished` : `${data.games.length}/${data.total_games ?? data.games.length} games started · ${data.parallel_games ?? "—"} at once — updating`;
   el("legend").innerHTML = data.players
@@ -435,6 +439,14 @@ function renderAggregateTable(data) {
     <tbody>${rows.join("")}</tbody>`;
 }
 
+function showTournamentTitle(about) {
+  const title = about?.title || "";
+  el("tournamentTitle").textContent = title ? `· ${title}` : "";
+  document.title = title ? `${title} · risk-bench tournament` : "risk-bench · tournament";
+}
+
+mountAboutCard({ container: el("aboutCard"), about: DATA.about, saveUrl: POLL_URL ? `${POLL_URL}/description` : "",
+  noun: "tournament", onSaved: about => { if (latestData) latestData.about = about; showTournamentTitle(about); } });
 render(DATA);
 el('tournamentContinueForm').addEventListener('submit', continueTournament);
 el('tournamentReplayForm').addEventListener('submit', replayTournamentGame);

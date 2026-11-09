@@ -29,6 +29,7 @@ def render_reader_html(
     trace_url: str,
     analysis_url: str,
     experiment_judge_url: str,
+    description_url: str,
     human_url: str = "",
 ) -> str:
     """Render the unified evaluation reader: the game timeline with the panel's read merged in.
@@ -50,6 +51,8 @@ def render_reader_html(
             evaluation sheet).
         experiment_judge_url: The experiment judge's status and start URL; blank for games without a
             Prober, Deceiver or Gaslighter player and for static exports.
+        description_url: The URL the game's title and description are PUT to; blank for static exports,
+            which show them read-only.
         human_url: Optional decision mailbox URL, enabling the human turn card in live web games.
 
     Returns:
@@ -70,6 +73,7 @@ def render_reader_html(
         experiment_judge_url_json=json.dumps(experiment_judge_url),
         human_url=human_url,
         human_url_json=json.dumps(human_url),
+        description_url_json=json.dumps(description_url),
         mission_cards=_mission_reference([player["name"] for player in game_view_model["players"]])
         if game_view_model.get("human_players")
         else [],
@@ -123,6 +127,7 @@ def render_reader_export_html(game_view_model: dict[str, Any], evaluation_view_m
         trace_url="",
         analysis_url="",
         experiment_judge_url="",
+        description_url="",
     )
     return _inline_assets(html=html)
 
