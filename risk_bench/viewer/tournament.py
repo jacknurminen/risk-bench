@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from risk_bench.agents.tracing import TOKEN_CATEGORY_ORDER
+from risk_bench.runner import description_store
 from risk_bench.runner.evaluation_versions import list_versions, version_for
 from risk_bench.runner.tournament_evaluation import get_batch, list_batches
 from risk_bench.specs import named_specs
@@ -163,6 +164,7 @@ def build_tournament_view_model(tournament_directory: Path, evaluation_version: 
 
     return {
         "id": manifest["id"],
+        "about": description_store.read_description(directory=tournament_directory).model_dump(),
         "evaluation_version": evaluation_version,
         "evaluation_versions": batches,
         "evaluation_batch": selected,

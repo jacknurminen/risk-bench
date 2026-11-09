@@ -384,6 +384,7 @@ def test_reader_rendering_polls_the_given_url(tmp_path: Path):
         trace_url="/api/games/some-game/trace",
         analysis_url="/api/games/some-game/analysis",
         experiment_judge_url="",
+        description_url="/api/games/some-game/description",
     )
 
     assert "live: true" in html

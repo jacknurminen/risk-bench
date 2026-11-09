@@ -30,6 +30,9 @@ class GameSummary(BaseModel):
     cost_usd: float | None
     modified_at: datetime
     tournament_id: str | None
+    # the researcher's own label and note for the game, empty until one is written
+    title: str
+    description: str
 
 
 class TournamentSummary(BaseModel):
@@ -40,6 +43,8 @@ class TournamentSummary(BaseModel):
     game_ids: list[str]
     created_at: datetime
     parallel_games: int = 1
+    title: str
+    description: str
 
 
 class GameListResponse(BaseModel):

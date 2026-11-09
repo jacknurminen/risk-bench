@@ -41,6 +41,8 @@ async function refreshFromJournal() {
 }
 
 /* ================= INIT ================= */
+mountAboutCard({ container: el("aboutCard"), about: GAME.about, saveUrl: window.BOOT.urls.description, noun: "game",
+  onSaved: about => { GAME.about = about; renderMasthead(); } });
 buildBoard(); buildContinentLegend();
 renderMasthead(); renderGameControl(); renderModeToggle(); renderRail(); renderEvalCta(); renderEvalBar(); renderSynthesis(); renderTimeline();
 renderForkPanel();
