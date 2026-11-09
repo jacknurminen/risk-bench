@@ -20,6 +20,7 @@ from risk_bench import analysis, specs
 from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.models import MODELS, Provider
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
+from risk_bench.api.experiment_judge import install_experiment_judge_routes, judge_for_journal
 from risk_bench.api.human import install_human_routes
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
@@ -49,6 +50,7 @@ from risk_bench.runner.evaluation_store import (
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
+from risk_bench.runner.judges import core as judge_core
 from risk_bench.runner.live_evaluation import review_activity_for_journal
 from risk_bench.runner.tournament_evaluation import create_batch
 from risk_bench.runner.verification_store import delete_verification, write_verification
@@ -111,6 +113,9 @@ def create_app(games_directory: Path) -> FastAPI:
     app.mount("/assets", _RevalidatingStaticFiles(directory=UI_DIRECTORY), name="assets")
     usage_cache: _UsageCache = {}
     install_human_routes(app, manager, lambda game_id: _journal_path(games_directory, game_id))
+    install_experiment_judge_routes(
+        app=app, manager=manager, journal_path=lambda game_id: _journal_path(games_directory, game_id)
+    )
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -136,6 +141,9 @@ def create_app(games_directory: Path) -> FastAPI:
                 verifications_url=f"/api/games/{game_id}/verifications",
                 trace_url=f"/api/games/{game_id}/trace",
                 analysis_url=f"/api/games/{game_id}/analysis",
+                experiment_judge_url=f"/api/games/{game_id}/experiment-judge"
+                if judge_for_journal(journal_path=_journal_path(games_directory, game_id))
+                else "",
                 human_url=f"/api/games/{game_id}/human" if has_human and game_view_model["result"] is None else "",
             )
         )
@@ -314,7 +322,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 raise HTTPException(status_code=409, detail="Cancel the queued game before deleting it.")
             if manager.is_running(game_id=game_id):
                 raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
-            if manager.is_evaluating(game_id=game_id):
+            if manager.is_evaluating(game_id=game_id) or manager.is_running_experiment_judge(game_id=game_id):
                 raise HTTPException(
                     status_code=409, detail="An evaluation is running for this game; wait for it to finish."
                 )
@@ -633,6 +641,11 @@ def _evaluation_trace_path(journal_path: Path, run_id: str | None) -> Path:
 def _resolve_trace_path(journal_path: Path, source: str, run_id: str | None) -> Path:
     if source == "evaluation":
         return _evaluation_trace_path(journal_path=journal_path, run_id=run_id)
+    if source == "experiment_judge":
+        judge = judge_for_journal(journal_path=journal_path)
+        if judge is None:
+            raise HTTPException(status_code=404, detail="This game has no experiment judge.")
+        return judge_core.trace_path_for_journal(journal_path=journal_path, definition=judge)
     return trace_path_for_journal(journal_path=journal_path)
 
 

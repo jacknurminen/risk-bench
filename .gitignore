@@ -12,13 +12,15 @@ wheels/
 # Local API keys
 .env
 
-# Runtime data, except the selected tournament dataset and its audit history
+# Runtime data, except the tournaments used in the thesis and their audit history
 data/*
 !data/v3/
 data/v3/*
 !data/v3/games/
 data/v3/games/*
 !data/v3/games/20261012-101836-seed8349/
+!data/v3/games/20261028-152456-seed137/
+!data/v3/games/20261104-141131-seed895/
 data/v3/games/**/*.log
 data/v3/games/**/game.human/
 data/v3/games/**/*.lock

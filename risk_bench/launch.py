@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from risk_bench import analysis, specs
-from risk_bench.agents.tracing import TraceWriter, trace_path_for_journal
+from risk_bench.agents.tracing import TraceWriter, TracingAgent, trace_path_for_journal
 from risk_bench.config import Settings
 from risk_bench.game.rules import reinforcement_count
 from risk_bench.game.state import GameState
@@ -37,6 +37,8 @@ from risk_bench.runner.journal import (
     read_journal,
     restore_game,
 )
+from risk_bench.runner.judges import core as judge_core
+from risk_bench.runner.judges import registry as judge_registry
 from risk_bench.runner.trace_index import TraceSpan, build_trace_index, trace_fingerprint
 
 
@@ -366,6 +368,67 @@ def _run_whole_game_evaluation(journal_path: Path, evaluator_specs: list[str], s
     # evaluation therefore also produces the analysis dump
     _write_analysis_dump(journal_path=journal_path)
     return writer.path
+
+
+def run_experiment_judge(journal_path: Path, evaluator_spec: str, settings: Settings) -> Path:
+    """Run the experiment player's single-call judge over a stored game and write its sidecar.
+
+    The judge is chosen by the experiment player's profile: Prober, Deceiver or Gaslighter.
+
+    Args:
+        journal_path: The game journal; it may be a paused game's prefix.
+        evaluator_spec: The judge's model spec (provider:model:effort).
+        settings: Provides API keys and the evaluator token limit.
+
+    Returns:
+        The path to the written sidecar, such as ``game.gaslighting.json``.
+
+    Raises:
+        ValueError: If the game has no judged experiment player, no checkpoint, or the judge returns
+            no valid assessment.
+    """
+    records = read_journal(path=journal_path)
+    header = records[0]
+    experiment = header.get("configuration", {}).get("experiment_player") or {}
+    judge = judge_registry.judge_for_profile(profile_id=experiment.get("id"))
+    if judge is None:
+        raise ValueError("This game has no Prober, Deceiver or Gaslighter experiment player.")
+    saved = next((record["checkpoint"] for record in reversed(records) if record["type"] == "checkpoint"), None)
+    if saved is None:
+        raise ValueError("No committed v3 checkpoint is available to evaluate.")
+    state, _ = restore_engine(saved)
+    spans = build_trace_index(records=records)
+    finished = any(record["type"] == "result" for record in records)
+    overview = (
+        _render_game_overview(state=state)
+        + f"\nObservation cutoff: span {len(spans) - 1}; "
+        + ("game finished." if finished else "game still open.")
+    )
+    context = judge_core.JudgeContext(
+        experiment_player=experiment["player_id"],
+        players=list(state.players),
+        spans=spans,
+        player_models=header.get("player_specs", {}),
+    )
+    trace_path = judge_core.trace_path_for_journal(journal_path=journal_path, definition=judge)
+    trace = TraceWriter(path=trace_path, append=False)
+    trace.set_context(turn=state.turn_number, kind="evaluation")
+    try:
+        agent = specs.build_agent(spec=evaluator_spec, settings=settings, max_tokens=settings.max_evaluator_tokens)
+        traced_agent = TracingAgent(
+            agent=agent, model=specs.resolve_model(spec=evaluator_spec), caller=judge.name, writer=trace
+        )
+        outcome = judge_core.assess(definition=judge, agent=traced_agent, context=context, game_overview=overview)
+    finally:
+        trace.close()
+    return judge_core.write_sidecar(
+        journal_path=journal_path,
+        definition=judge,
+        evaluator_spec=evaluator_spec,
+        outcome=outcome,
+        experiment_player=experiment["player_id"],
+        finished=finished,
+    )
 
 
 def _write_analysis_dump(journal_path: Path) -> None:

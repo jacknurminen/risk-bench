@@ -105,6 +105,7 @@
   .tname { font: 500 7px var(--font-sans); text-anchor: middle; dominant-baseline: middle; fill: #2c3540; opacity: 1;
            paint-order: stroke; stroke: #ffffffa8; stroke-width: 1.6px; pointer-events: none; }
   #board path.flash { animation: borderFlash 1.2s ease-out; }
+  #board path.pactHighlight { stroke: #c45d12; stroke-width: 3.5; stroke-dasharray: 5 2.5; }
   @keyframes borderFlash { 0% { stroke: #c45d12; stroke-width: 4; } 55% { stroke: #c45d12; stroke-width: 2.5; } 100% { stroke: #000; stroke-width: 1.2; } }
 
   .controls { display: flex; align-items: center; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
@@ -132,6 +133,20 @@
   .synthCard { border: 1px solid var(--line-2); border-radius: 6px; padding: 13px; border-top: 3px solid var(--line); }
   .synthCard .summary { font-size: 12px; line-height: 1.5; color: var(--body); margin: 8px 0 0; }
   #synthSection { font-size: 12px; line-height: 1.5; color: var(--body); }
+  /* the experiment judge's card: summary tables, then the coded items with their citations */
+  .judgeCard { padding: 16px 18px; margin-bottom: 14px; font-size: 12px; line-height: 1.5; color: var(--body); }
+  .judgeCard h2 { font-family: var(--font-serif); font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+  .judgeCard p { margin: 6px 0; }
+  .judgeActions { margin-top: 10px; }
+  .judgeCard h3 { font-family: var(--font-mono); font-size: 10px; font-weight: 500; color: var(--mute); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 0; }
+  .judgeBadge { display: inline-block; font-family: var(--font-mono); font-size: 9.5px; border: 1px solid var(--line);
+    border-radius: 3px; padding: 0 5px; margin: 0 4px; color: var(--mute); font-weight: 500; }
+  .judgeSummary { color: var(--body); }
+  .judgeItems { margin-top: 10px; }
+  .judgeItems > summary { cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--mute); }
+  .judgeItem { border-top: 1px solid var(--line-2); padding: 8px 0; }
+  .judgeItem h4 { font-size: 12.5px; margin: 0 0 4px; }
+  .judgeItem ul { margin: 4px 0 0; padding-left: 18px; }
   .synthDim { margin-top: 8px; font-size: 11.5px; line-height: 1.45; }
   .synthDim b { font-family: var(--font-mono); font-size: 10px; color: var(--mute); }
 

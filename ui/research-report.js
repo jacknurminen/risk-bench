@@ -124,6 +124,11 @@ function researchIntroHtml() {
     'Games with incidents use source-matched observations; partial assessments remain provisional. Human records remain separate. Missing screening and untagged messages do not establish honesty. ' +
     'Citation checks verify sources, not interpretations. Related branches share history and are not independent observations.</p>';
 }
+// tournament rows are one per player; name the copy, and its experiment profile, when a model fills several seats
+function researchTournamentPlayer(p) {
+  const name = !p.name || p.name === p.model ? p.model : p.model + ' · ' + p.name;
+  return {...p, model: p.experiment_profile ? name + ' (' + p.experiment_profile + ')' : name};
+}
 function renderResearchGameReport(report, game) {
   const context = game.research_context;
   const cohorts = report.members.map(m => ({method: report.method, codebook_version: report.codebook_version, codebook_hash: report.codebook_hash,
@@ -179,7 +184,7 @@ function tournamentOutputHtml(output) {
 }
 function renderTournamentResearch(report, games, output) {
   return tournamentOutputHtml(output) + researchIntroHtml() +
-    (report?.cohorts.length ? report.cohorts.map(c => researchCohortHtml(c)).join('') :
+    (report?.cohorts.length ? report.cohorts.map(c => researchCohortHtml({...c, players: c.players.map(researchTournamentPlayer)})).join('') :
     '<p class="researchScopeNotice">No research evaluations are available. Missing evaluations are not zero findings.</p>') +
     '<details class="researchRecordDetails" open><summary>Evaluation availability by game</summary>' +
     researchTable(['Game', 'Method', 'Evaluation', 'Instrument', 'Branch'], (report?.availability || []).map(g => [

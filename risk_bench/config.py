@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     # a reasoning model to think AND still emit its tool call (4096 proved too tight for GPT)
     max_agent_tokens: int = 8192
     # Whole-game adjudication emits linked research units, requiring more output than gameplay calls.
-    max_evaluator_tokens: int = 64000
+    max_evaluator_tokens: int = 128000
     agent_reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     max_invalid_retries: int = 3
     # how many commentator-panel members may call their providers at once per commentary point

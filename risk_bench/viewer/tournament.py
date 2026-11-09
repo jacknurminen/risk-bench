@@ -127,7 +127,10 @@ def build_tournament_view_model(tournament_directory: Path, evaluation_version: 
 
     player_names = ([player["name"] for player in members[0][1]["players"]] if members
                     else list(named_specs(specs=manifest["players"])))
-    member_series = [model["stats"]["series"] for _, model in members]
+    member_series = [
+        _series_in_player_order(series=model["stats"]["series"], model=model, player_names=player_names)
+        for _, model in members
+    ]
     turns = list(range(max((len(series["turns"]) for series in member_series), default=0)))
     bootstrap_rng = random.Random(_BOOTSTRAP_SEED)
     research_games = []
@@ -195,6 +198,19 @@ def build_tournament_view_model(tournament_directory: Path, evaluation_version: 
         "research": tournament_research(research_games),
         "output_volume": _aggregate_output_volume(members),
     }
+
+
+def _series_in_player_order(
+    series: dict[str, Any], model: dict[str, Any], player_names: list[str]
+) -> dict[str, Any]:
+    # seating differs per game (cycle or shuffled seating), so a seat index means a different player in each
+    # game; reorder every game's per-seat series to the tournament's player order before merging by index
+    seats = _seats_by_name(model=model)
+    return {**series, "players": [series["players"][seats[name]] for name in player_names]}
+
+
+def _seats_by_name(model: dict[str, Any]) -> dict[str, int]:
+    return {player["name"]: seat for seat, player in enumerate(model["players"])}
 
 
 def _aggregate_output_volume(members: list[tuple[str, dict[str, Any]]]) -> dict[str, Any]:
@@ -429,7 +445,7 @@ def _game_row(game_id: str, model: dict[str, Any]) -> dict[str, Any]:
 def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
     finished = [model for _, model in members if model["result"] is not None]
     rows = []
-    for seat, name in enumerate(player_names):
+    for name in player_names:
         wins = sum(1 for model in finished if model["result"]["winner"] == name)
         win_low, win_high = _wilson_interval(wins=wins, games=len(finished))
         combined = dict.fromkeys(
@@ -438,7 +454,7 @@ def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str,
         tags: dict[str, int] = {}
         input_tokens, output_tokens, costs = 0, 0, []
         for _, model in members:
-            per_player = model["stats"]["per_player"][seat]
+            per_player = model["stats"]["per_player"][_seats_by_name(model=model)[name]]
             for key in combined:
                 combined[key] += per_player[key]
             for behavior, count in per_player["tags"].items():
@@ -452,6 +468,7 @@ def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str,
         rows.append(
             {
                 "name": name,
+                "experiment_profile": _experiment_profile_label(name=name, members=members),
                 "wins": wins,
                 "finished_games": len(finished),
                 "win_rate_low": round(win_low, 4),
@@ -464,6 +481,16 @@ def _aggregate_table(player_names: list[str], members: list[tuple[str, dict[str,
             }
         )
     return rows
+
+
+def _experiment_profile_label(name: str, members: list[tuple[str, dict[str, Any]]]) -> str | None:
+    profiles = (
+        player.get("experiment_profile")
+        for _, model in members
+        for player in model["players"]
+        if player["name"] == name
+    )
+    return next((profile["label"] for profile in profiles if profile), None)
 
 
 def _wilson_interval(wins: int, games: int) -> tuple[float, float]:

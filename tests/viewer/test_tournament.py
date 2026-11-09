@@ -1,8 +1,13 @@
 import json
+import random
 from pathlib import Path
 
 import pytest
 
+from risk_bench.players.random import RandomPlayer
+from risk_bench.runner.game_runner import GameRunner
+from risk_bench.runner.journal import SCHEMA_VERSION, JournalHeader, JournalWriter
+from risk_bench.viewer.snapshots import build_view_model
 from risk_bench.viewer.tournament import build_tournament_view_model
 from tests.runner.test_journal import PLAYER_NAMES, write_game_journal
 
@@ -185,3 +190,61 @@ def test_a_tournament_whose_games_have_not_started_is_rejected(tmp_path: Path):
 
     with pytest.raises(ValueError, match="no readable game journals"):
         build_tournament_view_model(tournament_directory=tmp_path)
+
+
+def test_seat_stats_follow_the_player_when_seating_changes(tmp_path: Path):
+    directory = tournament_directory_with_games(tmp_path=tmp_path, seeds=[11, 12])
+    manifest = json.loads((directory / "tournament.json").read_text(encoding="utf-8"))
+    reseated_path = directory / manifest["game_ids"][1] / "game.jsonl"
+    _write_reseated_journal(path=reseated_path, seed=12, player_order=list(reversed(PLAYER_NAMES)))
+    member_models = [
+        build_view_model(journal_path=directory / game_id / "game.jsonl") for game_id in manifest["game_ids"]
+    ]
+    assert [player["name"] for player in member_models[1]["players"]] == list(reversed(PLAYER_NAMES))
+
+    model = build_tournament_view_model(tournament_directory=directory)
+
+    for row_position, row in enumerate(model["table"]):
+        own_attacks = [
+            member["stats"]["per_player"][_seat_of(member=member, name=row["name"])]["attacks"]
+            for member in member_models
+        ]
+        assert row["attacks"] == sum(own_attacks)
+        own_territories = [
+            member["stats"]["series"]["players"][_seat_of(member=member, name=row["name"])]["territories"]
+            for member in member_models
+        ]
+        assert model["metrics"]["territories"][row_position]["games"] == own_territories
+
+
+def _write_reseated_journal(path: Path, seed: int, player_order: list[str]) -> None:
+    journal = JournalWriter(path=path, append=False)
+    journal.write_header(
+        header=JournalHeader(
+            schema_version=SCHEMA_VERSION,
+            seed=seed,
+            player_specs={name: "random" for name in player_order},
+            max_turns=2_000,
+            allow_private_messages=False,
+            max_negotiation_rounds=3,
+            commentators=[],
+        )
+    )
+    GameRunner(
+        players={name: RandomPlayer(player_id=name, rng=random.Random(f"{seed}:{name}")) for name in player_order},
+        additional_context={},
+        seed=seed,
+        max_turns=2_000,
+        allow_private_messages=False,
+        max_negotiation_rounds=3,
+        commentators=(),
+        max_concurrent_commentators=1,
+        journal=journal,
+        trace=None,
+        verbose=False,
+    ).run()
+    journal.close()
+
+
+def _seat_of(member: dict, name: str) -> int:
+    return [player["name"] for player in member["players"]].index(name)
