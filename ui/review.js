@@ -256,6 +256,7 @@ function startReview(tournamentId) {
     const body = {
       commitments: number("sampleCommitments"), candidates: number("sampleCandidates"),
       messages: number("sampleMessages"), minimum_per_stratum: number("sampleFloor"),
+      all_violated: el("sampleAllViolated").checked,
       seed: el("sampleSeed").value === "" ? null : number("sampleSeed"), batch_id: el("sampleBatch").value || null,
     };
     el("drawSample").disabled = true;

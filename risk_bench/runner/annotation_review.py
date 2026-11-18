@@ -51,6 +51,9 @@ def finding_answer(verdict: dict) -> str:
     if "incorrect" in parts:
         return "incorrect"
     return "unsure" if "unsure" in parts else "correct"
+
+
+VIOLATED_STRATUM: Final[str] = "commitment:violated"
 MESSAGE_FIELDS: Final[tuple[str, ...]] = ("commitment", "deception")
 MESSAGE_VERDICTS: Final[frozenset[str]] = frozenset({"yes", "no", "unsure"})
 
@@ -143,7 +146,7 @@ def population(tournament_directory: Path, runs: list[dict], evaluator_index: in
     findings, messages = [], []
     for run in runs:
         for record in read_evaluation(_version(tournament_directory, run).eval_path):
-            if record.get("type") in FINDING_TYPES and record.get("evaluator_index", 0) == evaluator_index:
+            if _is_reported_finding(record=record, evaluator_index=evaluator_index):
                 findings.append(
                     {
                         "game_id": run["game_id"],
@@ -160,6 +163,16 @@ def population(tournament_directory: Path, runs: list[dict], evaluator_index: in
             if span.layer == "message"
         )
     return findings, messages
+
+
+def _is_reported_finding(record: dict, evaluator_index: int) -> bool:
+    # The reported counts leave out records that failed validation and proposals that were
+    # never established, so a sample drawn from them would estimate a different population.
+    if record.get("type") not in FINDING_TYPES or record.get("evaluator_index", 0) != evaluator_index:
+        return False
+    if record.get("valid") is False:
+        return False
+    return record["type"] != "eval_commitment" or record.get("established", True)
 
 
 # --- sampling ---------------------------------------------------------------------------------
@@ -219,13 +232,15 @@ def draw_sample(
     candidates: int = 0,
     messages: int = 30,
     minimum_per_stratum: int = 3,
+    all_violated: bool = False,
     seed: int | None = None,
     batch_id: str | None = None,
     evaluator_index: int = 0,
 ) -> dict:
     """Draw and save a review sample; the seed and population are recorded with it.
 
-    Every documented deception is included: they are few and carry the central claims.
+    Every documented deception is included: they are few and carry the central claims. With
+    ``all_violated``, so is every violated commitment, and ``commitments`` counts the others.
 
     Args:
         tournament_directory: The tournament's directory (holds ``tournament.json``).
@@ -233,6 +248,7 @@ def draw_sample(
         candidates: Deception candidates (suspected, not documented) to review.
         messages: Delivered messages to code blind, drawn uniformly from all games.
         minimum_per_stratum: Floor per status stratum before proportional allocation.
+        all_violated: Include every violated commitment instead of sampling them.
         seed: Random seed; a fresh one is chosen and recorded when omitted.
         batch_id: A tournament evaluation batch to take runs from; newest runs otherwise.
         evaluator_index: The panel member whose findings are reviewed.
@@ -255,7 +271,8 @@ def draw_sample(
     sizes = {name: len(units) for name, units in sorted(strata.items())}
 
     commitment_sizes = {name: size for name, size in sizes.items() if name.startswith("commitment:")}
-    allocation = allocate(commitment_sizes, commitments, minimum_per_stratum)
+    census = {VIOLATED_STRATUM: commitment_sizes.pop(VIOLATED_STRATUM, 0)} if all_violated else {}
+    allocation = allocate(commitment_sizes, commitments, minimum_per_stratum) | census
     allocation["deception"] = sizes.get("deception", 0)
     candidate_sizes = {name: size for name, size in sizes.items() if name.startswith("deception_candidate:")}
     allocation.update(allocate(candidate_sizes, candidates, minimum_per_stratum))
@@ -295,6 +312,7 @@ def draw_sample(
             "deceptions": "all",
             "messages": messages,
             "minimum_per_stratum": minimum_per_stratum,
+            "all_violated": all_violated,
         },
         "runs": runs,
         "skipped_games": skipped,
@@ -408,7 +426,7 @@ def judge_labels(records: list[dict], evaluator_index: int) -> dict[int, dict]:
         lambda: {"commitments": [], "deceptions": [], "candidates": [], "screening": None}
     )
     for record in records:
-        if record.get("evaluator_index", 0) != evaluator_index:
+        if record.get("evaluator_index", 0) != evaluator_index or record.get("valid") is False:
             continue
         match record.get("type"):
             case "eval_commitment":

@@ -27,13 +27,14 @@
     <details id="newSample">
       <summary>Draw a new sample</summary>
       <p class="note">The sample is drawn once with a recorded seed and saved before any review. Every documented
-        deception is included. Commitments are stratified by final status, with a floor per stratum so rare
+        deception is included, and every violated commitment when that box is ticked (the commitment count then covers the other outcomes). Commitments are stratified by final status, with a floor per stratum so rare
         outcomes appear; the report reweights by population size. Messages are drawn uniformly from all games and reviewed blind.</p>
       <form id="sampleForm" class="controls">
         <label>Commitments <input id="sampleCommitments" type="number" min="0" value="25"></label>
         <label>Deception candidates <input id="sampleCandidates" type="number" min="0" value="0"></label>
         <label>Messages <input id="sampleMessages" type="number" min="0" value="30"></label>
         <label>Floor per stratum <input id="sampleFloor" type="number" min="0" value="3"></label>
+        <label><input id="sampleAllViolated" type="checkbox"> Include every violated commitment</label>
         <label>Seed <input id="sampleSeed" type="number" min="0" placeholder="random"></label>
         <label>Runs <select id="sampleBatch"><option value="">Newest whole-game run per game</option></select></label>
         <button class="btn dark" type="submit" id="drawSample">Draw sample</button>

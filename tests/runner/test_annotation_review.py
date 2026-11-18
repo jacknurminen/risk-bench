@@ -121,12 +121,9 @@ def test_allocate_keeps_a_floor_and_sums_exactly():
 
 
 def test_sample_is_reproducible_saved_and_skips_failed_runs(tournament):
-    first = review.draw_sample(
-        tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11
-    )
-    second = review.draw_sample(
-        tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11
-    )
+    first = review.draw_sample(tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11)
+    second = review.draw_sample(tournament, commitments=4, candidates=2, messages=3, minimum_per_stratum=1, seed=11)
+
     def keys(sample):
         return [(i["kind"], i["game_id"], i.get("unit_id"), i["span"]) for i in sample["items"]]
 
@@ -151,6 +148,30 @@ def test_population_counts_only_the_chosen_panel_member(tournament):
         strata[finding["stratum"]] = strata.get(finding["stratum"], 0) + 1
     assert strata == {"commitment:fulfilled": 5, "commitment:violated": 1, "deception_candidate:excluded": 3}
     assert len(messages) == 6
+
+
+def test_population_leaves_out_invalid_and_unestablished_commitments(tmp_path):
+    directory = tmp_path / "t2"
+    write_journal(directory / "t2-g1" / "game.jsonl")
+    invalid = commitment("invalid", "fulfilled") | {"valid": False}
+    proposal = commitment("proposal", "closed") | {"established": False}
+    write_eval(
+        directory / "t2-g1", [commitment("kept", "fulfilled"), invalid, proposal], run_id="20261026-000001-000000"
+    )
+    (directory / "tournament.json").write_text(json.dumps({"id": "t2", "game_ids": ["t2-g1"]}), encoding="utf-8")
+    runs, _ = review.pinned_runs(directory)
+    findings, _ = review.population(directory, runs, 0)
+    assert [finding["unit_id"] for finding in findings] == ["kept"]
+
+
+def test_all_violated_takes_every_violation_beside_the_commitment_count(tournament):
+    sample = review.draw_sample(
+        tournament, commitments=2, messages=0, minimum_per_stratum=0, all_violated=True, seed=4
+    )
+    strata = [item["stratum"] for item in sample["items"] if item["kind"] == "finding"]
+    assert strata.count("commitment:violated") == 1
+    assert strata.count("commitment:fulfilled") == 2
+    assert sample["requested"]["all_violated"] is True
 
 
 def test_message_review_is_blind_until_coded_and_scores_recall(tournament):
