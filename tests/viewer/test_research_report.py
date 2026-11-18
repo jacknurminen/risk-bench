@@ -112,11 +112,15 @@ def test_tournament_keeps_instruments_and_evaluators_separate_and_counts_games_o
         ]
     )
     assert len(result["cohorts"]) == 3
-    row = result["cohorts"][0]["players"][0]  # both random seats merge by model
-    assert row["established"] == 2 and row["deception_incidents"] == 2
-    assert row["deception_games"] == ["g1", "g2"]
-    assert row["observed_games"] == ["g1", "g2"]
-    assert row["turns_survived"] == 12 and row["player_games"] == 4
+    rows = result["cohorts"][0]["players"]
+    assert [row["name"] for row in rows] == ["alice", "bob", "carla"]  # two random seats stay apart
+    alice = rows[0]
+    assert alice["model"] == "random" and alice["experiment_profile"] is None
+    assert alice["turns_survived"] == 6 and alice["player_games"] == 2
+    assert alice["observed_games"] == ["g1", "g2"]
+    pooled = [row for row in rows if row["model"] == "random"]
+    assert sum(row["established"] for row in pooled) == 2
+    assert sum(row["deception_incidents"] for row in pooled) == 2
     assert result["availability"][-1]["status"] == "Not evaluated"
     json.dumps(result)
 
@@ -149,3 +153,17 @@ def test_tournament_keeps_methods_separate_even_for_the_same_model_and_game(tmp_
     assert len(result["cohorts"]) == 2
     for cohort in result["cohorts"]:
         assert cohort["players"][0]["established"] == 1
+
+
+def test_tournament_rows_name_the_experiment_profile(tmp_path):
+    report = summarize(evaluated_view(tmp_path))
+    context = {
+        "players": [
+            {"name": "alice", "turns_survived": 1, "experiment_profile": {"id": "deceiver", "label": "Deceiver"}},
+            {"name": "bob", "turns_survived": 1},
+            {"name": "carla", "turns_survived": 1},
+        ]
+    }
+    [cohort] = tournament_research([("g1", context, report)])["cohorts"]
+    profiles = {row["name"]: row["experiment_profile"] for row in cohort["players"]}
+    assert profiles == {"alice": "Deceiver", "bob": None, "carla": None}

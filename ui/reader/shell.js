@@ -2,6 +2,9 @@
 function renderMasthead() {
   const status = readerStatus();
   el("mastStatus").innerHTML = `<span class="dot"></span>${status}`;
+  const title = GAME.about?.title || "";
+  el("mastTitle").textContent = title ? `· ${title}` : "";
+  document.title = title ? `${title} · risk-bench` : "risk-bench · evaluation reader";
   el("mastWinner").innerHTML = GAME.result && GAME.result.winner
     ? `winner <span style="color:${colorOf(GAME.result.winner)};font-weight:600">${tagOf(GAME.result.winner)}</span>` : "";
 }

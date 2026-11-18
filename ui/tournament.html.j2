@@ -86,11 +86,13 @@
 <body>
 <header class="masthead">
   <div class="inner">
-    <div class="brand"><span class="dice">⚂</span> risk-bench<small>tournament · <span id="tournamentId"></span></small></div>
+    <div class="brand"><span class="dice">⚂</span> risk-bench<small>tournament · <span id="tournamentId"></span></small>
+      <span class="mastTitle" id="tournamentTitle"></span></div>
     <div class="mastmeta"><span id="liveNote"></span><a id="reviewLink" href="#">annotation review</a><a href="/">← all games</a></div>
   </div>
 </header>
 <div class="shell">
+  <section class="card aboutCard" id="aboutCard" aria-label="Title and description" hidden></section>
   <section class="card section" style="padding:16px" aria-label="Continue tournament">
     <form id="tournamentContinueForm">
       <div class="controls"><strong>Continue tournament</strong>
@@ -183,6 +185,7 @@
 </div>
 </div>
 <script src="/assets/research-report.js"></script>
+<script src="/assets/about.js"></script>
 <script src="/assets/tournament-evaluate.js"></script>
 <script src="/assets/tournament-continue.js"></script>
 <script src="/assets/tournament-replay.js"></script>
@@ -211,6 +214,7 @@ function render(data) {
   renderTournamentReplay(data);
   el("tournamentId").textContent = data.id;
   el("reviewLink").href = `/tournaments/${encodeURIComponent(data.id)}/review`;
+  showTournamentTitle(data.about);
   el("liveNote").textContent = data.games.length === (data.total_games ?? data.games.length) && data.games.every(game => game.finished)
     ? `${data.games.length} games, all finished` : `${data.games.length}/${data.total_games ?? data.games.length} games started · ${data.parallel_games ?? "—"} at once — updating`;
   el("legend").innerHTML = data.players
@@ -421,7 +425,7 @@ function renderAggregateTable(data) {
   const rows = data.table.map((row, seat) => {
     const interval = `${Math.round(row.win_rate_low * 100)}–${Math.round(row.win_rate_high * 100)}%`;
     const cost = row.cost_usd == null ? "—" : `$${row.cost_usd.toFixed(2)}`;
-    return `<tr><td style="white-space:nowrap"><span class="swatch" style="background:${COLORS[seat]};display:inline-block;margin-right:7px"></span><span style="font-weight:600">${row.name}</span></td>
+    return `<tr><td style="white-space:nowrap"><span class="swatch" style="background:${COLORS[seat]};display:inline-block;margin-right:7px"></span><span style="font-weight:600">${escapeHtml(row.name)}</span>${row.experiment_profile ? ` <small>(${escapeHtml(row.experiment_profile)})</small>` : ""}</td>
       <td class="num">${row.wins} / ${row.finished_games}</td>
       <td class="num">${row.finished_games ? interval : "—"}</td>
       <td class="num">${row.attacks}</td><td class="num">${row.conquests}</td>
@@ -436,6 +440,14 @@ function renderAggregateTable(data) {
     <tbody>${rows.join("")}</tbody>`;
 }
 
+function showTournamentTitle(about) {
+  const title = about?.title || "";
+  el("tournamentTitle").textContent = title ? `· ${title}` : "";
+  document.title = title ? `${title} · risk-bench tournament` : "risk-bench · tournament";
+}
+
+mountAboutCard({ container: el("aboutCard"), about: DATA.about, saveUrl: POLL_URL ? `${POLL_URL}/description` : "",
+  noun: "tournament", onSaved: about => { if (latestData) latestData.about = about; showTournamentTitle(about); } });
 render(DATA);
 el('tournamentContinueForm').addEventListener('submit', continueTournament);
 el('tournamentReplayForm').addEventListener('submit', replayTournamentGame);

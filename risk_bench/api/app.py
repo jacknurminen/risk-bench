@@ -20,6 +20,7 @@ from risk_bench import analysis, specs
 from risk_bench.agents.base import ReasoningEffort
 from risk_bench.agents.models import MODELS, Provider
 from risk_bench.agents.tracing import trace_path_for_journal, usage_by_caller
+from risk_bench.api.experiment_judge import install_experiment_judge_routes, judge_for_journal
 from risk_bench.api.human import install_human_routes
 from risk_bench.api.processes import GameProcessManager
 from risk_bench.api.schemas import (
@@ -41,7 +42,7 @@ from risk_bench.api.schemas import (
 from risk_bench.config import REPLAY_SETTING_FIELDS, load_settings
 from risk_bench.game.engine import IllegalActionError
 from risk_bench.players.profiles import ExperimentProfile, load_profile, profile_catalog
-from risk_bench.runner import annotation_review
+from risk_bench.runner import annotation_review, description_store
 from risk_bench.runner.control import journal_control_lock
 from risk_bench.runner.evaluation_config import configure_evaluation, configured_panel
 from risk_bench.runner.evaluation_store import (
@@ -52,6 +53,7 @@ from risk_bench.runner.evaluation_store import (
 from risk_bench.runner.evaluation_versions import EvaluationVersion, version_for
 from risk_bench.runner.forking import apply_additional_context, fork_game
 from risk_bench.runner.journal import read_journal, restore_game
+from risk_bench.runner.judges import core as judge_core
 from risk_bench.runner.live_evaluation import review_activity_for_journal
 from risk_bench.runner.tournament_evaluation import create_batch, list_batches
 from risk_bench.runner.verification_store import delete_verification, write_verification
@@ -114,6 +116,9 @@ def create_app(games_directory: Path) -> FastAPI:
     app.mount("/assets", _RevalidatingStaticFiles(directory=UI_DIRECTORY), name="assets")
     usage_cache: _UsageCache = {}
     install_human_routes(app, manager, lambda game_id: _journal_path(games_directory, game_id))
+    install_experiment_judge_routes(
+        app=app, manager=manager, journal_path=lambda game_id: _journal_path(games_directory, game_id)
+    )
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
@@ -139,6 +144,10 @@ def create_app(games_directory: Path) -> FastAPI:
                 verifications_url=f"/api/games/{game_id}/verifications",
                 trace_url=f"/api/games/{game_id}/trace",
                 analysis_url=f"/api/games/{game_id}/analysis",
+                experiment_judge_url=f"/api/games/{game_id}/experiment-judge"
+                if judge_for_journal(journal_path=_journal_path(games_directory, game_id))
+                else "",
+                description_url=f"/api/games/{game_id}/description",
                 human_url=f"/api/games/{game_id}/human" if has_human and game_view_model["result"] is None else "",
             )
         )
@@ -271,6 +280,13 @@ def create_app(games_directory: Path) -> FastAPI:
         except ValueError as error:
             raise HTTPException(status_code=404, detail=str(error)) from None
 
+    @app.put("/api/tournaments/{tournament_id}/description")
+    def describe_tournament(
+        tournament_id: str, request: description_store.Description
+    ) -> description_store.Description:
+        directory = _tournament_directory(games_directory, tournament_id)
+        return description_store.write_description(directory=directory, description=request)
+
     @app.get("/api/games")
     def list_games() -> GameListResponse:
         games: list[GameSummary] = []
@@ -321,6 +337,11 @@ def create_app(games_directory: Path) -> FastAPI:
         with journal_control_lock(journal_path):
             _resume_game(games_directory=games_directory, manager=manager, game_id=game_id, journal_path=journal_path)
 
+    @app.put("/api/games/{game_id}/description")
+    def describe_game(game_id: str, request: description_store.Description) -> description_store.Description:
+        journal_path = _journal_path(games_directory=games_directory, game_id=game_id, allow_unstarted=True)
+        return description_store.write_description(directory=journal_path.parent, description=request)
+
     @app.post("/api/games/{game_id}/fork", status_code=201)
     def fork_game_route(game_id: str, request: ForkRequest) -> dict:
         source = _journal_path(games_directory, game_id)
@@ -370,7 +391,7 @@ def create_app(games_directory: Path) -> FastAPI:
                 raise HTTPException(status_code=409, detail="Cancel the queued game before deleting it.")
             if manager.is_running(game_id=game_id):
                 raise HTTPException(status_code=409, detail="The game is running; pause it before deleting.")
-            if manager.is_evaluating(game_id=game_id):
+            if manager.is_evaluating(game_id=game_id) or manager.is_running_experiment_judge(game_id=game_id):
                 raise HTTPException(
                     status_code=409, detail="An evaluation is running for this game; wait for it to finish."
                 )
@@ -689,6 +710,11 @@ def _evaluation_trace_path(journal_path: Path, run_id: str | None) -> Path:
 def _resolve_trace_path(journal_path: Path, source: str, run_id: str | None) -> Path:
     if source == "evaluation":
         return _evaluation_trace_path(journal_path=journal_path, run_id=run_id)
+    if source == "experiment_judge":
+        judge = judge_for_journal(journal_path=journal_path)
+        if judge is None:
+            raise HTTPException(status_code=404, detail="This game has no experiment judge.")
+        return judge_core.trace_path_for_journal(journal_path=journal_path, definition=judge)
     return trace_path_for_journal(journal_path=journal_path)
 
 
@@ -794,12 +820,15 @@ def _trace_call_summary(record: dict[str, Any]) -> dict[str, Any]:
 
 def _tournament_summary(manifest_path: Path) -> TournamentSummary:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    description = description_store.read_description(directory=manifest_path.parent)
     return TournamentSummary(
         id=data["id"],
         players=data["players"],
         game_ids=data["game_ids"],
         created_at=datetime.fromisoformat(data["created_at"]),
         parallel_games=data.get("parallel_games", len(data["game_ids"])),
+        title=description.title,
+        description=description.description,
     )
 
 
@@ -815,6 +844,7 @@ def _summarize_game_directory(
         if not launch_path.is_file():
             return None
         launch = NewGameRequest.model_validate_json(launch_path.read_text(encoding="utf-8"))
+        description = description_store.read_description(directory=game_directory)
         return GameSummary(
             id=game_directory.name, players=launch.players, seed=launch.seed,
             max_turns=launch.max_turns or load_settings().max_turns,
@@ -822,6 +852,7 @@ def _summarize_game_directory(
             running=manager.is_running(game_directory.name), queued=manager.is_queued(game_directory.name),
             started=False, winner=None, turn_count=None, input_tokens=None, output_tokens=None, cost_usd=None,
             modified_at=datetime.fromtimestamp(launch_path.stat().st_mtime, tz=UTC), tournament_id=tournament_id,
+            title=description.title, description=description.description,
         )
     with journal_path.open(encoding="utf-8") as source:
         try:
@@ -876,6 +907,7 @@ def _summarize_journal(
     if header is None:
         return None  # not a game journal
     final_turn = int(result["turn_count"]) if result is not None else None
+    description = description_store.read_description(directory=path.parent)
     return GameSummary(
         id=game_id,
         players=list(header["player_specs"]),
@@ -892,6 +924,8 @@ def _summarize_journal(
         cost_usd=usage.cost_usd,
         modified_at=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
         tournament_id=tournament_id,
+        title=description.title,
+        description=description.description,
     )
 
 

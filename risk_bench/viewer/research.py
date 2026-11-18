@@ -22,6 +22,7 @@ def game_context(model, player_specs, termination_reason):
             {
                 **player_identity(player["name"], player_specs[player["name"]]),
                 "mission": player["mission"],
+                "experiment_profile": player.get("experiment_profile"),
                 "eliminated_turn": eliminated["turn"] if eliminated else None,
                 "eliminated_round": eliminated["round"] if eliminated else None,
                 "turns_survived": sum(not eliminated or t <= eliminated["turn"] for t in turns),
@@ -283,11 +284,15 @@ def tournament_research(games):
             )
             exposure = {p["name"]: p for p in context["players"]}
             for player in member["players"]:
-                model_key = (player["kind"], player["model"])
+                # one row per player, not per model: games with several copies of a model (all-Opus tables,
+                # or one copy playing an experiment profile) must keep each copy apart
+                profile = exposure[player["name"]].get("experiment_profile")
                 row = cohort["players"].setdefault(
-                    model_key,
+                    (player["kind"], player["name"]),
                     {
+                        "name": player["name"],
                         "model": player["model"],
+                        "experiment_profile": profile["label"] if profile else None,
                         "kind": player["kind"],
                         "specs": set(),
                         "games": set(),

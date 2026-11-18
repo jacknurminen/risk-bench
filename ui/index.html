@@ -18,6 +18,8 @@
                      justify-content: space-between; gap: 24px; flex-wrap: wrap; }
   .brand { font-family: var(--font-serif); font-weight: 600; font-size: 22px; letter-spacing: -.01em; }
   .brand .dice { color: var(--gold); }
+  .itemTitle { font-weight: 600; margin-right: 8px; }
+  .itemTitle[title] { text-decoration: underline dotted var(--mute-2); text-underline-offset: 3px; }
   .tagline { font-family: var(--font-mono); font-size: 11px; color: var(--mute-2); }
 
   .shell { max-width: 1100px; margin: 0 auto; padding: 26px 30px 0; }
@@ -453,6 +455,16 @@ const avgPerTurnCell = (inputTokens, outputTokens, cost, turns) => {
   return cost == null ? tokensPerTurn : `${tokensPerTurn} · $${(cost / turns).toFixed(3)}`;
 };
 
+const escapeHtml = text => String(text).replaceAll("&", "&amp;").replaceAll("<", "&lt;")
+  .replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+
+/* the researcher's title leads the row; the description shows on hover */
+function titleLabel(item) {
+  if (!item.title) return "";
+  const hover = item.description ? ` title="${escapeHtml(item.description)}"` : "";
+  return `<span class="itemTitle"${hover}>${escapeHtml(item.title)}</span>`;
+}
+
 function gameRow(game, child) {
   const started = new Date(game.modified_at).toLocaleString();
   const status = game.queued ? '<span class="status paused">queued</span>'
@@ -473,7 +485,7 @@ function gameRow(game, child) {
   const mic = (game.has_commentary ? ' <span class="mic" title="commentated">🎙️</span>' : "")
     + (game.has_evaluation ? ' <span class="mic" title="evaluated">🔬</span>' : "");
   const first = child ? `seed ${game.seed}` : started;
-  const players = child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`;
+  const players = titleLabel(game) + (child ? `${game.id}${mic}` : `${game.players.join(", ")}${mic}`);
   const turn = game.turn_count == null ? "—" : game.finished ? game.turn_count : `${game.turn_count}…`;
   return `<tr class="game${child ? " child" : ""}" ${game.started === false ? "" : `onclick="location.href='/games/${game.id}'"`}>
     <td>${first}</td><td>${players}</td>
@@ -508,7 +520,7 @@ function tournamentRows(tournament, games) {
   const cost = totalOrNull(games.map(game => game.cost_usd));
   const header = `<tr class="game" onclick="toggleTournament('${tournament.id}')">
     <td><span class="caret">${expanded ? "▾" : "▸"}</span>${started}</td>
-    <td><span class="trophy">🏆</span>${tournament.players.join(", ")}${mic}
+    <td><span class="trophy">🏆</span>${titleLabel(tournament)}${tournament.players.join(", ")}${mic}
       <span style="color:var(--mute)"> — ${tournament.game_ids.length} games · ${tournament.parallel_games} at once</span></td>
     <td>${status}</td><td>${winners}</td><td></td>
     <td class="num">${tokensCell(inputTokens, outputTokens)}</td>

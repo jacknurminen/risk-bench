@@ -178,6 +178,21 @@ def evaluate(
 
 
 @app.command()
+def evaluate_experiment(
+    journal: Annotated[Path, typer.Argument(help="Journal (.jsonl) of a game with a Prober, Deceiver or Gaslighter.")],
+    evaluator: Annotated[str, typer.Option(help="Judge model spec (provider:model:effort).")],
+) -> None:
+    """Run the experiment player's single-call judge, writing a sidecar such as game.gaslighting.json."""
+    settings = load_settings()
+    try:
+        path = launch.run_experiment_judge(journal_path=journal, evaluator_spec=evaluator, settings=settings)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
+    _print_experiment_judge_summary(path=path)
+    console.print(f"Judge result written to {path}")
+
+
+@app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Interface to bind to.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port to bind to.")] = 8420,
@@ -187,6 +202,19 @@ def serve(
     web_app = create_app(games_directory=settings.output_directory / "games")
     console.print(f"risk-bench running at [bold]http://{host}:{port}[/bold] — Ctrl+C to stop.")
     uvicorn.run(web_app, host=host, port=port, log_level="warning")
+
+
+def _print_experiment_judge_summary(path: Path) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    for summary_table in payload["tables"]:
+        table = Table(title=summary_table["title"])
+        for _, label in summary_table["columns"]:
+            table.add_column(label)
+        for row in summary_table["rows"]:
+            table.add_row(*(str(row.get(key, "")) for key, _ in summary_table["columns"]))
+        console.print(table)
+    if payload["citation_issues"]:
+        console.print(f"[bold yellow]{len(payload['citation_issues'])} citation issues[/bold yellow] in the sidecar.")
 
 
 def _print_evaluation_summary(records: list[dict[str, Any]]) -> None:
