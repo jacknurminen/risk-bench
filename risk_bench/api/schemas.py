@@ -117,6 +117,26 @@ class EvaluateRequest(BaseModel):
     restart: bool = False
 
 
+class ReviewSampleRequest(BaseModel):
+    """Sizes and source of a new annotation review sample for a tournament."""
+
+    commitments: int = Field(default=25, ge=0, le=1000)
+    candidates: int = Field(default=0, ge=0, le=1000)
+    messages: int = Field(default=30, ge=0, le=5000)
+    minimum_per_stratum: int = Field(default=3, ge=0, le=100)
+    all_violated: bool = False
+    seed: int | None = Field(default=None, ge=0)
+    batch_id: str | None = None
+    evaluator_index: int = Field(default=0, ge=0)
+
+
+class ReviewVerdictBody(BaseModel):
+    """A reviewer's verdict on one sample item; ``verdict`` None clears it."""
+
+    verdict: dict[str, str] | None
+    note: str = Field(default="", max_length=4000)
+
+
 class ExperimentJudgeRequest(BaseModel):
     """One judge model for the experiment player's single-call assessment."""
 

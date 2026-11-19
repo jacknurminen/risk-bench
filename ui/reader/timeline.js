@@ -92,6 +92,7 @@ function toggleAnnotator(idx) {
 }
 el("privToggle").onclick = () => { state.filters.showPrivate = !state.filters.showPrivate; renderFilters(); renderTimeline(); };
 el("commToggle").onclick = () => {
+  if (reviewBlind) { toast("Research annotations stay hidden while you code messages blind."); return; }
   researchVisibilityChosen = true;
   state.filters.showCommentary = !state.filters.showCommentary;
   renderFilters(); renderEvalBar(); renderSynthesis(); renderTimeline();
@@ -192,7 +193,8 @@ function expandedBody(turn) {
 }
 function traceLine(turn, s) {
   const label = s.layer === "message" ? (s.visibility === "private" ? "private message · to " + s.recipients[0] : "public message") : (KINDS[s.layer]?.[0] || s.layer);
-  const content = '<div class="traceline" onclick="lineClick(event,' + s.step + ')"><button class="chip" title="Open in raw trace" onclick="openLineDrawer(' + s.span + ')">[' + s.span + ']</button>' +
+  const content = '<div class="traceline' + (s.span === reviewTargetSpan ? ' reviewTarget' : '') + '" id="trace-span-' + s.span +
+    '" onclick="lineClick(event,' + s.step + ')"><button class="chip" title="Open in raw trace" onclick="openLineDrawer(' + s.span + ')">[' + s.span + ']</button>' +
     '<span><span class="kindlabel">' + escapeHtml(label) + (s.inherited ? " · inherited" : "") +
     (s.origin ? " · " + escapeHtml(pretty(s.origin)) : "") + '</span>' +
     '<span class="tracetext ' + (s.layer === "message" ? "msg" : "mono") + '">' + richText(s.text) + '</span></span></div>';

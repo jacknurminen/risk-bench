@@ -25,6 +25,9 @@ GAME.notes ??= []; GAME.commentary ??= []; GAME.commentators ??= [];
 const steps = GAME.steps;
 const humanPlayers = new Set(GAME.human_players || []);
 let researchVisibilityChosen = false;
+// Set by an annotation review: blind message coding keeps research annotations hidden, and the
+// reviewed trace line is highlighted in the timeline.
+let reviewBlind = false, reviewTargetSpan = null;
 let hideOpponentMissions = false;
 try { hideOpponentMissions = localStorage.getItem("risk-bench:hide-opponent-missions") === "true"; } catch {}
 let index = 0, timer = null;
